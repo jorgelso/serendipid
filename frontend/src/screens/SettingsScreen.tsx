@@ -17,7 +17,6 @@ import apiService from '../services/api';
 import CustomToast from '../components/CustomToast';
 import { RootStackParamList } from '../../App';
 import { QueueStatus } from '../types';
-import { sendImmediateWatchLaterNotification } from '../services/notificationService';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -30,7 +29,6 @@ const SettingsScreen = () => {
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'testing'>('disconnected');
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [flushingRetry, setFlushingRetry] = useState(false);
-  const [testingNotif, setTestingNotif] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'warning' | 'info' });
 
   useEffect(() => {
@@ -117,29 +115,6 @@ const SettingsScreen = () => {
       case 'testing': return '⟳ Testing...';
       case 'disconnected': return '✕ Disconnected';
       default: return '⚠ Unknown';
-    }
-  };
-
-  const handleTestNotification = async () => {
-    try {
-      setTestingNotif(true);
-      await sendImmediateWatchLaterNotification({
-        shortcode: 'test_notif',
-        title: 'SuperBrain Test Notification',
-        summary: 'This is a test notification from SuperBrain.',
-        content_type: 'youtube',
-        category: 'entertainment',
-        url: '',
-        username: 'sidinsearch',
-        thumbnail: '',
-        tags: [],
-        music: '',
-      } as any);
-      setToast({ visible: true, message: '🔔 Test notification sent!', type: 'success' });
-    } catch (e) {
-      setToast({ visible: true, message: 'Failed to send test notification', type: 'error' });
-    } finally {
-      setTestingNotif(false);
     }
   };
 
@@ -292,17 +267,6 @@ const SettingsScreen = () => {
               <Text style={styles.appInfoCreditLink}>sidinsearch</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Test Notification */}
-          <TouchableOpacity
-            style={styles.testNotifButton}
-            onPress={handleTestNotification}
-            disabled={testingNotif}
-          >
-            {testingNotif
-              ? <ActivityIndicator size="small" color={colors.text} />
-              : <Text style={styles.testNotifText}>🔔 Test Notification</Text>}
-          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -523,19 +487,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginBottom: 4,
-  },
-  testNotifButton: {
-    marginTop: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.backgroundCard,
-  },
-  testNotifText: {
-    fontSize: 14,
-    color: colors.text,
   },
   bottomNav: {
     position: 'absolute',

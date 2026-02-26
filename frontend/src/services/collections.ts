@@ -3,6 +3,79 @@ import { Collection } from '../types';
 import apiService from './api';
 
 const COLLECTIONS_KEY = '@superbrain_collections';
+const PENDING_SYNC_KEY = '@superbrain_pending_sync';
+
+// ─────────────────────────────────────────────────────────────────
+// Offline pending-sync queue
+// ─────────────────────────────────────────────────────────────────
+
+type PendingMutation =
+  | { type: 'upsert'; collection: Collection }
+  | { type: 'update_posts'; id: string; postIds: string[] }
+  | { type: 'delete'; id: string };
+
+function isNetworkError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const err = e as any;
+  if (err.response !== undefined) return false; // got HTTP response → server error, not offline
+  const code = err.code ?? '';
+  const msg = (err.message ?? '').toLowerCase();
+  return (
+    code === 'ECONNABORTED' ||
+    code === 'ERR_NETWORK' ||
+    msg.includes('network') ||
+    msg.includes('timeout') ||
+    msg.includes('econnrefused')
+  );
+}
+
+async function loadPending(): Promise<PendingMutation[]> {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_SYNC_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+async function savePending(mutations: PendingMutation[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(mutations));
+  } catch { /* best effort */ }
+}
+
+async function enqueueMutation(mutation: PendingMutation): Promise<void> {
+  const pending = await loadPending();
+  const id = mutation.type === 'upsert' ? mutation.collection.id : mutation.id;
+  // De-duplicate: replace older entry of same type+id
+  const filtered = pending.filter(m => {
+    const mId = m.type === 'upsert' ? m.collection.id : m.id;
+    return !(mId === id && m.type === mutation.type);
+  });
+  filtered.push(mutation);
+  await savePending(filtered);
+}
+
+/** Replay all pending mutations. Removes ones that succeed or get a 4xx. Keeps network failures. */
+async function flushPendingMutations(): Promise<void> {
+  const pending = await loadPending();
+  if (pending.length === 0) return;
+  console.log(`[Collections] flushing ${pending.length} pending mutation(s)`);
+  const remaining: PendingMutation[] = [];
+  for (const m of pending) {
+    try {
+      if (m.type === 'upsert') {
+        await apiService.upsertCollection(m.collection);
+      } else if (m.type === 'update_posts') {
+        await apiService.updateCollectionPosts(m.id, m.postIds);
+      } else if (m.type === 'delete') {
+        await apiService.deleteCollection(m.id);
+      }
+    } catch (e) {
+      if (isNetworkError(e)) remaining.push(m); // keep for next flush
+      // else discard (4xx/5xx = permanent error)
+    }
+  }
+  await savePending(remaining);
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Helpers
@@ -75,24 +148,34 @@ async function pullFromBackend(): Promise<Collection[] | null> {
   }
 }
 
-/** Push a single updated collection to backend silently (fire-and-forget). */
-function pushCollectionToBackend(col: Collection): void {
-  isBackendAvailable().then(ok => {
-    if (!ok) return;
-    apiService.upsertCollection(col).catch(e =>
-      console.warn('[Collections] push upsert failed:', e)
-    );
-  });
+/** Try to push upsert; enqueue if offline. */
+async function pushUpsert(col: Collection): Promise<void> {
+  try {
+    await apiService.upsertCollection(col);
+  } catch (e) {
+    if (isNetworkError(e)) await enqueueMutation({ type: 'upsert', collection: col });
+    else console.warn('[Collections] push upsert failed:', e);
+  }
 }
 
-/** Push only the post_ids for a collection to backend silently. */
-function pushPostIdsToBackend(collectionId: string, postIds: string[]): void {
-  isBackendAvailable().then(ok => {
-    if (!ok) return;
-    apiService.updateCollectionPosts(collectionId, postIds).catch(e =>
-      console.warn('[Collections] push postIds failed:', e)
-    );
-  });
+/** Try to push post_ids; enqueue if offline. */
+async function pushPostIds(collectionId: string, postIds: string[]): Promise<void> {
+  try {
+    await apiService.updateCollectionPosts(collectionId, postIds);
+  } catch (e) {
+    if (isNetworkError(e)) await enqueueMutation({ type: 'update_posts', id: collectionId, postIds });
+    else console.warn('[Collections] push postIds failed:', e);
+  }
+}
+
+/** Try to push delete; enqueue if offline. */
+async function pushDelete(id: string): Promise<void> {
+  try {
+    await apiService.deleteCollection(id);
+  } catch (e) {
+    if (isNetworkError(e)) await enqueueMutation({ type: 'delete', id });
+    else console.warn('[Collections] push delete failed:', e);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -103,9 +186,10 @@ class CollectionsService {
 
   /**
    * Sync from backend on startup. Call this once after the token is confirmed.
-   * Overwrites local cache with server data so fresh installs restore their library.
+   * First flushes any offline mutations, then pulls authoritative server state.
    */
   async syncFromBackend(): Promise<void> {
+    await flushPendingMutations();
     const remote = await pullFromBackend();
     if (remote) {
       console.log('[Collections] synced from backend:', remote.length, 'collections');
@@ -124,12 +208,7 @@ class CollectionsService {
   async saveCollections(collections: Collection[]): Promise<void> {
     const cleaned = clean(collections);
     await writeLocal(cleaned);
-    // Push each collection to backend in background
-    if (await isBackendAvailable()) {
-      for (const col of cleaned) {
-        apiService.upsertCollection(col).catch(() => {});
-      }
-    }
+    for (const col of cleaned) pushUpsert(col);
   }
 
   async createCollection(name: string, icon: string): Promise<Collection> {
@@ -144,7 +223,7 @@ class CollectionsService {
     const cols = await readLocal();
     cols.push(newCol);
     await writeLocal(cols);
-    pushCollectionToBackend(newCol);
+    pushUpsert(newCol);
     return newCol;
   }
 
@@ -154,16 +233,14 @@ class CollectionsService {
     if (idx !== -1) {
       cols[idx] = { ...cols[idx], ...updates, updatedAt: new Date().toISOString() };
       await writeLocal(cols);
-      pushCollectionToBackend(cols[idx]);
+      pushUpsert(cols[idx]);
     }
   }
 
   async deleteCollection(id: string): Promise<void> {
     const cols = await readLocal();
     await writeLocal(cols.filter(c => c.id !== id));
-    if (await isBackendAvailable()) {
-      apiService.deleteCollection(id).catch(() => {});
-    }
+    pushDelete(id);
   }
 
   async addPostToCollection(collectionId: string, postId: string): Promise<void> {
@@ -173,7 +250,7 @@ class CollectionsService {
       col.postIds.push(postId);
       col.updatedAt = new Date().toISOString();
       await writeLocal(cols);
-      pushPostIdsToBackend(collectionId, col.postIds);
+      pushPostIds(collectionId, col.postIds);
     }
   }
 
@@ -184,7 +261,7 @@ class CollectionsService {
       col.postIds = col.postIds.filter(id => id !== postId);
       col.updatedAt = new Date().toISOString();
       await writeLocal(cols);
-      pushPostIdsToBackend(collectionId, col.postIds);
+      pushPostIds(collectionId, col.postIds);
     }
   }
 
@@ -195,4 +272,5 @@ class CollectionsService {
   }
 }
 
-export default new CollectionsService();
+export const collectionsService = new CollectionsService();
+export default collectionsService;

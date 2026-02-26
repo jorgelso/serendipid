@@ -15,6 +15,7 @@ import {
   Keyboard,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../theme/colors';
@@ -47,9 +48,11 @@ const LibraryScreen = () => {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'warning' | 'info' });
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedCollections, setSelectedCollections] = useState<Set<string>>(new Set());
+  const [showLibraryTips, setShowLibraryTips] = useState(false);
 
   useEffect(() => {
     loadCollections();
+    checkLibraryTips();
     
     // Add focus listener to reload when returning from collection detail
     const unsubscribe = navigation.addListener('focus', () => {
@@ -58,6 +61,24 @@ const LibraryScreen = () => {
     
     return unsubscribe;
   }, [navigation]);
+
+  const checkLibraryTips = async () => {
+    const seen = await AsyncStorage.getItem('@superbrain_library_tips_seen');
+    if (seen) return;
+    // Existing install upgrading — user already has data, skip tips
+    const existingPosts = await AsyncStorage.getItem('@superbrain_posts_cache');
+    const existingCollections = await AsyncStorage.getItem('@superbrain_collections');
+    if (existingPosts || existingCollections) {
+      await AsyncStorage.setItem('@superbrain_library_tips_seen', '1');
+      return;
+    }
+    setShowLibraryTips(true);
+  };
+
+  const dismissLibraryTips = async () => {
+    await AsyncStorage.setItem('@superbrain_library_tips_seen', '1');
+    setShowLibraryTips(false);
+  };
 
   useEffect(() => {
     if (showCreateModal) {
@@ -553,6 +574,49 @@ const LibraryScreen = () => {
         </View>
       </Modal>
 
+      {/* Library Tips Modal */}
+      <Modal visible={showLibraryTips} transparent animationType="fade" onRequestClose={dismissLibraryTips}>
+        <View style={styles.tipsOverlay}>
+          <View style={styles.tipsCard}>
+            <View style={styles.tipsHeader}>
+              <Text style={styles.tipsHeaderLabel}>YOUR LIBRARY</Text>
+            </View>
+            <View style={styles.tipsBody}>
+              <View style={styles.tipRow}>
+                <View style={styles.tipIconWrap}>
+                  <Text style={styles.tipIcon}>⏰</Text>
+                </View>
+                <View style={styles.tipTextWrap}>
+                  <Text style={styles.tipTitle}>Watch Later</Text>
+                  <Text style={styles.tipDesc}>Everything you save lands here first. Get a daily notification reminder for each post.</Text>
+                </View>
+              </View>
+              <View style={styles.tipRow}>
+                <View style={styles.tipIconWrap}>
+                  <Text style={styles.tipIcon}>🔔</Text>
+                </View>
+                <View style={styles.tipTextWrap}>
+                  <Text style={styles.tipTitle}>Notifications</Text>
+                  <Text style={styles.tipDesc}>Each saved post gets a daily reminder at its own fixed time. Tap "Mark as Watched" on a post to silence it.</Text>
+                </View>
+              </View>
+              <View style={styles.tipRow}>
+                <View style={styles.tipIconWrap}>
+                  <Text style={styles.tipIcon}>📁</Text>
+                </View>
+                <View style={styles.tipTextWrap}>
+                  <Text style={styles.tipTitle}>Collections</Text>
+                  <Text style={styles.tipDesc}>Organise your saves into custom collections — travel, recipes, workouts, anything you like.</Text>
+                </View>
+              </View>
+            </View>
+            <TouchableOpacity style={styles.tipsDismiss} onPress={dismissLibraryTips}>
+              <Text style={styles.tipsDismissText}>Got it!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <CustomToast
         visible={toast.visible}
         message={toast.message}
@@ -981,6 +1045,84 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-  },});
+  },
+  // ── Library Tips ─────────────────────────────────────────────
+  tipsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  tipsCard: {
+    width: '100%',
+    backgroundColor: colors.backgroundCard,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  tipsHeader: {
+    backgroundColor: colors.primary,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  tipsHeaderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 3,
+  },
+  tipsBody: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 8,
+    gap: 16,
+  },
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  tipIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tipIcon: {
+    fontSize: 22,
+  },
+  tipTextWrap: {
+    flex: 1,
+  },
+  tipTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 3,
+  },
+  tipDesc: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 19,
+  },
+  tipsDismiss: {
+    marginHorizontal: 24,
+    marginTop: 20,
+    marginBottom: 24,
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  tipsDismissText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+});
 
 export default LibraryScreen;

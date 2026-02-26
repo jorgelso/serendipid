@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Post } from '../types';
+import { collectionsService } from './collections';
 
 const COLLECTIONS_KEY = '@superbrain_collections';
 const WL_NOTIF_IDS_KEY = '@superbrain_wl_notif_ids'; // { [shortcode]: string[] }
@@ -12,6 +13,8 @@ const WL_NOTIF_IDS_KEY = '@superbrain_wl_notif_ids'; // { [shortcode]: string[] 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -302,15 +305,8 @@ export async function rescheduleWatchLaterNotification(): Promise<void> {
 // ─────────────────────────────────────────────
 export async function handleMarkAsWatched(shortcode: string): Promise<void> {
   try {
-    const raw = await AsyncStorage.getItem(COLLECTIONS_KEY);
-    if (!raw) return;
-    const collections = JSON.parse(raw);
-    const wl = collections.find((c: any) => c.id === 'default_watch_later');
-    if (wl) {
-      wl.postIds = (wl.postIds as string[]).filter((id: string) => id !== shortcode);
-      wl.updatedAt = new Date().toISOString();
-      await AsyncStorage.setItem(COLLECTIONS_KEY, JSON.stringify(collections));
-    }
+    // Remove from Watch Later via the service so it syncs to backend
+    await collectionsService.removePostFromCollection('default_watch_later', shortcode);
     await cancelPostWatchLaterNotification(shortcode);
   } catch (e) {
     console.warn('[Notifications] handleMarkAsWatched error:', e);

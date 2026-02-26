@@ -13,6 +13,7 @@ import {
   Dimensions,
   Modal,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
@@ -20,6 +21,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import apiService from '../services/api';
 import postsCache from '../services/postsCache';
 import collectionsService from '../services/collections';
+import { scheduleAllWatchLaterNotifications } from '../services/notificationService';
 import { Post, Collection } from '../types';
 import { colors } from '../theme/colors';
 import { RootStackParamList } from '../../App';
@@ -59,10 +61,12 @@ const HomeScreen = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isConfigured, setIsConfigured] = useState(true);
   const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
 
   useEffect(() => {
     initializeAndLoad();
-    
+    checkFirstLaunch();
     return () => {
       if (pollInterval) {
         clearInterval(pollInterval);
@@ -81,8 +85,46 @@ const HomeScreen = () => {
     return unsubscribe;
   }, [navigation, isInitialized]);
 
-  const initializeAndLoad = async () => {
+  const checkFirstLaunch = async () => {
     try {
+      const seen = await AsyncStorage.getItem('@superbrain_onboarded');
+      if (seen) return;
+      // Existing install upgrading — user already has data, skip tutorial
+      const existingPosts = await AsyncStorage.getItem('@superbrain_posts_cache');
+      const existingCollections = await AsyncStorage.getItem('@superbrain_collections');
+      if (existingPosts || existingCollections) {
+        await AsyncStorage.setItem('@superbrain_onboarded', '1');
+        return;
+      }
+      setShowOnboarding(true);
+    } catch { /* ignore */ }
+  };
+
+  const dismissOnboarding = async () => {
+    try { await AsyncStorage.setItem('@superbrain_onboarded', '1'); } catch { /* ignore */ }
+    setShowOnboarding(false);
+    setOnboardingStep(0);
+  };
+
+  const ONBOARDING_STEPS = [
+    {
+      icon: '🧠',
+      title: 'Welcome to SuperBrain',
+      description: 'Your personal second brain. Save posts from Instagram, YouTube, and Websites — no need to endlessly scroll through your saves. Find anything fast with search and filters.',
+    },
+    {
+      icon: '↗️',
+      title: 'Save from Anywhere',
+      description: 'Open any Instagram post, YouTube video, or Website → tap Share → select SuperBrain. Done. Your content is saved and analyzed instantly.',
+    },
+    {
+      icon: '📱',
+      title: 'Explore Your Feed',
+      description: 'Scroll through your saves, filter by category, or search. Tap a post to see full details. Long-press to select and delete multiple posts at once.',
+    },
+  ];
+
+  const initializeAndLoad = async () => {    try {
       await apiService.initialize();
       const token = await apiService.getApiToken();
       if (!token) {
@@ -92,8 +134,13 @@ const HomeScreen = () => {
         return;
       }
       setIsConfigured(true);
-      // Sync collections from backend in parallel with loading posts
-      collectionsService.syncFromBackend().catch(() => {});
+      // Await backend sync first, THEN reschedule notifications
+      // This ensures fresh-install users get notifications restored after backend pull
+      try {
+        await collectionsService.syncFromBackend();
+      } catch { /* offline — local cache used */ }
+      // Reschedule Watch Later notifications with (possibly restored) collection data
+      scheduleAllWatchLaterNotifications().catch(() => {});
       await loadPosts(false); // Use cache-first strategy even on initial load
       setIsInitialized(true);
     } catch (error) {
@@ -463,7 +510,7 @@ const HomeScreen = () => {
 
   // Build grid: YT/web = full-width landscape, instagram = paired compact rows
   const buildGridRows = (posts: Post[]) => {
-    const elements: JSX.Element[] = [];
+    const elements: React.ReactElement[] = [];
     let i = 0;
     while (i < posts.length) {
       const post = posts[i];
@@ -777,6 +824,75 @@ const HomeScreen = () => {
         type={toast.type}
         onHide={() => setToast({ ...toast, visible: false })}
       />
+
+      {/* ── Onboarding Tutorial Modal ─────────────────────────── */}
+      <Modal
+        visible={showOnboarding}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissOnboarding}
+      >
+        <View style={styles.onboardingOverlay}>
+          <View style={styles.onboardingCard}>
+            {/* Header gradient strip */}
+            <View style={styles.onboardingHeader}>
+              <Text style={styles.onboardingHeaderLabel}>SUPERBRAIN</Text>
+            </View>
+
+            {/* Step content */}
+            <View style={styles.onboardingBody}>
+              <Text style={styles.onboardingIcon}>{ONBOARDING_STEPS[onboardingStep].icon}</Text>
+              <Text style={styles.onboardingTitle}>{ONBOARDING_STEPS[onboardingStep].title}</Text>
+              <Text style={styles.onboardingDesc}>{ONBOARDING_STEPS[onboardingStep].description}</Text>
+            </View>
+
+            {/* Step dots */}
+            <View style={styles.onboardingDots}>
+              {ONBOARDING_STEPS.map((_, i) => (
+                <View
+                  key={i}
+                  style={[styles.onboardingDot, i === onboardingStep && styles.onboardingDotActive]}
+                />
+              ))}
+            </View>
+
+            {/* Buttons */}
+            <View style={styles.onboardingActions}>
+              {onboardingStep > 0 && (
+                <TouchableOpacity
+                  style={styles.onboardingBtnSecondary}
+                  onPress={() => setOnboardingStep(s => s - 1)}
+                >
+                  <Text style={styles.onboardingBtnSecondaryText}>Back</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.onboardingBtnPrimary}
+                onPress={() => {
+                  if (onboardingStep < ONBOARDING_STEPS.length - 1) {
+                    setOnboardingStep(s => s + 1);
+                  } else {
+                    dismissOnboarding();
+                  }
+                }}
+              >
+                <Text style={styles.onboardingBtnPrimaryText}>
+                  {onboardingStep < ONBOARDING_STEPS.length - 1 ? 'Next →' : 'Get Started 🚀'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Skip — always rendered so card height stays constant */}
+            <TouchableOpacity
+              onPress={dismissOnboarding}
+              style={[styles.onboardingSkip, onboardingStep === ONBOARDING_STEPS.length - 1 && { opacity: 0 }]}
+              disabled={onboardingStep === ONBOARDING_STEPS.length - 1}
+            >
+              <Text style={styles.onboardingSkipText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1422,6 +1538,118 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  // ── Onboarding ──────────────────────────────────────────────
+  onboardingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  onboardingCard: {
+    width: '100%',
+    backgroundColor: colors.backgroundCard,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  onboardingHeader: {
+    backgroundColor: colors.primary,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  onboardingHeaderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 3,
+  },
+  onboardingBody: {
+    paddingHorizontal: 28,
+    paddingTop: 32,
+    paddingBottom: 8,
+    alignItems: 'center',
+    minHeight: 220,
+    justifyContent: 'center',
+  },
+  onboardingIcon: {
+    fontSize: 56,
+    marginBottom: 16,
+  },
+  onboardingTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  onboardingDesc: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 23,
+  },
+  onboardingDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 24,
+    marginBottom: 4,
+  },
+  onboardingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+  },
+  onboardingDotActive: {
+    width: 24,
+    backgroundColor: colors.primary,
+  },
+  onboardingActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  onboardingBtnPrimary: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  onboardingBtnPrimaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  onboardingBtnSecondary: {
+    flex: 1,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  onboardingBtnSecondaryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  onboardingSkip: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingBottom: 20,
+  },
+  onboardingSkipText: {
+    fontSize: 13,
+    color: colors.textMuted,
   },
 });
 
