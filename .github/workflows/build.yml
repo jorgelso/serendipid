@@ -33,9 +33,10 @@ jobs:
 
       - name: Install JS dependencies
         run: npm ci
+        working-directory: supermobile-app
 
       - name: Set Android SDK local.properties
-        run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > supermobile-app/android/local.properties
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
@@ -43,22 +44,22 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-${{ hashFiles('supermobile-app/android/**/*.gradle*', 'supermobile-app/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
       - name: Make gradlew executable
-        run: chmod +x android/gradlew
+        run: chmod +x supermobile-app/android/gradlew
 
       - name: Build APK
         run: |
           BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
           TASK="assemble$(echo ${BUILD_TYPE^})"
-          cd android && ./gradlew $TASK --no-daemon --stacktrace
+          cd supermobile-app/android && ./gradlew $TASK --no-daemon --stacktrace
 
       - name: Find and upload APK
         run: |
           BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
-          APK_PATH=$(find android/app/build/outputs/apk/${BUILD_TYPE} -name "*.apk" | head -1)
+          APK_PATH=$(find supermobile-app/android/app/build/outputs/apk/${BUILD_TYPE} -name "*.apk" | head -1)
           echo "APK found at: $APK_PATH"
           cp "$APK_PATH" superbrain.apk
 
