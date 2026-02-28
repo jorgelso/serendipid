@@ -32,8 +32,12 @@ backend/static/
 backend/*.apk
 
 # ── Mobile app ───────────────────────────────────────────────────────────────
-# superbrain-app has its own separate git repo (freakysid/superbrain-mobile)
-superbrain-app/
+superbrain-app/node_modules/
+superbrain-app/.expo/
+superbrain-app/android/build/
+superbrain-app/android/app/build/
+superbrain-app/android/.gradle/
+superbrain-app/.env
 
 supermobile-app/node_modules/
 supermobile-app/.expo/
