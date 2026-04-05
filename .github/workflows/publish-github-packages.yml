@@ -28,7 +28,7 @@ jobs:
         run: node scripts/build.js
         working-directory: superbrain-cli
 
-      - name: Set scoped package name and release version
+      - name: Set release version and dist-tag
         id: meta
         shell: bash
         run: |
