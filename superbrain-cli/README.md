@@ -41,6 +41,8 @@ npx -y @sidinsearch/superbrain-server@beta
 
 GitHub Packages docs: https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry
 
+GitHub Packages is separate from the npmjs package page and may not appear in the repository Packages tab until it has been published and linked there.
+
 ## What It Does on First Run
 
 1. Unpacks backend files into `~/.superbrain-server`

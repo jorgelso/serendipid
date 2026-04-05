@@ -362,7 +362,7 @@ npx -y @sidinsearch/superbrain-server@beta
 
 GitHub Packages docs: [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)
 
-Repository Packages page: https://github.com/sidinsearch/superbrain/packages
+GitHub Packages is separate from the npmjs package page and may not appear in the repository Packages tab until it has been published and linked there.
 
 ---
 

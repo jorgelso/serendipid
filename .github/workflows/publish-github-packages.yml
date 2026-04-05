@@ -38,8 +38,7 @@ jobs:
 
           cd superbrain-cli
           npm pkg set "name=@${OWNER_LC}/superbrain-server"
-          npm pkg set "repository.type=git"
-          npm pkg set "repository.url=${REPO_URL}"
+          npm pkg set "repository=${REPO_URL}"
           npm pkg set "publishConfig.registry=https://npm.pkg.github.com"
           npm version "$VERSION" --no-git-tag-version
 
