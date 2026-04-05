@@ -4,7 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+  release:
+    types:
+      - published
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v1.0.3-beta.1)'
+        required: true
 
 permissions:
   contents: read
@@ -28,12 +35,32 @@ jobs:
         run: node scripts/build.js
         working-directory: superbrain-cli
 
+      - name: Resolve release tag
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+          else
+            TAG_NAME="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ "$TAG_NAME" != v* ]]; then
+            echo "Tag must start with v (received: $TAG_NAME)"
+            exit 1
+          fi
+
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Set release version and dist-tag
         id: meta
         shell: bash
         run: |
           OWNER_LC="${GITHUB_REPOSITORY_OWNER,,}"
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ steps.vars.outputs.tag_name }}"
+          VERSION="${VERSION#v}"
           REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
 
           cd superbrain-cli

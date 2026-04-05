@@ -12,7 +12,7 @@ A self-hosted AI-powered second brain for Android — save Instagram posts, YouT
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK_54-000020?logo=expo&logoColor=white)](https://expo.dev)
 [![npm package](https://img.shields.io/npm/v/superbrain-server?label=npm%20package)](https://www.npmjs.com/package/superbrain-server)
 
-[![Download APK](https://img.shields.io/badge/Download%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/sidinsearch/superbrain/releases)
+[![Download APK](https://img.shields.io/badge/Download%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/sidinsearch/superbrain/releases/latest/download/superbrain.apk)
 [![Report Bug](https://img.shields.io/badge/Report%20Bug-d73a4a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=bug)
 [![Request Feature](https://img.shields.io/badge/Request%20Feature-7057ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=enhancement)
 
@@ -442,10 +442,15 @@ EAS returns a download URL + QR code when done. No Android Studio required.
 
 The repo includes:
 
-- [build workflow](.github/workflows/build.yml): Builds APK artifacts on push to `main` and `beta`
-- [release APK workflow](.github/workflows/release-apk.yml): On version tags (`v*`) or when a Release is published, builds APK and attaches/updates `superbrain.apk` on the matching GitHub Release automatically
+- [build workflow](.github/workflows/build.yml): On push to `main` or `beta`, it builds APK, uploads artifact, publishes the GitHub npm package, and updates the release with `superbrain.apk`
+- [release APK workflow](.github/workflows/release-apk.yml): Optional tag/release-driven APK pipeline for versioned tags
 
-How to get the newest APK from Actions without creating a release:
+Automatic release targets:
+
+1. Push to `main` updates release tag `latest` (stable).
+2. Push to `beta` updates release tag `beta-latest` (pre-release).
+
+How to get the newest APK from Actions artifacts:
 
 1. Push your changes to `beta` or `main`.
 2. Open **GitHub → Actions → Build APK (Gradle)**.
@@ -468,28 +473,17 @@ cd android
 
 ## Release Process
 
-Use this automated flow to keep npm + GitHub release + APK aligned.
+Use this push-based flow to keep GitHub release + APK + GitHub Packages aligned.
 
-1. Merge or push final changes to `beta` (or `main` for stable).
-2. Create and push a version tag.
-
-```bash
-git tag v1.0.3-beta.0
-git push origin v1.0.3-beta.0
-```
-
-Stable example:
-
-```bash
-git tag v1.0.3
-git push origin v1.0.3
-```
-
-3. GitHub Actions runs automatically:
-  - `.github/workflows/release-apk.yml` builds `superbrain.apk` and publishes or updates it on the GitHub Release for that tag.
-   - `.github/workflows/publish-github-packages.yml` publishes `@sidinsearch/superbrain-server` to GitHub Packages.
-4. Publish/update npmjs package (`superbrain-server`) with matching version and dist-tag (`beta` or `latest`).
-5. Verify release assets and install commands in release notes.
+1. Push changes to `beta` or `main`.
+2. `.github/workflows/build.yml` runs automatically and does all of the following:
+  - Builds release APK.
+  - Uploads APK as an Actions artifact.
+  - Updates the branch release and attaches `superbrain.apk`.
+  - Publishes `@sidinsearch/superbrain-server` to GitHub Packages.
+3. Verify:
+  - APK download works from the release.
+  - Package appears under GitHub Packages for the repository.
 
 Recommended release notes install line:
 
@@ -505,7 +499,7 @@ npx -y superbrain-server@latest
 
 Verification checklist:
 
-1. Release page for the tag contains `superbrain.apk`.
+1. `latest` (main) or `beta-latest` (beta) release contains `superbrain.apk`.
 2. Repository **Packages** tab shows `@sidinsearch/superbrain-server`.
 3. Install checks:
   - npmjs: `npx -y superbrain-server@beta` (or `@latest`)
