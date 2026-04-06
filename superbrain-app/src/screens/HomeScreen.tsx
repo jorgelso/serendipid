@@ -1184,7 +1184,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.backgroundCard,
     marginHorizontal: 20,
-    marginBottom: 12,
+    marginBottom: 16,
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderRadius: 14,
@@ -1280,7 +1280,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyIcon: {
-    fontSize: 64,
+    fontSize: 48,
+      height: 48,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     marginBottom: 16,
   },
   emptyTitle: {
@@ -1357,7 +1361,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   categoryBadgeText: {
     fontSize: 11,
@@ -1521,7 +1525,7 @@ const styles = StyleSheet.create({
   },
   actionsBar: {
     paddingHorizontal: 20,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   actionsRow: {
     flexDirection: 'row',
@@ -1720,7 +1724,7 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: colors.backgroundCard,
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -1770,7 +1774,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   deleteMessage: {
     fontSize: 15,
@@ -1858,11 +1862,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center' as const,
   },
   onboardingIcon: {
-    marginBottom: 16,
-  },
+      marginBottom: 16,
+      height: 48,
+    },
   onboardingEmoji: {
-    fontSize: 64,
-    marginBottom: 12,
+    fontSize: 48,
+      height: 48,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    marginBottom: 16,
   },
   onboardingTitle: {
     fontSize: 24,
@@ -1941,3 +1950,4 @@ const styles = StyleSheet.create({
 });
 
 export default HomeScreen;
+
