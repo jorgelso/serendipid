@@ -122,6 +122,7 @@ def ensure_runtime_dependencies():
     """Install must-have runtime packages if missing in the active venv."""
     required = [
         ("multipart", "python-multipart"),
+        ("segno", "segno"),
     ]
     missing: list[str] = []
 
@@ -1003,17 +1004,18 @@ def _display_connect_qr(url: str, token: str):
     The QR encodes a JSON string:  {"url": "...", "token": "..."}
     which the mobile app's QR scanner can read to auto-configure connection.
     """
+    ensure_runtime_dependencies()
+
     try:
         import segno
     except ImportError:
-        # segno not installed — try installing it on the fly
         try:
-            info("Installing segno for QR code display …")
+            info("Installing missing QR dependency …")
             run_q([str(VENV_PIP), "install", "--quiet", "segno"])
             import segno
         except Exception:
             warn("Could not generate QR code (segno not available).")
-            info("Install it:  pip install segno")
+            info(f"Run manually if needed: {VENV_PYTHON} -m pip install segno")
             return
 
     payload = json.dumps({"url": url, "token": token}, separators=(',', ':'))
