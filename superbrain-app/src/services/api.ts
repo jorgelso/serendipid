@@ -232,8 +232,8 @@ class ApiService {
           const isQueueStatus = error.response?.status === 502 || error.response?.status === 503 || error.response?.status === 504;
           
           if (isQueueStatus || isNetworkIssue) {
-          err.isServerQueued = true;
-          throw err;
+          error.isServerQueued = true;
+          throw error;
         }
       throw error;
     }

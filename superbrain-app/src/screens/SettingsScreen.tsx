@@ -93,16 +93,17 @@ const SettingsScreen = () => {
 
   // Handle QR scan data when returning from QRScanner
   useEffect(() => {
-    if (route.params?.qrData) {
-      const { url, token } = route.params.qrData;
+    const params = route.params as any;
+    if (params?.qrData) {
+      const { url, token } = params.qrData;
       if (url) setServerUrl(url);
       if (token) setApiToken(token);
       // Clear the params so we don't re-trigger
-      navigation.setParams({ qrData: undefined });
+      navigation.setParams({ qrData: undefined } as any);
       // Auto-save after state updates
       setTimeout(() => handleQRConnect(url, token), 300);
     }
-  }, [route.params?.qrData]);
+  }, [(route.params as any)?.qrData]);
 
   const loadSettings = async () => {
     try {

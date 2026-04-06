@@ -354,8 +354,8 @@ export async function sendImmediateSavedNotification(post: Post): Promise<void> 
     if (!granted) return;
 
     const body = post.title
-      ? `"${post.title}" is being analyzed…`
-      : 'Your post is being analyzed…';
+      ? `"${post.title}" has been successfully shared to SuperBrain!` 
+      : 'Your post has been successfully shared to SuperBrain!';
 
     await Notifications.scheduleNotificationAsync({
       content: {
@@ -451,3 +451,6 @@ export async function sendAnalysisFailedNotification(shortcode: string, title?: 
     console.warn('[Notifications] sendAnalysisFailedNotification error:', e);
   }
 }
+
+
+

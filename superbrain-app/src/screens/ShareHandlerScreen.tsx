@@ -19,7 +19,7 @@ import { colors } from '../theme/colors';
 import apiService from '../services/api';
 import postsCache from '../services/postsCache';
 import { collectionsService } from '../services/collections';
-import { sendImmediateWatchLaterNotification, sendAnalysisCompleteNotification, sendAnalysisFailedNotification } from '../services/notificationService';
+import { sendImmediateWatchLaterNotification, sendImmediateSavedNotification } from '../services/notificationService';
 import { Post, Collection } from '../types';
 import CustomToast from '../components/CustomToast';
 
@@ -333,9 +333,7 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
             }
             postsCache.markAnalysisComplete(shortcode);
 
-            // Fire completion notification with proper post title
-            const completePost = analyzedPost || placeholderPost;
-            sendAnalysisCompleteNotification(completePost).catch(() => {});
+            // Notification logic removed as per user preference
           }).catch((err: any) => {
             if (err?.isRetryQueued) {
               showToast('queue msg', 'info');
@@ -350,8 +348,7 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
                   post?.thumbnail_url,
                   post?.content_type,
                 );
-                // Fire failure notification
-                sendAnalysisFailedNotification(shortcode, post?.title).catch(() => {});
+                
               }
               if (!err?.isServerQueued) {
                 postsCache.markAnalysisComplete(shortcode);
@@ -359,6 +356,7 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
           });
         }
       }
+      if (post) sendImmediateSavedNotification(post).catch(() => {});
       
       showToast('✨ Saved — analyzing in background...', 'info');
       
@@ -412,9 +410,7 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
           }
           if (post.shortcode) postsCache.markAnalysisComplete(post.shortcode);
 
-          // Fire completion notification with proper post title
-          const completePost = analyzedPost || post;
-          sendAnalysisCompleteNotification(completePost).catch(() => {});
+          // Notification logic removed as per user preference
         }).catch((err: any) => {
           if (err?.isRetryQueued) {
               showToast('queue msg', 'info');
@@ -430,12 +426,12 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
                   post?.content_type,
                 );
               }
-              // Fire failure notification
-              sendAnalysisFailedNotification(post?.shortcode || '', post?.title).catch(() => {});
+              
             }
             if (post?.shortcode && !err?.isServerQueued) postsCache.markAnalysisComplete(post.shortcode);
         });
       }
+      if (post) sendImmediateSavedNotification(post).catch(() => {});
       
       showToast('✨ Saved — analyzing in background...', 'info');
       
@@ -778,6 +774,4 @@ const styles = StyleSheet.create({
 });
 
 export default ShareHandlerScreen;
-
-
 

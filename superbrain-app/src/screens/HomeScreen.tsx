@@ -93,7 +93,7 @@ const HomeScreen = () => {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'warning' | 'info' });
   const [isInitialized, setIsInitialized] = useState(false);
   const [isConfigured, setIsConfigured] = useState(true);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadPostsRef = useRef<(forceRefresh?: boolean) => Promise<void>>(undefined);
   const prevProcessingRef = useRef<number>(0); // tracks backend processing_count across poll ticks
   const [showOnboarding, setShowOnboarding] = useState(false);

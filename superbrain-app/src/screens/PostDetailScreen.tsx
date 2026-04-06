@@ -389,11 +389,11 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                       style={[
                         styles.categoryOption,
                         isActive ? {
-                          backgroundColor: cat.color,
-                          borderColor: cat.color,
+                          backgroundColor: (cat as any).color,
+                          borderColor: (cat as any).color,
                         } : {
-                          borderColor: cat.color + '40',
-                          backgroundColor: cat.color + '10',
+                          borderColor: (cat as any).color + '40',
+                          backgroundColor: (cat as any).color + '10',
                         },
                       ]}
                       onPress={() => setEditedCategory(cat.id)}
@@ -401,12 +401,12 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                       <Ionicons
                         name={cat.icon as any}
                         size={16}
-                        color={isActive ? '#fff' : cat.color}
+                        color={isActive ? '#fff' : (cat as any).color}
                       />
                       <Text
                         style={[
                           styles.categoryOptionText,
-                          { color: isActive ? '#fff' : cat.color }
+                          { color: isActive ? '#fff' : (cat as any).color }
                         ]}
                       >
                         {cat.name}
