@@ -62,9 +62,9 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
 
   const getContentTypeLabel = (type?: string) => {
     switch (type) {
-      case 'youtube':  return { icon: 'play-circle', label: 'YouTube' };
-      case 'webpage':  return { icon: 'globe', label: 'Web Page' };
-      default:         return { icon: 'camera', label: 'Instagram' };
+      case 'youtube':  return { icon: 'logo-youtube', label: 'YouTube' };
+      case 'webpage':  return { icon: 'globe-outline', label: 'Web Page' };
+      default:         return { icon: 'logo-instagram', label: 'Instagram' };
     }
   };
 
@@ -383,17 +383,18 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
               >
                 {CATEGORIES.map((cat) => {
                   const isActive = editedCategory === cat.id;
+                  const catColor = getCategoryColor(cat.id);
                   return (
                     <TouchableOpacity
                       key={cat.id}
                       style={[
                         styles.categoryOption,
                         isActive ? {
-                          backgroundColor: (cat as any).color,
-                          borderColor: (cat as any).color,
+                          backgroundColor: catColor,
+                          borderColor: catColor,
                         } : {
-                          borderColor: (cat as any).color + '40',
-                          backgroundColor: (cat as any).color + '10',
+                          borderColor: catColor + '40',
+                          backgroundColor: catColor + '10',
                         },
                       ]}
                       onPress={() => setEditedCategory(cat.id)}
@@ -401,12 +402,12 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                       <Ionicons
                         name={cat.icon as any}
                         size={16}
-                        color={isActive ? '#fff' : (cat as any).color}
+                        color={isActive ? '#fff' : catColor}
                       />
                       <Text
                         style={[
                           styles.categoryOptionText,
-                          { color: isActive ? '#fff' : (cat as any).color }
+                          { color: isActive ? '#fff' : catColor }
                         ]}
                       >
                         {cat.name}
