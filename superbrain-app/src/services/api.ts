@@ -228,8 +228,10 @@ class ApiService {
           err.detail = error.response.data?.detail || 'Queued for retry tomorrow';
           throw err;
         }
-        if (error.response?.status === 503 || error.code === 'ECONNABORTED') {
-          const err = new Error('SERVER_QUEUED_OR_TIMEOUT') as any;
+          const isNetworkIssue = !error.response || error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message?.toLowerCase().includes('network') || error.message?.toLowerCase().includes('timeout');
+          const isQueueStatus = error.response?.status === 502 || error.response?.status === 503 || error.response?.status === 504;
+          
+          if (isQueueStatus || isNetworkIssue) {
           err.isServerQueued = true;
           throw err;
         }
