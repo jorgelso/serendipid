@@ -338,20 +338,24 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
             sendAnalysisCompleteNotification(completePost).catch(() => {});
           }).catch((err: any) => {
             if (err?.isRetryQueued) {
-              showToast('⏰ Queued — will retry automatically tomorrow', 'info');
+              showToast('queue msg', 'info');
+            } else if (err?.isServerQueued) {
+              console.log('Server queued or timeout, keeping in analyzing state');
             } else {
-              console.error('Background analysis error:', err);
-              postsCache.markAsFailed(
-                shortcode,
-                url,
-                post?.title || '',
-                post?.thumbnail_url,
-                post?.content_type,
-              );
-              // Fire failure notification
-              sendAnalysisFailedNotification(shortcode, post?.title).catch(() => {});
-            }
-            postsCache.markAnalysisComplete(shortcode);
+                console.error('Background analysis error:', err);
+                postsCache.markAsFailed(
+                  shortcode,
+                  url,
+                  post?.title || '',
+                  post?.thumbnail_url,
+                  post?.content_type,
+                );
+                // Fire failure notification
+                sendAnalysisFailedNotification(shortcode, post?.title).catch(() => {});
+              }
+              if (!err?.isServerQueued) {
+                postsCache.markAnalysisComplete(shortcode);
+              }
           });
         }
       }
@@ -413,22 +417,23 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
           sendAnalysisCompleteNotification(completePost).catch(() => {});
         }).catch((err: any) => {
           if (err?.isRetryQueued) {
-            showToast('⏰ Quota full — queued for retry tomorrow', 'info');
-          } else {
-            console.error('Background analysis error:', err);
-            if (post?.shortcode) {
-              postsCache.markAsFailed(
-                post.shortcode,
-                url,
-                post?.title || '',
-                post?.thumbnail_url,
-                post?.content_type,
-              );
+              showToast('queue msg', 'info');
+            } else if (err?.isServerQueued) {
+              console.log('Server queued or timeout, keeping in analyzing state'); } else {
+              console.error('Background analysis error:', err);
+              if (post?.shortcode) {
+                postsCache.markAsFailed(
+                  post.shortcode,
+                  url,
+                  post?.title || '',
+                  post?.thumbnail_url,
+                  post?.content_type,
+                );
+              }
+              // Fire failure notification
+              sendAnalysisFailedNotification(post?.shortcode || '', post?.title).catch(() => {});
             }
-            // Fire failure notification
-            sendAnalysisFailedNotification(post?.shortcode || '', post?.title).catch(() => {});
-          }
-          if (post.shortcode) postsCache.markAnalysisComplete(post.shortcode);
+            if (post?.shortcode && !err?.isServerQueued) postsCache.markAnalysisComplete(post.shortcode);
         });
       }
       
@@ -773,3 +778,6 @@ const styles = StyleSheet.create({
 });
 
 export default ShareHandlerScreen;
+
+
+

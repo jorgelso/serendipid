@@ -488,11 +488,11 @@ const HomeScreen = () => {
     return `https://www.instagram.com/p/${post.shortcode}/media/?size=l`;
   };
 
-  const getContentTypeIcon = (post: Post) => {
+  const renderContentTypeIcon = (post: Post) => {
     switch (post.content_type) {
-      case 'youtube': return '▶️';
-      case 'webpage': return '🌐';
-      default: return '📸'; // instagram
+      case 'youtube': return <Ionicons name="logo-youtube" size={14} color="#fff" />;
+      case 'webpage': return <Ionicons name="globe-outline" size={14} color="#fff" />;
+      default: return <Ionicons name="logo-instagram" size={14} color="#fff" />; // instagram
     }
   };
 
@@ -663,7 +663,10 @@ const HomeScreen = () => {
               {post.title || 'Untitled'}
             </Text>
             <View style={styles.cardFooter}>
-              <Text style={styles.username}>{getContentTypeIcon(post)} {post.username || 'unknown'}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {renderContentTypeIcon(post)}
+                <Text style={[styles.username, { marginLeft: 4 }]}>{post.username || 'unknown'}</Text>
+              </View>
               {post.likes && post.likes > 0 ? (
                 <Text style={styles.likes}>{post.likes} likes</Text>
               ) : null}
@@ -732,7 +735,10 @@ const HomeScreen = () => {
           <Text style={styles.compactCardTitle} numberOfLines={2}>
             {post.title || 'Untitled'}
           </Text>
-          <Text style={styles.compactUsername} numberOfLines={1}>{getContentTypeIcon(post)} {post.username || 'unknown'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+            {renderContentTypeIcon(post)}
+            <Text style={[styles.compactUsername, { marginLeft: 4 }]} numberOfLines={1}>{post.username || 'unknown'}</Text>
+          </View>
         </LinearGradient>
         {isAnalyzing ? (
           <View style={styles.analyzingOverlay}>

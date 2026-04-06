@@ -381,30 +381,39 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                 contentContainerStyle={styles.categoriesContent}
                 keyboardShouldPersistTaps="always"
               >
-                {CATEGORIES.map((cat) => (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[
-                      styles.categoryOption,
-                      editedCategory === cat.id && styles.categoryOptionActive,
-                    ]}
-                    onPress={() => setEditedCategory(cat.id)}
-                  >
-                    <Ionicons
-                      name={cat.icon as any}
-                      size={16}
-                      color={editedCategory === cat.id ? '#fff' : colors.textMuted}
-                    />
-                    <Text
+                {CATEGORIES.map((cat) => {
+                  const isActive = editedCategory === cat.id;
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
                       style={[
-                        styles.categoryOptionText,
-                        editedCategory === cat.id && styles.categoryOptionTextActive,
+                        styles.categoryOption,
+                        isActive ? {
+                          backgroundColor: cat.color,
+                          borderColor: cat.color,
+                        } : {
+                          borderColor: cat.color + '40',
+                          backgroundColor: cat.color + '10',
+                        },
                       ]}
+                      onPress={() => setEditedCategory(cat.id)}
                     >
-                      {cat.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Ionicons
+                        name={cat.icon as any}
+                        size={16}
+                        color={isActive ? '#fff' : cat.color}
+                      />
+                      <Text
+                        style={[
+                          styles.categoryOptionText,
+                          { color: isActive ? '#fff' : cat.color }
+                        ]}
+                      >
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </ScrollView>
 

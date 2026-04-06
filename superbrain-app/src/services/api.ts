@@ -220,14 +220,19 @@ class ApiService {
       
       throw new Error('Failed to analyze post');
     } catch (error: any) {
-      console.error('Error analyzing URL:', error.response?.data || error.message);
-      // 202 = quota exhausted, queued for automatic retry
-      if (error.response?.status === 202) {
-        const err = new Error('QUEUED_FOR_RETRY') as any;
-        err.isRetryQueued = true;
-        err.detail = error.response.data?.detail || 'Queued for retry tomorrow';
-        throw err;
-      }
+        console.error('Error analyzing URL:', error.response?.data || error.message);
+        // 202 = quota exhausted, queued for automatic retry
+        if (error.response?.status === 202) {
+          const err = new Error('QUEUED_FOR_RETRY') as any;
+          err.isRetryQueued = true;
+          err.detail = error.response.data?.detail || 'Queued for retry tomorrow';
+          throw err;
+        }
+        if (error.response?.status === 503 || error.code === 'ECONNABORTED') {
+          const err = new Error('SERVER_QUEUED_OR_TIMEOUT') as any;
+          err.isServerQueued = true;
+          throw err;
+        }
       throw error;
     }
   }
@@ -674,3 +679,4 @@ class ApiService {
 }
 
 export default new ApiService();
+
