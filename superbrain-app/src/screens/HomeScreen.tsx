@@ -1084,12 +1084,16 @@ const HomeScreen = () => {
 
             {/* Step content */}
             <View style={styles.onboardingBody}>
-              <Ionicons
-                name={ONBOARDING_STEPS[onboardingStep].iconName as any}
-                size={48}
-                color={colors.primary}
-                style={styles.onboardingIcon}
-              />
+              {onboardingStep === 0 ? (
+                <Text style={styles.onboardingEmoji}>🧠</Text>
+              ) : (
+                <Ionicons
+                  name={ONBOARDING_STEPS[onboardingStep].iconName as any}
+                  size={48}
+                  color={colors.primary}
+                  style={styles.onboardingIcon}
+                />
+              )}
               <Text style={styles.onboardingTitle}>{ONBOARDING_STEPS[onboardingStep].title}</Text>
               <Text style={styles.onboardingDesc}>{ONBOARDING_STEPS[onboardingStep].description}</Text>
             </View>
