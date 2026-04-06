@@ -55,7 +55,9 @@ jobs:
           node-version: 20
 
       - name: Install JS dependencies
-        run: npm ci
+        run: |
+          npm cache clean --force
+          npm ci || npm install
         working-directory: superbrain-app
 
       - name: Set Android SDK local.properties
