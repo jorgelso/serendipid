@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import apiService from '../services/api';
 import CustomToast from '../components/CustomToast';
@@ -20,7 +20,8 @@ import { RootStackParamList } from '../../App';
 import { QueueStatus } from '../types';
 import BottomNav from '../components/BottomNav';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
+type SettingsRouteProp = RouteProp<RootStackParamList, 'Settings'>;
 
 interface DialogState {
   visible: boolean;
@@ -64,6 +65,7 @@ const sanitizeAccessToken = (value: string) => value.replace(/[^a-zA-Z0-9]/g, ''
 
 const SettingsScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<SettingsRouteProp>();
   const tokenInputRefs = useRef<Array<TextInput | null>>([]);
   // Start with truly empty; loadSettings will populate from storage if they exist
   const [serverUrl, setServerUrl] = useState('');
@@ -91,22 +93,16 @@ const SettingsScreen = () => {
 
   // Handle QR scan data when returning from QRScanner
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      const routes = navigation.getState()?.routes;
-      const currentRoute = routes?.[routes.length - 1];
-      const params = currentRoute?.params as any;
-      if (params?.qrData) {
-        const { url, token } = params.qrData;
-        if (url) setServerUrl(url);
-        if (token) setApiToken(token);
-        // Clear the params so we don't re-trigger
-        navigation.setParams({ qrData: undefined } as any);
-        // Auto-save after a brief delay to let state update
-        setTimeout(() => handleQRConnect(url, token), 300);
-      }
-    });
-    return unsubscribe;
-  }, [navigation]);
+    if (route.params?.qrData) {
+      const { url, token } = route.params.qrData;
+      if (url) setServerUrl(url);
+      if (token) setApiToken(token);
+      // Clear the params so we don't re-trigger
+      navigation.setParams({ qrData: undefined });
+      // Auto-save after state updates
+      setTimeout(() => handleQRConnect(url, token), 300);
+    }
+  }, [route.params?.qrData]);
 
   const loadSettings = async () => {
     try {
@@ -220,7 +216,7 @@ const SettingsScreen = () => {
       if (status !== null) {
         setConnectionStatus('connected');
         setQueueStatus(status);
-        setToast({ visible: true, message: '✅ Connected via QR code!', type: 'success' });
+        setToast({ visible: true, message: 'Connected via QR code!', type: 'success' });
       } else {
         setConnectionStatus('disconnected');
         setToast({ visible: true, message: 'Invalid Access Token from QR', type: 'error' });

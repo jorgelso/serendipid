@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
@@ -60,37 +62,44 @@ const DataImportExportScreen = () => {
 
       const baseUrl = await apiService.getBaseUrl();
       const token = await apiService.getApiToken();
-      
-      // Use timestamp with time to ensure unique filename each export
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = format === 'zip' 
-        ? `superbrain_export_${timestamp}.zip`
-        : `superbrain_export_${timestamp}.json`;
-      const destinationFile = new File(Paths.cache, filename);
-      
-      const downloadedFile = await File.downloadFileAsync(
-        `${baseUrl}/export?format=${format}`,
-        destinationFile,
-        { headers: { 'X-API-Key': token || '' } }
-      );
-      
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(downloadedFile.uri, {
-          mimeType: format === 'zip' ? 'application/zip' : 'application/json',
-          dialogTitle: 'Export SuperBrain Data',
-        });
-        setToast({ 
-          visible: true, 
-          message: `Export downloaded: ${filename}`, 
-          type: 'success' 
-        });
+
+      if (Platform.OS === 'android') {
+        // Trigger Android native download manager with notification
+        setToast({ visible: true, message: 'Downloading... Check notifications', type: 'info' });
+        const exportUrl = `${baseUrl}/export?format=${format}&token=${token || ''}`;
+        await Linking.openURL(exportUrl);
       } else {
-        setToast({ 
-          visible: true, 
-          message: `Export saved: ${downloadedFile.uri}`, 
-          type: 'success' 
-        });
+        // iOS or fallback: download locally and Share
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = format === 'zip'
+          ? `superbrain_export_${timestamp}.zip`
+          : `superbrain_export_${timestamp}.json`;
+        const destinationFile = new File(Paths.cache, filename);
+        
+        const downloadedFile = await File.downloadFileAsync(
+          `${baseUrl}/export?format=${format}`,
+          destinationFile,
+          { headers: { 'X-API-Key': token || '' } }
+        );
+
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(downloadedFile.uri, {
+            mimeType: format === 'zip' ? 'application/zip' : 'application/json',
+            dialogTitle: 'Export SuperBrain Data',
+          });
+          setToast({
+            visible: true,
+            message: `Export downloaded: ${filename}`,
+            type: 'success'
+          });
+        } else {
+          setToast({
+            visible: true,
+            message: `Export saved: ${downloadedFile.uri}`,
+            type: 'success'
+          });
+        }
       }
     } catch (error: any) {
       console.error('Export error:', error);

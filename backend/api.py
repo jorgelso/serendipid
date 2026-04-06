@@ -72,17 +72,19 @@ def load_or_create_api_token():
 
 API_TOKEN = load_or_create_api_token()
 
-async def verify_token(request: Request, x_api_key: str = Header(..., description="Access Token for authentication")):
+async def verify_token(request: Request, x_api_key: str = Header(None, description="Access Token for authentication")):
     """
     Verify authentication using Access Token.
+    Can be passed in X-API-Key header or token query parameter.
     """
-    if x_api_key != API_TOKEN:
-        logger.warning("Invalid Access Token attempt from IP: %s", request.client.host if hasattr(request, 'client') else 'unknown')
+    actual_token = x_api_key or request.query_params.get("token")
+    if actual_token != API_TOKEN:
+        logger.warning("Invalid Access Token attempt from IP: %s", request.client.host if hasattr(request, 'client') and request.client else 'unknown')
         raise HTTPException(
             status_code=401,
             detail="Invalid Access Token. Use the token from backend/token.txt."
         )
-    return x_api_key
+    return actual_token
 
 # Initialize FastAPI app
 app = FastAPI(

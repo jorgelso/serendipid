@@ -315,7 +315,7 @@ class Database:
         try:
             cur = self._conn.cursor()
 
-            cur.execute("SELECT COUNT(*) FROM analyses")
+            cur.execute("SELECT COUNT(*) FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0)")
             total = cur.fetchone()[0]
 
             cur.execute("SELECT COUNT(*) FROM collections")
@@ -323,7 +323,7 @@ class Database:
 
             cur.execute(
                 "SELECT COALESCE(category,'Uncategorized') as cat, COUNT(*) as cnt "
-                "FROM analyses GROUP BY cat"
+                "FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0) GROUP BY cat"
             )
             category_counts = {r["cat"]: r["cnt"] for r in cur.fetchall()}
 

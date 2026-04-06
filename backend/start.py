@@ -122,7 +122,6 @@ def ensure_runtime_dependencies():
     """Install must-have runtime packages if missing in the active venv."""
     required = [
         ("multipart", "python-multipart"),
-        ("segno", "segno"),
     ]
     missing: list[str] = []
 
@@ -999,81 +998,108 @@ def _detect_local_ip() -> str:
     return "127.0.0.1"
 
 def _display_connect_qr(url: str, token: str):
-    """Display a proper QR code in the terminal using segno + Unicode half-block chars.
-
-    The QR encodes a JSON string:  {"url": "...", "token": "..."}
-    which the mobile app's QR scanner can read to auto-configure connection.
-    """
-    ensure_runtime_dependencies()
-
-    try:
-        import segno
-    except ImportError:
-        try:
-            info("Installing missing QR dependency …")
-            run_q([str(VENV_PIP), "install", "--quiet", "segno"])
-            import segno
-        except Exception:
-            warn("Could not generate QR code (segno not available).")
-            info(f"Run manually if needed: {VENV_PYTHON} -m pip install segno")
-            return
+    """Display a QR code in the terminal without depending on the active interpreter."""
 
     payload = json.dumps({"url": url, "token": token}, separators=(',', ':'))
-    qr = segno.make(payload, error='L')
+    qr_script = textwrap.dedent(r'''
+        import json
+        import sys
 
-    # Convert to a matrix of booleans (True = dark module)
-    matrix = [list(row) for row in qr.matrix]
-    rows = len(matrix)
-    cols = len(matrix[0]) if rows else 0
+        import segno
 
-    # Add quiet zone (2 modules on each side)
-    quiet = 2
-    padded_cols = cols + quiet * 2
-    padded_rows = rows + quiet * 2
-    padded = []
-    empty_row = [0] * padded_cols
-    for _ in range(quiet):
-        padded.append(list(empty_row))
-    for row in matrix:
-        padded.append([0] * quiet + row + [0] * quiet)
-    for _ in range(quiet):
-        padded.append(list(empty_row))
+        payload = sys.argv[1]
+        qr = segno.make(payload, error='L')
 
-    # Render using Unicode half-block characters for double vertical resolution
-    # Each output line encodes TWO rows of QR modules:
-    #   top=dark, bottom=dark → "█"  (full block)
-    #   top=dark, bottom=light → "▀" (upper half)
-    #   top=light, bottom=dark → "▄" (lower half)
-    #   top=light, bottom=light → " " (space)
-    BG_WHITE  = "\033[47m"   # white background
-    FG_BLACK  = "\033[30m"   # black foreground
-    ANSI_RST  = "\033[0m"
+        matrix = [list(row) for row in qr.matrix]
+        rows = len(matrix)
+        cols = len(matrix[0]) if rows else 0
 
-    nl()
-    print(f"  {BOLD}{CYAN}┌{'─' * (padded_cols + 4)}┐{RESET}")
-    print(f"  {BOLD}{CYAN}│{RESET}  {BOLD}Scan with SuperBrain app{RESET}  {BOLD}{CYAN}│{RESET}")
-    print(f"  {BOLD}{CYAN}├{'─' * (padded_cols + 4)}┤{RESET}")
+        quiet = 2
+        padded_cols = cols + quiet * 2
+        padded_rows = rows + quiet * 2
+        padded = []
+        empty_row = [0] * padded_cols
+        for _ in range(quiet):
+            padded.append(list(empty_row))
+        for row in matrix:
+            padded.append([0] * quiet + row + [0] * quiet)
+        for _ in range(quiet):
+            padded.append(list(empty_row))
 
-    for y in range(0, padded_rows, 2):
-        line_chars = []
-        for x in range(padded_cols):
-            top = padded[y][x] if y < padded_rows else 0
-            bottom = padded[y + 1][x] if y + 1 < padded_rows else 0
+        print(f"  ┌{'─' * (padded_cols + 4)}┐")
+        
+        # Center the title within the inner frame
+        inner_width = padded_cols + 4
+        title = "Scan with SuperBrain App"
+        # If the width is too small, truncate it just in case, though QR is usually wider
+        if len(title) > inner_width - 2:
+            title = title[:inner_width - 2]
+        
+        print(f"  │{title.center(inner_width)}│")
+        print(f"  ├{'─' * inner_width}┤")
 
-            if top and bottom:
-                line_chars.append("█")
-            elif top and not bottom:
-                line_chars.append("▀")
-            elif not top and bottom:
-                line_chars.append("▄")
-            else:
-                line_chars.append(" ")
+        for y in range(0, padded_rows, 2):
+            line_chars = []
+            for x in range(padded_cols):
+                top = padded[y][x] if y < padded_rows else 0
+                bottom = padded[y + 1][x] if y + 1 < padded_rows else 0
 
-        line = "".join(line_chars)
-        print(f"  {BOLD}{CYAN}│{RESET}  {line}  {BOLD}{CYAN}│{RESET}")
+                if top and bottom:
+                    line_chars.append("█")
+                elif top and not bottom:
+                    line_chars.append("▀")
+                elif not top and bottom:
+                    line_chars.append("▄")
+                else:
+                    line_chars.append(" ")
 
-    print(f"  {BOLD}{CYAN}└{'─' * (padded_cols + 4)}┘{RESET}")
-    nl()
+            print(f"  │  {''.join(line_chars)}  │")
+
+        print(f"  └{'─' * (padded_cols + 4)}┘")
+    ''')
+
+    interpreters = []
+    if VENV_PYTHON.exists():
+        interpreters.append(str(VENV_PYTHON))
+    if sys.executable not in interpreters:
+        interpreters.append(sys.executable)
+
+    import os
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    
+    for python_executable in interpreters:
+        try:
+            result = subprocess.run(
+                [python_executable, "-c", qr_script, payload],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+            )
+            nl()
+            print(result.stdout, end="")
+            nl()
+            return
+        except subprocess.CalledProcessError as e:
+            try:
+                run([python_executable, "-m", "pip", "install", "--quiet", "segno"])
+                result = run_q([python_executable, "-c", qr_script, payload], encoding="utf-8", errors="replace", env=env)
+                nl()
+                print(result.stdout, end="")
+                nl()
+                return
+            except subprocess.CalledProcessError as e2:
+                warn(f"Failed to generate QR code using {python_executable}. STDOUT: {e2.stdout} STDERR: {e2.stderr}")
+                continue
+            except Exception as ex:
+                warn(f"Failed to generate QR code using {python_executable}: {ex}")
+                continue
+
+    warn("Could not generate QR code.")
+    info("Use the server URL and Access Token shown below to connect manually.")
 
 
 def launch_backend():
@@ -1199,7 +1225,7 @@ def launch_backend():
         tunnel_hint = f"         · public     →  install Node.js first, then run: {DIM}npx localtunnel --port {PORT}{RESET}"
 
     # ── Generate and display QR code ──────────────────────────────────────────
-    qr_url = f"http://{local_ip}:{PORT}"
+    qr_url = localtunnel_url if localtunnel_url else f"http://{local_ip}:{PORT}"
     _display_connect_qr(qr_url, token)
 
     print(f"""

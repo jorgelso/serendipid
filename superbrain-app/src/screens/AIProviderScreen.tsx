@@ -175,9 +175,9 @@ const AIProviderScreen = () => {
                 <TouchableOpacity
                   key={p}
                   style={[
-                    styles.providerOption, 
-                    selectedProvider === p && styles.providerOptionActive,
-                    { borderColor: selectedProvider === p ? providerIconColors[p] : colors.border }
+                    styles.providerOption,
+                    selectedProvider === p && { backgroundColor: providerIconColors[p], borderColor: providerIconColors[p] },
+                    selectedProvider !== p && { borderColor: colors.border }
                   ]}
                   onPress={() => setSelectedProvider(p)}
                 >

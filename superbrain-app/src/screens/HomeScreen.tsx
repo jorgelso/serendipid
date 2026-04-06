@@ -214,22 +214,22 @@ const HomeScreen = () => {
     {
       iconName: 'sparkles-outline',
       title: 'Welcome to SuperBrain',
-      description: 'Save from Instagram, YouTube, and web in one place, then find everything fast with search and filters.',
+      description: 'Save from Instagram, YouTube, and web in one place. Find everything fast with AI search and smart tagging.',
     },
     {
       iconName: 'share-outline',
       title: 'Save from Anywhere',
-      description: 'Open any Instagram post, YouTube video, or Website → tap Share → select SuperBrain. Done. Your content is saved and analyzed instantly.',
+      description: 'Open any social post or website → tap Share → select SuperBrain. Your content is saved and analyzed instantly.',
     },
     {
       iconName: 'layers-outline',
       title: 'Explore Your Feed',
-      description: 'Scroll through your saves, filter by category, or search. Tap a post to see full details. Long-press to select and delete multiple posts at once.',
+      description: 'Scroll through your saves, filter by category, or search. Tap a post to see details. Long-press to delete multiple.',
     },
     {
       iconName: 'settings-outline',
       title: 'Connect Your Backend',
-      description: 'Head to Settings to add your Server URL and Access Token. You can also configure AI providers and Instagram credentials for content analysis.',
+      description: 'Head to Settings to add your Server URL and Token. You can also configure AI providers and Instagram credentials.',
     },
   ];
 
