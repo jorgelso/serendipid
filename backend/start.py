@@ -399,7 +399,7 @@ def setup_api_keys():
         f"INSTAGRAM_USERNAME={ig_user}\n",
         f"INSTAGRAM_PASSWORD={ig_pass}\n",
     ]
-    API_KEYS.write_text("".join(lines))
+    API_KEYS.write_text(encoding='utf-8', errors='replace', data="".join(lines))
     ok(f"Keys saved to {API_KEYS}")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -647,7 +647,7 @@ def setup_whisper():
     # ── Save model choice to config ─────────────────────────────────────────
     whisper_cfg = BASE_DIR / "config" / "whisper_model.txt"
     (BASE_DIR / "config").mkdir(exist_ok=True)
-    whisper_cfg.write_text(model)
+    whisper_cfg.write_text(encoding='utf-8', errors='replace', data=model)
     ok(f"Whisper model set to '{model}' (saved to config/whisper_model.txt)")
 
     h2(f"Pre-downloading Whisper '{model}' model …")
@@ -689,16 +689,16 @@ def setup_remote_access():
 
     ok("ngrok auto-start enabled")
     NGROK_ENABLED.parent.mkdir(parents=True, exist_ok=True)
-    NGROK_ENABLED.write_text("enabled")
+    NGROK_ENABLED.write_text(encoding='utf-8', errors='replace', data="enabled")
 
-    existing_token = NGROK_TOKEN.read_text().strip() if NGROK_TOKEN.exists() else ""
+    existing_token = NGROK_TOKEN.read_text(encoding='utf-8', errors='ignore').strip() if NGROK_TOKEN.exists() else ""
     print(f"\n  {YELLOW}Please paste your ngrok Authtoken.{RESET}")
     if existing_token:
          print(f"  {DIM}(Leave blank to keep existing token){RESET}")
          
     auth_token = ask("Authtoken", default=existing_token, paste=True)
     if auth_token.strip():
-        NGROK_TOKEN.write_text(auth_token.strip())
+        NGROK_TOKEN.write_text(encoding='utf-8', errors='replace', data=auth_token.strip())
         ok("ngrok token saved.")
     else:
         warn("No ngrok token provided. ngrok may disconnect. To fix, re-run setup.")
@@ -711,7 +711,7 @@ def setup_token_and_db():
 
     # Token
     if TOKEN_FILE.exists():
-        token = TOKEN_FILE.read_text().strip()
+        token = TOKEN_FILE.read_text(encoding='utf-8', errors='ignore').strip()
         if token and len(token) == 8 and token.isalnum():
             ok(f"Access Token already exists: {BOLD}{token}{RESET}")
             if not ask_yn("Generate a new Access Token?", default=False):
@@ -723,7 +723,7 @@ def setup_token_and_db():
 
     alphabet = string.ascii_uppercase + string.digits
     new_token = ''.join(secrets.choice(alphabet) for _ in range(8))
-    TOKEN_FILE.write_text(new_token)
+    TOKEN_FILE.write_text(encoding='utf-8', errors='replace', data=new_token)
     ok(f"Access Token saved: {BOLD}{GREEN}{new_token}{RESET}")
     nl()
     print(f"  {YELLOW}Copy this token into the mobile app → Settings → Access Token.{RESET}")
@@ -738,10 +738,21 @@ def setup_token_and_db():
 # ══════════════════════════════════════════════════════════════════════════════
 def _start_ngrok(port: int) -> str | None:
     try:
+        # Dynamically inject the venv site-packages to import pyngrok since start.py is run by global python
+        import sys
+        if IS_WINDOWS:
+            sp = VENV_DIR / "Lib" / "site-packages"
+        else:
+            sp_list = list(VENV_DIR.glob("lib/python*/site-packages"))
+            sp = sp_list[0] if sp_list else VENV_DIR / "lib" / "python3" / "site-packages"
+        
+        if str(sp) not in sys.path:
+            sys.path.insert(0, str(sp))
+
         import pyngrok
         from pyngrok import ngrok
         
-        token = NGROK_TOKEN.read_text().strip() if NGROK_TOKEN.exists() else None
+        token = NGROK_TOKEN.read_text(encoding='utf-8', errors='ignore').strip() if NGROK_TOKEN.exists() else None
         if token:
             ngrok.set_auth_token(token)
             
@@ -791,7 +802,7 @@ def _start_localtunnel(port: int, timeout: int = 25) -> str | None:
     info("Starting localtunnel in background...")
     try:
         LOCALTUNNEL_LOG.parent.mkdir(parents=True, exist_ok=True)
-        LOCALTUNNEL_LOG.write_text("")
+        LOCALTUNNEL_LOG.write_text(encoding='utf-8', errors='replace', data="")
         log_handle = open(LOCALTUNNEL_LOG, "a", encoding="utf-8", buffering=1)
         kwargs = {
             "start_new_session": True,
@@ -856,7 +867,7 @@ def _start_localtunnel(port: int, timeout: int = 25) -> str | None:
     info("Starting localtunnel in background...")
     try:
         LOCALTUNNEL_LOG.parent.mkdir(parents=True, exist_ok=True)
-        LOCALTUNNEL_LOG.write_text("")
+        LOCALTUNNEL_LOG.write_text(encoding='utf-8', errors='replace', data="")
         log_handle = open(LOCALTUNNEL_LOG, "a", encoding="utf-8", buffering=1)
         kwargs = {
             "start_new_session": True,
@@ -1245,7 +1256,7 @@ def launch_backend():
                 info(f"Try manually:  kill -9 {pid}")
             sys.exit(1)
 
-    token = TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else "—"
+    token = TOKEN_FILE.read_text(encoding='utf-8', errors='ignore').strip() if TOKEN_FILE.exists() else "—"
     local_ip = _detect_local_ip()
 
     # tunnel startup
@@ -1253,7 +1264,7 @@ def launch_backend():
     tunnel_type: str = ""
     
     if NGROK_ENABLED.exists():
-        token_txt = NGROK_TOKEN.read_text().strip() if NGROK_TOKEN.exists() else ""
+        token_txt = NGROK_TOKEN.read_text(encoding='utf-8', errors='ignore').strip() if NGROK_TOKEN.exists() else ""
         if not token_txt:
             warn("Ngrok is enabled but no Authtoken was found.")
             setup_remote_access()
@@ -1428,7 +1439,7 @@ def main():
         sys.exit(1)
 
     # Mark setup done
-    SETUP_DONE.write_text("ok")
+    SETUP_DONE.write_text(encoding='utf-8', errors='replace', data="ok")
 
     nl()
     print(f"  {GREEN}{BOLD}{'═'*60}{RESET}")
