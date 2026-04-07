@@ -22,6 +22,7 @@ import string
 import textwrap
 import time
 import importlib
+import re
 from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
