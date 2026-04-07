@@ -1336,8 +1336,10 @@ def launch_backend():
 """)
 
     os.chdir(BASE_DIR)
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), "-m", "uvicorn", "api:app",
-                                 "--host", "0.0.0.0", "--port", str(PORT), "--reload"])
+    try:
+        subprocess.run([str(VENV_PYTHON), "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", str(PORT), "--reload"], check=True)
+    except KeyboardInterrupt:
+        pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Main
