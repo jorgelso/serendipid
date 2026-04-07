@@ -1118,6 +1118,11 @@ def launch_backend():
     # ngrok startup
     public_url: str | None = None
     if NGROK_ENABLED.exists():
+        token_txt = NGROK_TOKEN.read_text().strip() if NGROK_TOKEN.exists() else ""
+        if not token_txt:
+            warn("Ngrok is enabled but no Authtoken was found.")
+            setup_remote_access()
+
         info("Starting ngrok in background...")
         public_url = _start_ngrok(PORT)
         
@@ -1228,6 +1233,14 @@ def main():
     status_mode = "--status" in sys.argv
     if status_mode:
         launch_backend_status()
+        return
+
+    ngrok_mode = "--ngrok" in sys.argv
+    if ngrok_mode:
+        h1("SuperBrain Ngrok Configuration")
+        setup_remote_access()
+        nl()
+        ok("Ngrok configuration finished. Run 'superbrain-server' to start the backend.")
         return
 
     reset_mode = "--reset" in sys.argv

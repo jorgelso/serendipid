@@ -663,10 +663,7 @@ class ModelRouter:
             try:
                 self._refresh_openrouter_models()
             except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
-                raise RateLimitError("Quota limit hit")
-            raise e
-                print(f"⚠️  OpenRouter auto-refresh error: {e}")
+                print(f"??  OpenRouter auto-refresh error: {e}")
             time.sleep(OPENROUTER_FREE_CACHE_HOURS * 3600)
 
     def _refresh_openrouter_models(self):
@@ -1106,9 +1103,8 @@ class ModelRouter:
                 return result
 
             except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
-                raise RateLimitError("Quota limit hit")
-            raise e
+                if "429" in str(e) or "quota" in str(e).lower():
+                    raise RateLimitError("Quota limit hit")
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
@@ -1153,9 +1149,8 @@ class ModelRouter:
                 return result
 
             except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
-                raise RateLimitError("Quota limit hit")
-            raise e
+                if "429" in str(e) or "quota" in str(e).lower():
+                    raise RateLimitError("Quota limit hit")
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
@@ -1263,3 +1258,5 @@ if __name__ == "__main__":
         router.refresh_models()
     else:
         router.print_rankings()
+
+

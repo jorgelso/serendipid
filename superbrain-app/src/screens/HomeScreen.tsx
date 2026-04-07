@@ -120,7 +120,8 @@ const HomeScreen = () => {
 
   useEffect(() => {
     if (isInitialized && shouldShowOnboardingOnInit) {
-      setShowOnboarding(true);
+      const t = setTimeout(() => setShowOnboarding(true), 30);
+      return () => clearTimeout(t);
     }
   }, [isInitialized, shouldShowOnboardingOnInit]);
 

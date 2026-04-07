@@ -171,11 +171,15 @@ if (userArgs.length > 0) {
     superbrain-server reset         -> Open Reset Menu
     superbrain-server reset --all   -> Force complete wipe
     superbrain-server status        -> Show QR Code and Server Info
+    superbrain-server ngrok         -> Configure Ngrok tunnel
     `);
     process.exit(0);
   } else if (cmd === 'status' || cmd === 'update') {
     targetScript = 'start.py';
     finalArgs = ['--status'];
+  } else if (cmd === 'ngrok') {
+    targetScript = 'start.py';
+    finalArgs = ['--ngrok'];
   }
 }
 
