@@ -1152,6 +1152,7 @@ async def get_retry_queue(token: str = Depends(verify_token)):
 async def flush_retry_queue(token: str = Depends(verify_token)):
     """Immediately promote all retry-ready items to the active queue"""
     try:
+        db = get_db()
         ready = db.get_retry_ready()
         for item in ready:
             db.add_to_queue(item['shortcode'], item['url'])
@@ -1162,6 +1163,17 @@ async def flush_retry_queue(token: str = Depends(verify_token)):
         }
     except Exception as e:
         logger.error(f"Error flushing retry queue: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/queue/{shortcode}")
+async def delete_queue_item(shortcode: str, token: str = Depends(verify_token)):
+    """Remove an item from the processing or retry queue"""
+    try:
+        db = get_db()
+        db.remove_from_queue(shortcode)
+        return {"success": True, "message": f"Removed {shortcode} from queue"}
+    except Exception as e:
+        logger.error(f"Error removing {shortcode} from queue: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

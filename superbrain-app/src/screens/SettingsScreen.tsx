@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -118,7 +118,10 @@ const SettingsScreen = () => {
         setApiToken(sanitizeAccessToken(token).slice(0, ACCESS_TOKEN_LENGTH));
       }
 
-      // Only attempt to validate connection if both are configured
+      // Stop loading spinner IMMEDIATELY for instant UI navigation (Issue #1 fix)
+      setLoading(false);
+
+      // Validate connection in background
       if (token && baseUrl) {
         try {
           const status = await apiService.getQueueStatus();
@@ -137,7 +140,6 @@ const SettingsScreen = () => {
     } catch (error) {
       console.error('Error loading settings:', error);
       setConnectionStatus('disconnected');
-    } finally {
       setLoading(false);
     }
   };
@@ -423,7 +425,7 @@ const SettingsScreen = () => {
                 maxLength={8}
                 textAlign="center"
                 keyboardType="default"
-                placeholder="•"
+                placeholder="�"
                 placeholderTextColor={colors.textMuted}
               />
             ))}
@@ -482,7 +484,7 @@ const SettingsScreen = () => {
               iconColor="#f59e0b"
               title="Retry Queue"
               subtitle={`${queueStatus.retry_count} posts pending`}
-              onPress={handleFlushRetry}
+              onPress={() => navigation.navigate('RetryQueue')}
               showBadge
               badgeText={`${queueStatus.retry_count}`}
             />
@@ -513,12 +515,12 @@ const SettingsScreen = () => {
         {/* App Info */}
         <View style={styles.appInfo}>
           <View style={styles.appInfoRow}>
-            <Text style={styles.appInfoEmoji}>🧠</Text>
+            <Ionicons name="sparkles" size={24} color={colors.primary} />
             <Text style={styles.appInfoTitle}>SuperBrain</Text>
           </View>
           <View style={styles.appInfoCreditRow}>
             <Text style={styles.appInfoCreditText}>made with </Text>
-            <Text style={styles.appInfoEmojiSmall}>❤️</Text>
+            <Ionicons name="heart" size={14} color="#d43500" />
             <Text style={styles.appInfoCreditText}> by </Text>
             <TouchableOpacity onPress={() => Linking.openURL('https://github.com/sidinsearch')}>
               <Text style={styles.appInfoCreditLink}>sidinsearch</Text>

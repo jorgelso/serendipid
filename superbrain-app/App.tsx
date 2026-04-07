@@ -16,6 +16,7 @@ import PostDetailScreen from './src/screens/PostDetailScreen';
 import CollectionDetailScreen from './src/screens/CollectionDetailScreen';
 import ShareHandlerScreen from './src/screens/ShareHandlerScreen';
 import FailedAnalysisScreen from './src/screens/FailedAnalysisScreen';
+import RetryQueueScreen from './src/screens/RetryQueueScreen';
 import AIProviderScreen from './src/screens/AIProviderScreen';
 import InstagramScreen from './src/screens/InstagramScreen';
 import DataImportExportScreen from './src/screens/DataImportExportScreen';
@@ -35,7 +36,7 @@ export type RootStackParamList = {
   PostDetail: { post: Post };
   CollectionDetail: { collection: Collection };
   ShareHandler: { url?: string };
-  FailedAnalysis: undefined;
+  FailedAnalysis: undefined;        RetryQueue: undefined;
   AIProvider: undefined;
   Instagram: undefined;
   DataImportExport: undefined;
@@ -248,6 +249,11 @@ export default function App() {
           <Stack.Screen
             name="FailedAnalysis"
             component={FailedAnalysisScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="RetryQueue"
+            component={RetryQueueScreen}
             options={{ animation: 'slide_from_right' }}
           />
           <Stack.Screen

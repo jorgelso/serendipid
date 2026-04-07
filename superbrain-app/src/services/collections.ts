@@ -193,7 +193,19 @@ class CollectionsService {
   }
 
   async getCollections(): Promise<Collection[]> {
-    // Try backend first; fall back to local cache
+    // Return local cache immediately for instant UI navigation (Issue #1 fix)
+    const local = await readLocal();
+    if (local && local.length > 0) {
+      // Background sync, UI will update next time or by explicit refresh
+      setTimeout(async () => {
+        try {
+          if (await isBackendAvailable()) await pullFromBackend();
+        } catch (e) { }
+      }, 0);
+      return local;
+    }
+
+    // Try backend if local is empty
     if (await isBackendAvailable()) {
       const remote = await pullFromBackend();
       if (remote) return remote;

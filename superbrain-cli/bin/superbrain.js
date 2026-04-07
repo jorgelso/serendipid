@@ -170,8 +170,12 @@ if (userArgs.length > 0) {
     superbrain-server               -> Starts the backend engine
     superbrain-server reset         -> Open Reset Menu
     superbrain-server reset --all   -> Force complete wipe
+    superbrain-server status        -> Show QR Code and Server Info
     `);
     process.exit(0);
+  } else if (cmd === 'status' || cmd === 'update') {
+    targetScript = 'start.py';
+    finalArgs = ['--status'];
   }
 }
 

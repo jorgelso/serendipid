@@ -256,8 +256,9 @@ What this does on first run:
 Useful commands:
 
 ```bash
-superbrain-server reset
-superbrain-server reset --all
+superbrain-server status       # Show connection QR code & running server info
+superbrain-server reset        # Open interactive reset menu
+superbrain-server reset --all  # Force complete data wipe
 npx -y superbrain-server@latest reset
 ```
 

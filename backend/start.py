@@ -118,17 +118,57 @@ def run_q(cmd, **kwargs):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
 
 
+def _load_saved_api_keys() -> dict[str, str]:
+    """Load saved API keys and credentials from config/.api_keys."""
+    keys: dict[str, str] = {}
+    if API_KEYS.exists():
+        for line in API_KEYS.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                keys[k.strip()] = v.strip()
+    return keys
+
+
+CORE_PACKAGES = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.0.0",
+    "python-multipart>=0.0.9",
+    "requests>=2.31.0",
+    "httpx>=0.27.0",
+    "groq>=0.9.0",
+    "google-genai>=0.8.0",
+    "beautifulsoup4>=4.12.0",
+    "trafilatura>=1.12.0",
+    "newspaper4k>=0.9.0",
+    "lxml>=5.0.0",
+    "lxml_html_clean>=0.1.0",
+    "htmldate>=1.9.0",
+    "instaloader>=4.11.0",
+    "rich>=13.0.0",
+    "segno>=1.6.0",
+]
+
+
 def ensure_runtime_dependencies():
     """Install must-have runtime packages if missing in the active venv."""
     required = [
+        ("fastapi", "fastapi"),
+        ("uvicorn", "uvicorn"),
         ("multipart", "python-multipart"),
+        ("instaloader", "instaloader"),
+        ("segno", "segno"),
     ]
     missing: list[str] = []
 
     for module_name, package_name in required:
-        try:
-            importlib.import_module(module_name)
-        except Exception:
+        # Check if the module is actually importable in the virtual environment
+        rc = subprocess.run(
+            [str(VENV_PYTHON), "-c", f"import {module_name}"],
+            capture_output=True
+        ).returncode
+        if rc != 0:
             missing.append(package_name)
 
     if not missing:
@@ -179,79 +219,16 @@ def setup_venv():
 # Step 2 — Install Dependencies
 # ══════════════════════════════════════════════════════════════════════════════
 def install_deps():
-    h1("Step 2 of 7 — Installing Python Dependencies")
-    req = BASE_DIR / "requirements.txt"
-    if not req.exists():
-        err("requirements.txt not found — cannot install dependencies.")
-        sys.exit(1)
+    h1("Step 2 of 7 — Installing Core Python Dependencies")
 
     h2("Upgrading pip …")
     run([str(VENV_PYTHON), "-m", "pip", "install", "--quiet", "--upgrade", "pip"])
     ok("pip up to date")
 
-    h2("Installing packages from requirements.txt …")
-    nl()
-
-    # ── stream pip output and display each package live ────────────────────────
-    cmd = [str(VENV_PIP), "install", "--progress-bar", "off", "-r", str(req)]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1)
-
-    collecting: list[str] = []
-    n_cached   = 0
-    n_download = 0
-    n_install  = 0
-    current_pkg = ""
-
-    for raw in proc.stdout:  # type: ignore[union-attr]
-        line = raw.rstrip()
-        if not line:
-            continue
-
-        if line.startswith("Collecting "):
-            pkg = line.split()[1]
-            current_pkg = pkg
-            collecting.append(pkg)
-            idx = len(collecting)
-            print(f"  {CYAN}↓{RESET}  [{idx:>3}] {BOLD}{pkg}{RESET}")
-
-        elif "Downloading" in line and ".whl" in line or ".tar.gz" in line:
-            # e.g. "  Downloading fastapi-0.111.0-py3..whl (92 kB)"
-            parts = line.strip().split()
-            if len(parts) >= 2:
-                filename = parts[1]
-                size_str = " ".join(parts[2:]).strip("()")
-                print(f"       {DIM}↓ {filename}  {size_str}{RESET}")
-            n_download += 1
-
-        elif line.strip().startswith("Requirement already satisfied"):
-            n_cached += 1
-
-        elif line.startswith("Installing collected packages:"):
-            pkgs = line.split(":", 1)[1].strip()
-            n_install = len(pkgs.split(","))
-            nl()
-            print(f"  {BLUE}{BOLD}  ▶  Linking {n_install} package(s) into virtual environment …{RESET}")
-
-        elif line.startswith("Successfully installed"):
-            tail = line.replace("Successfully installed", "").strip()
-            count = len(tail.split())
-            nl()
-            ok(f"{count} package(s) installed successfully")
-            if n_cached:
-                info(f"{n_cached} package(s) already satisfied (cached)")
-
-        elif line.upper().startswith("WARNING") or line.upper().startswith("DEPRECATION"):
-            pass   # suppress pip noise
-
-        else:
-            # Any other line (build output, etc.) show dimmed
-            if line.strip():
-                print(f"       {DIM}{line.strip()}{RESET}")
-
-    proc.wait()
-    if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    h2("Installing core runtime packages …")
+    info("Optional packages such as local Whisper, OpenCV, and music ID are installed only when enabled.")
+    run([str(VENV_PIP), "install", "--progress-bar", "off", *CORE_PACKAGES])
+    ok(f"Installed {len(CORE_PACKAGES)} core package(s)")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ── API key validators ────────────────────────────────────────────────────────
@@ -431,6 +408,9 @@ OLLAMA_MODEL = "qwen3-vl:4b"   # vision-language model, fits ~6 GB VRAM / ~8 GB 
 def setup_ollama():
     h1("Step 4 of 7 — Offline AI Model (Ollama)")
 
+    keys = _load_saved_api_keys()
+    has_cloud_key = any(keys.get(k) for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY"))
+
     print(f"""
   Ollama runs AI models {BOLD}locally on your machine{RESET} — no internet or API
   key required. SuperBrain uses it as a last-resort fallback if all
@@ -441,7 +421,10 @@ def setup_ollama():
   Other options: llama3.2:3b (2 GB / 4 GB RAM), gemma2:2b (1.5 GB / 4 GB RAM)
 """)
 
-    if not ask_yn("Set up Ollama offline model?", default=True):
+    if has_cloud_key:
+        info("Cloud API key(s) detected — Ollama is optional and skipped by default.")
+
+    if not ask_yn("Set up Ollama offline model?", default=not has_cloud_key):
         warn("Skipping Ollama. Cloud providers only — make sure you have API keys.")
         return
 
@@ -562,6 +545,9 @@ WHISPER_MODELS = {
 def setup_whisper():
     h1("Step 5 of 7 — Offline Audio Transcription (Whisper)")
 
+    keys = _load_saved_api_keys()
+    has_groq_key = bool(keys.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY"))
+
     print(f"""
   OpenAI Whisper transcribes audio and video {BOLD}entirely on your machine{RESET}.
   SuperBrain uses it to extract speech from Instagram Reels, YouTube
@@ -570,6 +556,16 @@ def setup_whisper():
   Whisper requires {BOLD}ffmpeg{RESET} to be installed on your system.
   It also pre-downloads a speech model the first time it runs.
 """)
+
+    if has_groq_key:
+        info("Groq API key detected — cloud Whisper is available, so local Whisper is optional.")
+        if not ask_yn("Also install local Whisper fallback?", default=False):
+            warn("Skipping local Whisper. Groq Whisper will be used when Groq is available.")
+            return
+    else:
+        if not ask_yn("Set up local Whisper offline transcription?", default=True):
+            warn("Skipping Whisper setup. Audio transcription will rely on cloud providers if available.")
+            return
 
     # ── ffmpeg check ──────────────────────────────────────────────────────────
     if shutil.which("ffmpeg"):
@@ -597,7 +593,7 @@ def setup_whisper():
         warn("openai-whisper not found — installing now …")
         nl()
         try:
-            cmd = [str(VENV_PIP), "install", "--progress-bar", "off", "openai-whisper"]
+            cmd = [str(VENV_PIP), "install", "--progress-bar", "off", "openai-whisper>=20231117"]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, bufsize=1)
             for raw in proc.stdout:  # type: ignore[union-attr]
@@ -1273,6 +1269,11 @@ def launch_backend():
 def main():
     os.chdir(BASE_DIR)
     banner()
+
+    status_mode = "--status" in sys.argv
+    if status_mode:
+        launch_backend_status()
+        return
 
     reset_mode = "--reset" in sys.argv
 

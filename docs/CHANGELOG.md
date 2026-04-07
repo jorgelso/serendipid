@@ -5,6 +5,28 @@ All notable changes to SuperBrain will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **CLI status Command**: Run 'superbrain-server status' (or 'update') to show server QR code and URLs instantly and safely without crashing on startup port conflicts.
+- **Mobile Retry Queue Screen**: A dedicated screen in Settings to see failed analyses, allowing you to directly delete stuck processing items using a new 'DELETE /queue/{shortcode}' endpoint.
+
+### Fixed & Changed
+- **UI Performance**: Resolved 15-20s navigation freezes when navigating to Settings or Library screens by returning cached data instantly and pushing blocking calls to the background.
+- **UI Fix**: Fixed a visual bug where the 'Analyzing...' placeholder cards on the Home Screen were erroneously deleted from the feed after using the Share Intent.
+- **Visual Polish**: Converted remaining text emojis (brain, heart) in app screens to native Ionicons.
+
+## [Unreleased]
+
+### Added
+- **CLI status Command**: Run 'superbrain-server status' (or 'update') to show server QR code and URLs instantly and safely without crashing on startup port conflicts.
+- **Mobile Retry Queue Screen**: A dedicated screen in Settings to see failed analyses, allowing you to directly delete stuck processing items using a new 'DELETE /queue/{shortcode}' endpoint.
+
+### Fixed & Changed
+- **UI Performance**: Resolved 15-20s navigation freezes when navigating to Settings or Library screens by returning cached data instantly and pushing blocking calls to the background.
+- **UI Fix**: Fixed a visual bug where the 'Analyzing...' placeholder cards on the Home Screen were erroneously deleted from the feed after using the Share Intent.
+- **Visual Polish**: Converted remaining text emojis (brain, heart) in app screens to native Ionicons.
+
 ## [1.0.0] - 2026-03-31
 
 ### ✨ Added

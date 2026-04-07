@@ -360,9 +360,8 @@ const HomeScreen = () => {
 
         const mergedPosts = [
           ...analyzingPlaceholders,
-          ...fetchedPosts.filter(p => !stillAnalyzing.includes(p.shortcode)),
+          ...fetchedPosts,
         ];
-
         setPosts(mergedPosts);
         await postsCache.savePosts(mergedPosts);
       } else if (hasAnalyzing && cachedPosts && cachedPosts.length > 0) {
@@ -729,7 +728,7 @@ const HomeScreen = () => {
         >
           {post.category ? (
             <View style={[styles.categoryBadgeSmall, { backgroundColor: categoryColor }]}>
-              <Text style={styles.categoryBadgeTextSmall}>{getCategoryIcon(post.category)}</Text>
+              <Ionicons name={(CATEGORY_ICONS[post.category.toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
             </View>
           ) : null}
           <Text style={styles.compactCardTitle} numberOfLines={2}>

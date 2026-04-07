@@ -678,6 +678,12 @@ class ApiService {
       return `${baseUrl}/export?format=${format}`;
     });
   }
+
+  async removeQueueItem(shortcode: string): Promise<void> {
+    const headers = await this.getHeaders();
+    const baseUrl = await this.getBaseUrl();
+    await axios.delete(`${baseUrl}/queue/${shortcode}`, { headers });
+  }
 }
 
 export default new ApiService();
