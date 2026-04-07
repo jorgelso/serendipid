@@ -119,12 +119,9 @@ const HomeScreen = () => {
   }, []);
 
   useEffect(() => {
-    if (!isInitialized || !shouldShowOnboardingOnInit) {
-      return;
+    if (isInitialized && shouldShowOnboardingOnInit) {
+      setShowOnboarding(true);
     }
-
-    const t = setTimeout(() => setShowOnboarding(true), 450);
-    return () => clearTimeout(t);
   }, [isInitialized, shouldShowOnboardingOnInit]);
 
   // Exit app when back is pressed on HomeScreen (it is the root screen)

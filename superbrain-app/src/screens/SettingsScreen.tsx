@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -425,7 +425,7 @@ const SettingsScreen = () => {
                 maxLength={8}
                 textAlign="center"
                 keyboardType="default"
-                placeholder="�"
+                placeholder=""
                 placeholderTextColor={colors.textMuted}
               />
             ))}
@@ -515,7 +515,7 @@ const SettingsScreen = () => {
         {/* App Info */}
         <View style={styles.appInfo}>
           <View style={styles.appInfoRow}>
-            <Ionicons name="sparkles" size={24} color={colors.primary} />
+            <Text style={{fontSize: 24}}>🧠</Text>
             <Text style={styles.appInfoTitle}>SuperBrain</Text>
           </View>
           <View style={styles.appInfoCreditRow}>

@@ -157,6 +157,7 @@ def ensure_runtime_dependencies():
         ("fastapi", "fastapi"),
         ("uvicorn", "uvicorn"),
         ("multipart", "python-multipart"),
+        ("pyngrok", "pyngrok"),
         ("instaloader", "instaloader"),
         ("segno", "segno"),
     ]
@@ -662,64 +663,41 @@ def setup_whisper():
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 6 — Remote Access / Port Forwarding
 # ══════════════════════════════════════════════════════════════════════════════
-LOCALTUNNEL_ENABLED = BASE_DIR / "config" / "localtunnel_enabled.txt"
-LOCALTUNNEL_LOG = BASE_DIR / "config" / "localtunnel.log"
+NGROK_ENABLED = BASE_DIR / "config" / "ngrok_enabled.txt"
+NGROK_TOKEN = BASE_DIR / "config" / "ngrok_token.txt"
 
 def setup_remote_access():
-    h1("Step 6 of 7 — Remote Access (localtunnel / Port Forwarding)")
+    h1("Step 6 of 7 — Remote Access (ngrok)")
 
     print(f"""
-  The SuperBrain backend runs on {BOLD}port 5000{RESET} on your machine.
-  Your phone needs to reach this port over the internet.
+  The SuperBrain backend runs locally. Your phone needs to reach it over the internet.
+  We recommend {BOLD}ngrok{RESET} for a secure tunnel.
 
-  You have two options:
-
-    {BOLD}Option A — localtunnel (easiest + free){RESET}
-        localtunnel creates a public HTTPS URL that tunnels to your local port 5000.
-        No account required.
-        Official site: {CYAN}https://theboroer.github.io/localtunnel-www/{RESET}
-
-  {BOLD}Option B — Your own port forwarding (advanced){RESET}
-    Forward {BOLD}TCP port 5000{RESET} on your router to your machine's local IP.
-    Then use {BOLD}http://<your-public-ip>:5000{RESET} in the mobile app.
-    Steps:
-      1. Find your machine's local IP  →  ip addr  (Linux) / ipconfig (Windows)
-      2. Log into your router admin panel (usually http://192.168.1.1)
-      3. Add a port forwarding rule: External 5000 → Internal <your-local-IP>:5000
-      4. Use your public IP (check https://ipify.org) in the mobile app.
-    {YELLOW}Note: dynamic public IPs change on router restart — consider a DDNS service.{RESET}
-
-  {DIM}You can also run only on your local WiFi — both phone and PC must be on
-  the same network. Use your PC's local IP (e.g. 192.168.x.x) in the app.{RESET}
+  Requires a free account from: {CYAN}https://dashboard.ngrok.com/signup{RESET}
+  Get your Authtoken at: {CYAN}https://dashboard.ngrok.com/get-started/your-authtoken{RESET}
 """)
 
-    choice = ask_yn("Enable localtunnel on startup?", default=True)
+    choice = ask_yn("Enable ngrok on startup?", default=True)
     if not choice:
-        LOCALTUNNEL_ENABLED.unlink(missing_ok=True)
-        warn("Skipping localtunnel. Use either your own port forwarding or local WiFi.")
-        info("Remember: set the correct server URL in the mobile app Settings.")
+        NGROK_ENABLED.unlink(missing_ok=True)
+        warn("Skipping ngrok. Local WiFi only.")
         return
 
-    if not shutil.which("npx"):
-        print(f"""
-    {YELLOW}npx is not installed / not on PATH.{RESET}
+    ok("ngrok auto-start enabled")
+    NGROK_ENABLED.parent.mkdir(parents=True, exist_ok=True)
+    NGROK_ENABLED.write_text("enabled")
 
-    Install it:
-        Linux   →  {CYAN}Install Node.js (includes npm + npx){RESET}
-        macOS   →  {CYAN}brew install node{RESET}
-        Windows →  Install Node.js LTS from {CYAN}https://nodejs.org/{RESET}
-
-    After installing, re-run {BOLD}python start.py{RESET}.
-""")
-        warn("Skipping localtunnel setup.")
-        return
-
-    ok("npx binary found")
-    LOCALTUNNEL_ENABLED.parent.mkdir(parents=True, exist_ok=True)
-    LOCALTUNNEL_ENABLED.write_text("enabled")
-    ok("localtunnel auto-start enabled")
-    nl()
-    info("localtunnel will be started automatically every time you run start.py.")
+    existing_token = NGROK_TOKEN.read_text().strip() if NGROK_TOKEN.exists() else ""
+    print(f"\n  {YELLOW}Please paste your ngrok Authtoken.{RESET}")
+    if existing_token:
+         print(f"  {DIM}(Leave blank to keep existing token){RESET}")
+         
+    auth_token = ask("Authtoken", default=existing_token, paste=True)
+    if auth_token.strip():
+        NGROK_TOKEN.write_text(auth_token.strip())
+        ok("ngrok token saved.")
+    else:
+        warn("No ngrok token provided. ngrok may disconnect. To fix, re-run setup.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 6 — Access Token & Database
@@ -754,86 +732,20 @@ def setup_token_and_db():
 # ══════════════════════════════════════════════════════════════════════════════
 # Launch Backend
 # ══════════════════════════════════════════════════════════════════════════════
-def _extract_localtunnel_url(text: str) -> str | None:
-    """Extract first localtunnel public URL from text."""
-    import re
-    m = re.search(r"https://[\w.-]+\.loca\.lt\b", text)
-    return m.group(0) if m else None
-
-
-def _find_localtunnel_url_from_log() -> str | None:
-    """Read local tunnel log and return detected public URL if available."""
+def _start_ngrok(port: int) -> str | None:
     try:
-        if not LOCALTUNNEL_LOG.exists():
-            return None
-        text = LOCALTUNNEL_LOG.read_text(encoding="utf-8", errors="ignore")
-        return _extract_localtunnel_url(text)
-    except Exception:
-        return None
-
-
-def _stop_localtunnel_processes():
-    """Stop existing localtunnel processes so only one tunnel remains active."""
-    try:
-        if IS_WINDOWS:
-            script = (
-                "Get-CimInstance Win32_Process "
-                "| Where-Object { $_.CommandLine -match 'localtunnel|\\.loca\\.lt' } "
-                "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-            )
-            subprocess.run(["powershell", "-NoProfile", "-Command", script], check=False)
-        else:
-            subprocess.run(["pkill", "-f", "localtunnel"], check=False)
-    except Exception:
-        pass
-
-
-def _start_localtunnel(port: int, timeout: int = 25) -> str | None:
-    """Start localtunnel in the background and wait for the public URL."""
-    import time as _time
-
-    npx_exec = shutil.which("npx") or shutil.which("npx.cmd")
-    if not npx_exec:
-        return None
-
-    # Clean stale localtunnel processes.
-    _stop_localtunnel_processes()
-    _time.sleep(0.8)
-
-    info("Starting localtunnel in background …")
-    try:
-        LOCALTUNNEL_LOG.parent.mkdir(parents=True, exist_ok=True)
-        LOCALTUNNEL_LOG.write_text("")
-
-        log_handle = open(LOCALTUNNEL_LOG, "a", encoding="utf-8", buffering=1)
-        kwargs = {
-            "start_new_session": True,
-            "stdout": log_handle,
-            "stderr": subprocess.STDOUT,
-            "text": True,
-        }
-        if IS_WINDOWS and npx_exec.lower().endswith(".cmd"):
-            cmd = ["cmd", "/c", npx_exec, "-y", "localtunnel", "--port", str(port)]
-        else:
-            cmd = [npx_exec, "-y", "localtunnel", "--port", str(port)]
-        subprocess.Popen(cmd, **kwargs)
+        import pyngrok
+        from pyngrok import ngrok
+        
+        token = NGROK_TOKEN.read_text().strip() if NGROK_TOKEN.exists() else None
+        if token:
+            ngrok.set_auth_token(token)
+            
+        tunnel = ngrok.connect(port, bind_tls=True)
+        return tunnel.public_url
     except Exception as e:
-        warn(f"Could not start localtunnel: {e}")
+        warn(f"Failed to start ngrok: {e}")
         return None
-
-    # Poll log output until URL is emitted.
-    deadline = _time.time() + timeout
-    while _time.time() < deadline:
-        _time.sleep(1)
-        url = _find_localtunnel_url_from_log()
-        if url:
-            ok(f"localtunnel active  →  {GREEN}{BOLD}{url}{RESET}")
-            return url
-
-    warn("localtunnel started but URL is not available yet.")
-    info(f"Check tunnel logs in: {LOCALTUNNEL_LOG}")
-    return None
-
 
 def _get_windows_pids_on_port(port: int) -> list[int]:
     """Return listener PIDs on Windows using Get-NetTCPConnection when available."""
@@ -1202,26 +1114,27 @@ def launch_backend():
     token = TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else "—"
     local_ip = _detect_local_ip()
 
-    localtunnel_enabled = bool(shutil.which("npx") or shutil.which("npx.cmd"))
-
-    localtunnel_url: str | None = None
-    if localtunnel_enabled:
-        localtunnel_url = _start_localtunnel(PORT)
+    # ngrok startup
+    public_url: str | None = None
+    if NGROK_ENABLED.exists():
+        info("Starting ngrok in background...")
+        public_url = _start_ngrok(PORT)
+        
+    tunnel_line = ""
+    tunnel_hint = ""
+    
+    if public_url:
+        tunnel_line = f"    Public URL   →  {GREEN}{BOLD}{public_url}{RESET}  {DIM}(ngrok){RESET}"
+        tunnel_hint = f"         · public     →  {GREEN}{public_url}{RESET}"
+        ok(f"ngrok active  →  {GREEN}{BOLD}{public_url}{RESET}")
+    elif NGROK_ENABLED.exists():
+        tunnel_line = f"    Public URL   →  {YELLOW}(failed to start ngrok){RESET}"
+        tunnel_hint = f"         · public     →  run manually: {DIM}ngrok http {PORT}{RESET}"
     else:
-        localtunnel_url = _find_localtunnel_url_from_log()
-
-    if localtunnel_url:
-        tunnel_line = f"    Public URL   →  {GREEN}{BOLD}{localtunnel_url}{RESET}  {DIM}(localtunnel){RESET}"
-        tunnel_hint = f"         · public     →  {GREEN}{localtunnel_url}{RESET}"
-    elif localtunnel_enabled:
-        tunnel_line = f"    Public URL   →  {YELLOW}(starting — URL pending, check localtunnel.log){RESET}"
-        tunnel_hint = f"         · public     →  run:  {DIM}npx localtunnel --port {PORT}{RESET}"
-    else:
-        tunnel_line = ""
-        tunnel_hint = f"         · public     →  install Node.js first, then run: {DIM}npx localtunnel --port {PORT}{RESET}"
+        tunnel_hint = f"         · public     →  enable ngrok via {DIM}python start.py --reset{RESET}"
 
     # ── Generate and display QR code ──────────────────────────────────────────
-    qr_url = localtunnel_url if localtunnel_url else f"http://{local_ip}:{PORT}"
+    qr_url = public_url if public_url else f"http://{local_ip}:{PORT}"
     _display_connect_qr(qr_url, token)
 
     print(f"""
@@ -1274,15 +1187,21 @@ def launch_backend_status():
     if TOKEN_FILE.exists():
         token = TOKEN_FILE.read_text(encoding="utf-8").strip()
 
+    # Fetch ngrok status via API
     url = "NOT_FOUND"
-    log_file = BASE_DIR / "config" / "localtunnel.log"
-    if log_file.exists():
-        match = re.search(r"your url is: (https://[^\s]+)", log_file.read_text(encoding="utf-8"))
-        if match:
-            url = match.group(1)
-            
+    try:
+        import urllib.request, json
+        req = urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=2)
+        data = json.loads(req.read())
+        for tunnel in data.get("tunnels", []):
+            if tunnel.get("proto") == "https":
+                url = tunnel.get("public_url")
+                break
+    except Exception:
+        pass
+        
     if url == "NOT_FOUND":
-        warn("Could not find a running localtunnel URL in config/localtunnel.log.")
+        warn("Could not find a running ngrok URL. Is the server running?")
         nl()
         print("  Wait 5 seconds, or run 'superbrain-server' to start the server.")
         return
