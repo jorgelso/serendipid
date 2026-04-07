@@ -1131,13 +1131,13 @@ def launch_backend():
     
     if public_url:
         tunnel_line = f"    Public URL   →  {GREEN}{BOLD}{public_url}{RESET}  {DIM}(ngrok){RESET}"
-        tunnel_hint = f"         · public     →  {GREEN}{public_url}{RESET}"
+        tunnel_hint = f"           · public     →  {GREEN}{public_url}{RESET}"
         ok(f"ngrok active  →  {GREEN}{BOLD}{public_url}{RESET}")
     elif NGROK_ENABLED.exists():
         tunnel_line = f"    Public URL   →  {YELLOW}(failed to start ngrok){RESET}"
-        tunnel_hint = f"         · public     →  run manually: {DIM}ngrok http {PORT}{RESET}"
+        tunnel_hint = f"           · public     →  run manually: {DIM}ngrok http {PORT}{RESET}"
     else:
-        tunnel_hint = f"         · public     →  enable ngrok via {DIM}python start.py --reset{RESET}"
+        tunnel_hint = f"           · public     →  enable ngrok via {DIM}python start.py --reset{RESET}"
 
     # ── Generate and display QR code ──────────────────────────────────────────
     qr_url = public_url if public_url else f"http://{local_ip}:{PORT}"
