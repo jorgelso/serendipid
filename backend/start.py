@@ -1,14 +1,14 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
-â•‘               SuperBrain â€” First-Time Setup & Launcher           â•‘
-â•‘         Run this once to configure everything, then again        â•‘
-â•‘                    any time to start the server.                 â•‘
-â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+╔══════════════════════════════════════════════════════════════════╗
+║               SuperBrain — First-Time Setup & Launcher           ║
+║         Run this once to configure everything, then again        ║
+║                    any time to start the server.                 ║
+╚══════════════════════════════════════════════════════════════════╝
 
 Usage:
-    python start.py          â€” interactive setup on first run, then start server
-    python start.py --reset  â€” re-run the full setup wizard
+    python start.py          — interactive setup on first run, then start server
+    python start.py --reset  — re-run the full setup wizard
 """
 
 import sys
@@ -25,7 +25,7 @@ import importlib
 import re
 from pathlib import Path
 
-# â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR    = Path(__file__).parent.resolve()
 VENV_DIR    = BASE_DIR / ".venv"
 API_KEYS    = BASE_DIR / "config" / ".api_keys"
@@ -37,7 +37,7 @@ PYTHON      = sys.executable          # path that launched this script
 VENV_PYTHON = (VENV_DIR / "Scripts" / "python.exe") if IS_WINDOWS else (VENV_DIR / "bin" / "python")
 VENV_PIP    = (VENV_DIR / "Scripts" / "pip.exe")    if IS_WINDOWS else (VENV_DIR / "bin" / "pip")
 
-# â”€â”€ ANSI colours (stripped on Windows unless ANSICON / Windows Terminal) â”€â”€â”€â”€â”€â”€
+# ── ANSI colours (stripped on Windows unless ANSICON / Windows Terminal) ──────
 def _ansi(code): return f"\033[{code}m"
 RESET  = _ansi(0);  BOLD   = _ansi(1)
 RED    = _ansi(31); GREEN  = _ansi(32); YELLOW = _ansi(33)
@@ -47,48 +47,48 @@ MAGENTA = _ansi(35)
 MAG    = MAGENTA
 
 def link(url: str, text: str | None = None) -> str:
-    """OSC 8 terminal hyperlink â€” clickable in most modern terminals."""
+    """OSC 8 terminal hyperlink — clickable in most modern terminals."""
     label = text or url
     return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 def banner():
     art = f"""{CYAN}{BOLD}
-  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—
-  â–ˆâ–ˆâ•”â•â•â•â•â•â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â•â•â•â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—
-  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•
-  â•šâ•â•â•â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â•â• â–ˆâ–ˆâ•”â•â•â•  â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—
-  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘
-  â•šâ•â•â•â•â•â•â• â•šâ•â•â•â•â•â• â•šâ•â•     â•šâ•â•â•â•â•â•â•â•šâ•â•  â•šâ•â•
+  ███████╗██╗   ██╗██████╗ ███████╗██████╗
+  ██╔════╝██║   ██║██╔══██╗██╔════╝██╔══██╗
+  ███████╗██║   ██║██████╔╝█████╗  ██████╔╝
+  ╚════██║██║   ██║██╔═══╝ ██╔══╝  ██╔══██╗
+  ███████║╚██████╔╝██║     ███████╗██║  ██║
+  ╚══════╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝
 
-  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—
-  â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘
-  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘
-  â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘
-  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘
-  â•šâ•â•â•â•â•â• â•šâ•â•  â•šâ•â•â•šâ•â•  â•šâ•â•â•šâ•â•â•šâ•â•  â•šâ•â•â•â•
+  ██████╗ ██████╗  █████╗ ██╗███╗   ██╗
+  ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║
+  ██████╔╝██████╔╝███████║██║██╔██╗ ██║
+  ██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║
+  ██████╔╝██║  ██║██║  ██║██║██║ ╚████║
+  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
 {RESET}"""
-    credit = (f"    {DIM}made with {RESET}{MAG}â¤{RESET}{DIM}  by "
+    credit = (f"    {DIM}made with {RESET}{MAG}❤{RESET}{DIM}  by "
               f"{link('https://github.com/sidinsearch', f'{BOLD}sidinsearch{RESET}{DIM}')}"
               f"{RESET}\n")
     print(art + credit)
 
-def h1(msg):  print(f"\n{BOLD}{CYAN}{'â”'*64}{RESET}\n{BOLD}  {msg}{RESET}\n{BOLD}{CYAN}{'â”'*64}{RESET}")
-def h2(msg):  print(f"\n{BOLD}{BLUE}  â–¶  {msg}{RESET}")
-def ok(msg):  print(f"  {GREEN}âœ“{RESET}  {msg}")
-def warn(msg):print(f"  {YELLOW}âš {RESET}  {msg}")
-def err(msg): print(f"  {RED}âœ—{RESET}  {msg}")
+def h1(msg):  print(f"\n{BOLD}{CYAN}{'━'*64}{RESET}\n{BOLD}  {msg}{RESET}\n{BOLD}{CYAN}{'━'*64}{RESET}")
+def h2(msg):  print(f"\n{BOLD}{BLUE}  ▶  {msg}{RESET}")
+def ok(msg):  print(f"  {GREEN}✓{RESET}  {msg}")
+def warn(msg):print(f"  {YELLOW}⚠{RESET}  {msg}")
+def err(msg): print(f"  {RED}✗{RESET}  {msg}")
 def info(msg):print(f"  {DIM}{msg}{RESET}")
 def nl():     print()
 
 def ask(prompt, default=None, secret=False, paste=False):
     """
     Prompt for input.
-      secret=True  â€” uses getpass (hidden, no echo) â€” good for passwords typed char-by-char.
-      paste=True   â€” uses plain input (visible) so Ctrl+V / right-click paste works;
-                     existing value is shown as â—â—â—â— to indicate something is already set.
+      secret=True  — uses getpass (hidden, no echo) — good for passwords typed char-by-char.
+      paste=True   — uses plain input (visible) so Ctrl+V / right-click paste works;
+                     existing value is shown as ●●●● to indicate something is already set.
     """
     if paste and default:
-        display_default = f" [{DIM}â—â—â—â— (already set â€” paste to replace){RESET}]"
+        display_default = f" [{DIM}●●●● (already set — paste to replace){RESET}]"
     elif default:
         display_default = f" [{DIM}{default}{RESET}]"
     else:
@@ -177,7 +177,7 @@ def ensure_runtime_dependencies():
         return
 
     warn(f"Missing runtime package(s): {', '.join(missing)}")
-    info("Installing missing runtime package(s) automatically â€¦")
+    info("Installing missing runtime package(s) automatically …")
     try:
         run([str(VENV_PYTHON), "-m", "pip", "install", *missing])
         ok("Runtime dependencies installed")
@@ -186,7 +186,7 @@ def ensure_runtime_dependencies():
         info(f"Run manually: {VENV_PYTHON} -m pip install {' '.join(missing)}")
         sys.exit(1)
 
-# â”€â”€ Helpers for live output displays â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Helpers for live output displays ───────────────────────────────────────────────
 BAR_WIDTH = 36
 
 def _ascii_bar(completed: int, total: int, width: int = BAR_WIDTH) -> str:
@@ -195,7 +195,7 @@ def _ascii_bar(completed: int, total: int, width: int = BAR_WIDTH) -> str:
         return ""
     pct  = min(completed / total, 1.0)
     fill = int(width * pct)
-    bar  = f"{GREEN}{'â–ˆ' * fill}{DIM}{'â–‘' * (width - fill)}{RESET}"
+    bar  = f"{GREEN}{'█' * fill}{DIM}{'░' * (width - fill)}{RESET}"
     mb_d = completed / 1_048_576
     mb_t = total    / 1_048_576
     return f"[{bar}] {mb_d:6.1f} / {mb_t:.1f} MB  {pct*100:5.1f}%"
@@ -205,42 +205,42 @@ def _overwrite(line: str):
     sys.stdout.write(f"\r  {line}")
     sys.stdout.flush()
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Step 1 â€” Virtual Environment
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 1 — Virtual Environment
+# ══════════════════════════════════════════════════════════════════════════════
 def setup_venv():
-    h1("Step 1 of 6 â€” Python Virtual Environment")
+    h1("Step 1 of 6 — Python Virtual Environment")
     if VENV_DIR.exists():
         ok(f"Virtual environment already exists at {VENV_DIR}")
         return
-    h2("Creating virtual environment â€¦")
+    h2("Creating virtual environment …")
     run([PYTHON, "-m", "venv", str(VENV_DIR)])
     ok(f"Virtual environment created at {VENV_DIR}")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Step 2 â€” Install Dependencies
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 2 — Install Dependencies
+# ══════════════════════════════════════════════════════════════════════════════
 def install_deps():
-    h1("Step 2 of 7 â€” Installing Core Python Dependencies")
+    h1("Step 2 of 7 — Installing Core Python Dependencies")
 
-    h2("Upgrading pip â€¦")
+    h2("Upgrading pip …")
     run([str(VENV_PYTHON), "-m", "pip", "install", "--quiet", "--upgrade", "pip"])
     ok("pip up to date")
 
-    h2("Installing core runtime packages â€¦")
+    h2("Installing core runtime packages …")
     info("Optional packages such as local Whisper, OpenCV, and music ID are installed only when enabled.")
     run([str(VENV_PIP), "install", "--progress-bar", "off", *CORE_PACKAGES])
     ok(f"Installed {len(CORE_PACKAGES)} core package(s)")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# â”€â”€ API key validators â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════════════════════
+# ── API key validators ────────────────────────────────────────────────────────
 # Return values:
-#   (True,  detail)  â€” key is definitely valid
-#   (False, detail)  â€” key is definitely INVALID  (401 / explicit auth error)
-#   (None,  detail)  â€” could not verify (network, 403 scope, timeout, etc.)
+#   (True,  detail)  — key is definitely valid
+#   (False, detail)  — key is definitely INVALID  (401 / explicit auth error)
+#   (None,  detail)  — could not verify (network, 403 scope, timeout, etc.)
 
 def _validate_gemini(key: str):
-    """Hit the Gemini models list endpoint â€” any valid key returns 200."""
+    """Hit the Gemini models list endpoint — any valid key returns 200."""
     try:
         import urllib.request as _r, json as _j
         req = _r.Request(
@@ -256,7 +256,7 @@ def _validate_gemini(key: str):
             return False, "invalid key (400 Bad Request)"
         if "401" in msg:
             return False, "invalid key (401 Unauthorized)"
-        # 403, timeouts, etc. â€” cannot determine validity
+        # 403, timeouts, etc. — cannot determine validity
         return None, f"could not verify ({msg[:70]})"
 
 def _validate_groq(key: str):
@@ -285,7 +285,7 @@ def _validate_groq(key: str):
     except _e.HTTPError as e:
         if e.code in (401, 400):
             return False, f"invalid key ({e.code} {e.reason})"
-        # 403, 429, 503, etc. â€” key may be fine
+        # 403, 429, 503, etc. — key may be fine
         return None, f"could not verify ({e.code} {e.reason})"
     except Exception as e:
         return None, f"could not verify ({str(e)[:70]})"
@@ -312,38 +312,38 @@ def _check_and_report(name: str, key: str, validator) -> str:
     """Validate `key`, print result inline, return the key unchanged."""
     if not key:
         return key
-    print(f"  {DIM}Checking {name} key â€¦{RESET}", end="", flush=True)
+    print(f"  {DIM}Checking {name} key …{RESET}", end="", flush=True)
     result, detail = validator(key)
     if result is True:
-        print(f"\r  {GREEN}âœ“{RESET}  {name}: {detail}                            ")
+        print(f"\r  {GREEN}✓{RESET}  {name}: {detail}                            ")
     elif result is False:
-        print(f"\r  {RED}âœ—{RESET}  {name}: {detail}                            ")
-        warn(f"That key looks invalid â€” double-check at the provider dashboard.")
+        print(f"\r  {RED}✗{RESET}  {name}: {detail}                            ")
+        warn(f"That key looks invalid — double-check at the provider dashboard.")
     else:
-        # None â€” ambiguous, don't cry wolf
+        # None — ambiguous, don't cry wolf
         print(f"\r  {YELLOW}~{RESET}  {name}: {detail}                            ")
-        info("Could not reach the API right now â€” key saved, will be tested on first use.")
+        info("Could not reach the API right now — key saved, will be tested on first use.")
     return key
 
-# Step 3 â€” API Keys
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# Step 3 — API Keys
+# ══════════════════════════════════════════════════════════════════════════════
 def setup_api_keys():
-    h1("Step 3 of 7 â€” AI Provider Keys")
+    h1("Step 3 of 7 — AI Provider Keys")
 
     print(f"""
   SuperBrain uses AI providers to analyse your saved content.
-  You need {BOLD}at least one{RESET} key â€” the router tries them in order and
+  You need {BOLD}at least one{RESET} key — the router tries them in order and
   falls back automatically.
 
-  Recommended: {GREEN}Gemini{RESET} (most generous free tier â€” 1 500 req/day)
+  Recommended: {GREEN}Gemini{RESET} (most generous free tier — 1 500 req/day)
 
   Get free keys:
-    Gemini      â†’  {CYAN}https://aistudio.google.com/apikey{RESET}
-    Groq        â†’  {CYAN}https://console.groq.com/keys{RESET}
-    OpenRouter  â†’  {CYAN}https://openrouter.ai/keys{RESET}
+    Gemini      →  {CYAN}https://aistudio.google.com/apikey{RESET}
+    Groq        →  {CYAN}https://console.groq.com/keys{RESET}
+    OpenRouter  →  {CYAN}https://openrouter.ai/keys{RESET}
 
   Press {BOLD}Enter{RESET} to skip any key you don't have yet.
-  {DIM}Keys and passwords are visible as you paste â€” don't run setup in a screen share.{RESET}
+  {DIM}Keys and passwords are visible as you paste — don't run setup in a screen share.{RESET}
 """)
 
     # Load existing values if re-running
@@ -371,14 +371,14 @@ def setup_api_keys():
     print(f"  {BOLD}Instagram Credentials{RESET}")
     print(f"""
   Used for downloading private/public Instagram posts.
-  {YELLOW}Use a secondary / burner account â€” NOT your main account.{RESET}
+  {YELLOW}Use a secondary / burner account — NOT your main account.{RESET}
   The session is cached after first login so you won't be asked again.
 
   {DIM}Without credentials:{RESET}
     SuperBrain can still save and analyse {BOLD}YouTube videos{RESET} and {BOLD}Websites{RESET}
     without any Instagram account. However, Instagram posts will be limited:
-    â€¢ Only {BOLD}public posts{RESET} that are accessible without login may work.
-    â€¢ You {BOLD}cannot process multiple Instagram posts back-to-back{RESET} â€”
+    • Only {BOLD}public posts{RESET} that are accessible without login may work.
+    • You {BOLD}cannot process multiple Instagram posts back-to-back{RESET} —
       Instagram enforces a rate-limit cool-down between unauthenticated
       requests. You may need to wait several minutes between saves.
     Adding credentials removes these restrictions entirely.
@@ -391,7 +391,7 @@ def setup_api_keys():
     # Write .api_keys
     API_KEYS.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# SuperBrain API Keys â€” DO NOT COMMIT THIS FILE\n",
+        "# SuperBrain API Keys — DO NOT COMMIT THIS FILE\n",
         f"GEMINI_API_KEY={gemini}\n",
         f"GROQ_API_KEY={groq_k}\n",
         f"OPENROUTER_API_KEY={openr}\n",
@@ -402,32 +402,32 @@ def setup_api_keys():
     API_KEYS.write_text("".join(lines))
     ok(f"Keys saved to {API_KEYS}")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Step 4 â€” Ollama / Offline Model
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 4 — Ollama / Offline Model
+# ══════════════════════════════════════════════════════════════════════════════
 OLLAMA_MODEL = "qwen3-vl:4b"   # vision-language model, fits ~6 GB VRAM / ~8 GB RAM
 
 def setup_ollama():
-    h1("Step 4 of 7 â€” Offline AI Model (Ollama)")
+    h1("Step 4 of 7 — Offline AI Model (Ollama)")
 
     keys = _load_saved_api_keys()
     has_cloud_key = any(keys.get(k) for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY"))
 
     print(f"""
-  Ollama runs AI models {BOLD}locally on your machine{RESET} â€” no internet or API
+  Ollama runs AI models {BOLD}locally on your machine{RESET} — no internet or API
   key required. SuperBrain uses it as a last-resort fallback if all
   cloud providers fail or run out of quota.
 
   Recommended model: {BOLD}{OLLAMA_MODEL}{RESET}  (~3 GB download, needs ~8 GB RAM)
-    â†’ Vision-language model: understands both text AND images.
+    → Vision-language model: understands both text AND images.
   Other options: llama3.2:3b (2 GB / 4 GB RAM), gemma2:2b (1.5 GB / 4 GB RAM)
 """)
 
     if has_cloud_key:
-        info("Cloud API key(s) detected â€” Ollama is optional and skipped by default.")
+        info("Cloud API key(s) detected — Ollama is optional and skipped by default.")
 
     if not ask_yn("Set up Ollama offline model?", default=not has_cloud_key):
-        warn("Skipping Ollama. Cloud providers only â€” make sure you have API keys.")
+        warn("Skipping Ollama. Cloud providers only — make sure you have API keys.")
         return
 
     # Check if ollama binary is available
@@ -436,8 +436,8 @@ def setup_ollama():
   {YELLOW}Ollama is not installed.{RESET}
 
   Install it first:
-    Linux / macOS  â†’  {CYAN}curl -fsSL https://ollama.com/install.sh | sh{RESET}
-    Windows        â†’  Download from {CYAN}https://ollama.com/download{RESET}
+    Linux / macOS  →  {CYAN}curl -fsSL https://ollama.com/install.sh | sh{RESET}
+    Windows        →  Download from {CYAN}https://ollama.com/download{RESET}
 
   After installing, re-run {BOLD}python start.py{RESET} to continue.
 """)
@@ -460,7 +460,7 @@ def setup_ollama():
     custom = ask(f"Model to pull", default=OLLAMA_MODEL)
     model  = custom or OLLAMA_MODEL
 
-    h2(f"Pulling {model} â€” this downloads ~3 GB, grab a coffee â˜•")
+    h2(f"Pulling {model} — this downloads ~3 GB, grab a coffee ☕")
     nl()
     try:
         _ollama_pull_with_progress(model)
@@ -476,7 +476,7 @@ def _ollama_pull_with_progress(model: str):
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
 
-    # digest â†’ (total_bytes, completed_bytes, short_label)
+    # digest → (total_bytes, completed_bytes, short_label)
     layers: dict[str, tuple[int, int, str]] = {}
     last_status = ""
     active_digest = ""
@@ -487,7 +487,7 @@ def _ollama_pull_with_progress(model: str):
         if not raw:
             continue
 
-        # Ollama outputs plain-text lines (not JSON) when not a TTY â€” accept both
+        # Ollama outputs plain-text lines (not JSON) when not a TTY — accept both
         try:
             data = _json.loads(raw)
         except _json.JSONDecodeError:
@@ -496,7 +496,7 @@ def _ollama_pull_with_progress(model: str):
                 sys.stdout.write("\n"); render_line = False
             if raw != last_status:
                 last_status = raw
-                print(f"  {CYAN}â†’{RESET}  {raw}")
+                print(f"  {CYAN}→{RESET}  {raw}")
             continue
 
         status   = data.get("status",    "")
@@ -520,9 +520,9 @@ def _ollama_pull_with_progress(model: str):
             done_statuses = ("verifying sha256 digest", "writing manifest",
                              "removing any unused layers", "success")
             if any(s in status.lower() for s in done_statuses):
-                print(f"  {GREEN}âœ“{RESET}  {status}")
+                print(f"  {GREEN}✓{RESET}  {status}")
             else:
-                print(f"  {CYAN}â†’{RESET}  {status}")
+                print(f"  {CYAN}→{RESET}  {status}")
 
     if render_line:
         sys.stdout.write("\n"); render_line = False
@@ -533,19 +533,19 @@ def _ollama_pull_with_progress(model: str):
 
     ok(f"Model {model} ready")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Step 5 â€” Whisper / Offline Transcription
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 5 — Whisper / Offline Transcription
+# ══════════════════════════════════════════════════════════════════════════════
 WHISPER_MODELS = {
     "tiny":   (" ~74 MB", "fastest, lower accuracy"),
-    "base":   ("~142 MB", "good balance  â­ recommended"),
+    "base":   ("~142 MB", "good balance  ⭐ recommended"),
     "small":  ("~461 MB", "higher accuracy"),
     "medium": ("~1.5 GB", "high accuracy, slower"),
     "large":  ("~2.9 GB", "best accuracy, needs 10 GB RAM"),
 }
 
 def setup_whisper():
-    h1("Step 5 of 7 â€” Offline Audio Transcription (Whisper)")
+    h1("Step 5 of 7 — Offline Audio Transcription (Whisper)")
 
     keys = _load_saved_api_keys()
     has_groq_key = bool(keys.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY"))
@@ -553,14 +553,14 @@ def setup_whisper():
     print(f"""
   OpenAI Whisper transcribes audio and video {BOLD}entirely on your machine{RESET}.
   SuperBrain uses it to extract speech from Instagram Reels, YouTube
-  videos, and any other saved media â€” no API key needed.
+  videos, and any other saved media — no API key needed.
 
   Whisper requires {BOLD}ffmpeg{RESET} to be installed on your system.
   It also pre-downloads a speech model the first time it runs.
 """)
 
     if has_groq_key:
-        info("Groq API key detected â€” cloud Whisper is available, so local Whisper is optional.")
+        info("Groq API key detected — cloud Whisper is available, so local Whisper is optional.")
         if not ask_yn("Also install local Whisper fallback?", default=False):
             warn("Skipping local Whisper. Groq Whisper will be used when Groq is available.")
             return
@@ -569,30 +569,30 @@ def setup_whisper():
             warn("Skipping Whisper setup. Audio transcription will rely on cloud providers if available.")
             return
 
-    # â”€â”€ ffmpeg check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── ffmpeg check ──────────────────────────────────────────────────────────
     if shutil.which("ffmpeg"):
         ok("ffmpeg is installed")
     else:
-        warn("ffmpeg is NOT installed â€” Whisper cannot run without it.")
+        warn("ffmpeg is NOT installed — Whisper cannot run without it.")
         print(f"""
   Install ffmpeg:
-    Linux / WSL  â†’  {CYAN}sudo apt install ffmpeg{RESET}
-    macOS        â†’  {CYAN}brew install ffmpeg{RESET}
-    Windows      â†’  {CYAN}winget install ffmpeg{RESET}
+    Linux / WSL  →  {CYAN}sudo apt install ffmpeg{RESET}
+    macOS        →  {CYAN}brew install ffmpeg{RESET}
+    Windows      →  {CYAN}winget install ffmpeg{RESET}
                     or download from {CYAN}https://ffmpeg.org/download.html{RESET}
 
   After installing ffmpeg, re-run {BOLD}python start.py --reset{RESET} or just
-  restart â€” Whisper will work automatically once ffmpeg is present.
+  restart — Whisper will work automatically once ffmpeg is present.
 """)
         if not ask_yn("Continue setup anyway?", default=True):
             sys.exit(0)
 
-    # â”€â”€ Whisper package check / install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Whisper package check / install ──────────────────────────────────────
     try:
         result = run_q([str(VENV_PYTHON), "-c", "import whisper; print(whisper.__version__)"])
         ok(f"openai-whisper installed (version {result.stdout.strip()})")
     except Exception:
-        warn("openai-whisper not found â€” installing now â€¦")
+        warn("openai-whisper not found — installing now …")
         nl()
         try:
             cmd = [str(VENV_PIP), "install", "--progress-bar", "off", "openai-whisper>=20231117"]
@@ -603,13 +603,13 @@ def setup_whisper():
                 if not line:
                     continue
                 if line.startswith("Collecting "):
-                    print(f"  {CYAN}â†“{RESET}  {BOLD}{line.split()[1]}{RESET}")
+                    print(f"  {CYAN}↓{RESET}  {BOLD}{line.split()[1]}{RESET}")
                 elif "Downloading" in line and (".whl" in line or ".tar.gz" in line):
                     parts = line.strip().split()
                     if len(parts) >= 2:
-                        print(f"       {DIM}â†“ {parts[1]}  {' '.join(parts[2:]).strip('()')}{RESET}")
+                        print(f"       {DIM}↓ {parts[1]}  {' '.join(parts[2:]).strip('()')}{RESET}")
                 elif line.startswith("Successfully installed"):
-                    print(f"  {GREEN}âœ“  {line}{RESET}")
+                    print(f"  {GREEN}✓  {line}{RESET}")
                 elif "error" in line.lower() or "ERROR" in line:
                     print(f"  {RED}{line}{RESET}")
             proc.wait()
@@ -617,7 +617,7 @@ def setup_whisper():
                 result = run_q([str(VENV_PYTHON), "-c", "import whisper; print(whisper.__version__)"])
                 ok(f"openai-whisper installed (version {result.stdout.strip()})")
             else:
-                err("openai-whisper install failed â€” offline transcription will not work.")
+                err("openai-whisper install failed — offline transcription will not work.")
                 if not ask_yn("Continue setup anyway?", default=True):
                     sys.exit(0)
                 return
@@ -627,50 +627,50 @@ def setup_whisper():
                 sys.exit(0)
             return
 
-    # â”€â”€ Model pre-download â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Model pre-download ────────────────────────────────────────────────────
     nl()
     print(f"  {BOLD}Whisper model pre-download{RESET}")
     print(f"  Pre-downloading a model now avoids a delay on first use.\n")
 
     rows = ""
     for name, (size, note) in WHISPER_MODELS.items():
-        star = f"  {YELLOW}â† default if skipped{RESET}" if name == "base" else ""
+        star = f"  {YELLOW}← default if skipped{RESET}" if name == "base" else ""
         rows += f"    {BOLD}{name:<8}{RESET} {size}  {DIM}{note}{RESET}{star}\n"
     print(rows)
 
     choice = ask("Model to pre-download", default="base")
     model  = choice.strip().lower() if choice else "base"
     if model not in WHISPER_MODELS:
-        warn(f"Unknown model '{model}' â€” defaulting to 'base'.")
+        warn(f"Unknown model '{model}' — defaulting to 'base'.")
         model = "base"
 
-    # â”€â”€ Save model choice to config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Save model choice to config ─────────────────────────────────────────
     whisper_cfg = BASE_DIR / "config" / "whisper_model.txt"
     (BASE_DIR / "config").mkdir(exist_ok=True)
     whisper_cfg.write_text(model)
     ok(f"Whisper model set to '{model}' (saved to config/whisper_model.txt)")
 
-    h2(f"Pre-downloading Whisper '{model}' model â€¦")
+    h2(f"Pre-downloading Whisper '{model}' model …")
     print(f"  {DIM}(Whisper's own progress bar will appear below){RESET}\n")
     try:
         # Don't capture: let tqdm's download progress bars stream to the terminal
         run([str(VENV_PYTHON), "-c",
-             f"import whisper; print('Loading model â€¦'); whisper.load_model('{model}'); print('Done.')"])
+             f"import whisper; print('Loading model …'); whisper.load_model('{model}'); print('Done.')"])
         nl()
         ok(f"Whisper '{model}' model downloaded and cached")
     except subprocess.CalledProcessError:
-        err(f"Pre-download failed â€” Whisper will download '{model}' automatically on first use.")
+        err(f"Pre-download failed — Whisper will download '{model}' automatically on first use.")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Step 6 â€” Remote Access / Port Forwarding
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 6 — Remote Access / Port Forwarding
+# ══════════════════════════════════════════════════════════════════════════════
 NGROK_ENABLED = BASE_DIR / "config" / "ngrok_enabled.txt"
 NGROK_TOKEN = BASE_DIR / "config" / "ngrok_token.txt"
 LOCALTUNNEL_LOG = BASE_DIR / "config" / "localtunnel.log"
 LOCALTUNNEL_LOG = BASE_DIR / "config" / "localtunnel.log"
 
 def setup_remote_access():
-    h1("Step 6 of 7 â€” Remote Access (ngrok / localtunnel)")
+    h1("Step 6 of 7 — Remote Access (ngrok / localtunnel)")
 
     print(f"""
   The SuperBrain backend runs locally. Your phone needs to reach it over the internet.
@@ -703,11 +703,11 @@ def setup_remote_access():
     else:
         warn("No ngrok token provided. ngrok may disconnect. To fix, re-run setup.")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Step 6 â€” Access Token & Database
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
+# Step 6 — Access Token & Database
+# ══════════════════════════════════════════════════════════════════════════════
 def setup_token_and_db():
-    h1("Step 7 of 7 â€” Access Token & Database")
+    h1("Step 7 of 7 — Access Token & Database")
 
     # Token
     if TOKEN_FILE.exists():
@@ -726,142 +726,16 @@ def setup_token_and_db():
     TOKEN_FILE.write_text(new_token)
     ok(f"Access Token saved: {BOLD}{GREEN}{new_token}{RESET}")
     nl()
-    print(f"  {YELLOW}Copy this token into the mobile app â†’ Settings â†’ Access Token.{RESET}")
+    print(f"  {YELLOW}Copy this token into the mobile app → Settings → Access Token.{RESET}")
 
     # DB is auto-created on first backend start; just let the user know
     nl()
     info("The SQLite database (superbrain.db) will be created automatically")
     info("the first time the backend starts.")
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
 # Launch Backend
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-def _find_localtunnel_url_from_log() -> str | None:
-    try:
-        import re
-        if not LOCALTUNNEL_LOG.exists():
-            return None
-        text = LOCALTUNNEL_LOG.read_text(encoding="utf-8", errors="ignore")
-        m = re.search(r"https://[\w.-]+\.loca\.lt\b", text)
-        return m.group(0) if m else None
-    except Exception:
-        return None
-
-def _stop_localtunnel_processes():
-    try:
-        if IS_WINDOWS:
-            script = (
-                "Get-CimInstance Win32_Process "
-                "| Where-Object { $_.CommandLine -match 'localtunnel|\\.loca\\.lt' } "
-                "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-            )
-            subprocess.run(["powershell", "-NoProfile", "-Command", script], check=False)
-        else:
-            subprocess.run(["pkill", "-f", "localtunnel"], check=False)
-    except Exception:
-        pass
-
-def _start_localtunnel(port: int, timeout: int = 25) -> str | None:
-    import time
-    npx_exec = shutil.which("npx") or shutil.which("npx.cmd")
-    if not npx_exec:
-        warn("Node.js (npx) not found. Cannot start localtunnel.")
-        return None
-
-    _stop_localtunnel_processes()
-    time.sleep(0.8)
-
-    info("Starting localtunnel in background...")
-    try:
-        LOCALTUNNEL_LOG.parent.mkdir(parents=True, exist_ok=True)
-        LOCALTUNNEL_LOG.write_text("")
-        log_handle = open(LOCALTUNNEL_LOG, "a", encoding="utf-8", buffering=1)
-        kwargs = {
-            "start_new_session": True,
-            "stdout": log_handle,
-            "stderr": subprocess.STDOUT,
-            "text": True,
-        }
-        if IS_WINDOWS and npx_exec.lower().endswith(".cmd"):
-            cmd = ["cmd", "/c", npx_exec, "-y", "localtunnel", "--port", str(port)]
-        else:
-            cmd = [npx_exec, "-y", "localtunnel", "--port", str(port)]
-        subprocess.Popen(cmd, **kwargs)
-    except Exception as e:
-        warn(f"Could not start localtunnel: {e}")
-        return None
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(1)
-        url = _find_localtunnel_url_from_log()
-        if url:
-            return url
-    return None
-
-def _find_localtunnel_url_from_log() -> str | None:
-    try:
-        import re
-        if not LOCALTUNNEL_LOG.exists():
-            return None
-        text = LOCALTUNNEL_LOG.read_text(encoding="utf-8", errors="ignore")
-        m = re.search(r"https://[\w.-]+\.loca\.lt\b", text)
-        return m.group(0) if m else None
-    except Exception:
-        return None
-
-def _stop_localtunnel_processes():
-    try:
-        if IS_WINDOWS:
-            script = (
-                "Get-CimInstance Win32_Process "
-                "| Where-Object { $_.CommandLine -match 'localtunnel|\\.loca\\.lt' } "
-                "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-            )
-            subprocess.run(["powershell", "-NoProfile", "-Command", script], check=False)
-        else:
-            subprocess.run(["pkill", "-f", "localtunnel"], check=False)
-    except Exception:
-        pass
-
-def _start_localtunnel(port: int, timeout: int = 25) -> str | None:
-    import time
-    npx_exec = shutil.which("npx") or shutil.which("npx.cmd")
-    if not npx_exec:
-        warn("Node.js (npx) not found. Cannot start localtunnel.")
-        return None
-
-    _stop_localtunnel_processes()
-    time.sleep(0.8)
-
-    info("Starting localtunnel in background...")
-    try:
-        LOCALTUNNEL_LOG.parent.mkdir(parents=True, exist_ok=True)
-        LOCALTUNNEL_LOG.write_text("")
-        log_handle = open(LOCALTUNNEL_LOG, "a", encoding="utf-8", buffering=1)
-        kwargs = {
-            "start_new_session": True,
-            "stdout": log_handle,
-            "stderr": subprocess.STDOUT,
-            "text": True,
-        }
-        if IS_WINDOWS and npx_exec.lower().endswith(".cmd"):
-            cmd = ["cmd", "/c", npx_exec, "-y", "localtunnel", "--port", str(port)]
-        else:
-            cmd = [npx_exec, "-y", "localtunnel", "--port", str(port)]
-        subprocess.Popen(cmd, **kwargs)
-    except Exception as e:
-        warn(f"Could not start localtunnel: {e}")
-        return None
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(1)
-        url = _find_localtunnel_url_from_log()
-        if url:
-            return url
-    return None
-
+# ══════════════════════════════════════════════════════════════════════════════
 def _start_ngrok(port: int) -> str | None:
     try:
         import pyngrok
@@ -876,6 +750,136 @@ def _start_ngrok(port: int) -> str | None:
     except Exception as e:
         warn(f"Failed to start ngrok: {e}")
         return None
+
+def _find_localtunnel_url_from_log() -> str | None:
+    try:
+        import re
+        if not LOCALTUNNEL_LOG.exists():
+            return None
+        text = LOCALTUNNEL_LOG.read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r"https://[\w.-]+\.loca\.lt\b", text)
+        return m.group(0) if m else None
+    except Exception:
+        return None
+
+def _stop_localtunnel_processes():
+    try:
+        if IS_WINDOWS:
+            script = (
+                "Get-CimInstance Win32_Process "
+                "| Where-Object { $_.CommandLine -match 'localtunnel|\\.loca\\.lt' } "
+                "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            )
+            import subprocess
+            subprocess.run(["powershell", "-NoProfile", "-Command", script], check=False)
+        else:
+            import subprocess
+            subprocess.run(["pkill", "-f", "localtunnel"], check=False)
+    except Exception:
+        pass
+
+def _start_localtunnel(port: int, timeout: int = 25) -> str | None:
+    import time
+    npx_exec = shutil.which("npx") or shutil.which("npx.cmd")
+    if not npx_exec:
+        warn("Node.js (npx) not found. Cannot start localtunnel.")
+        return None
+
+    _stop_localtunnel_processes()
+    time.sleep(0.8)
+
+    info("Starting localtunnel in background...")
+    try:
+        LOCALTUNNEL_LOG.parent.mkdir(parents=True, exist_ok=True)
+        LOCALTUNNEL_LOG.write_text("")
+        log_handle = open(LOCALTUNNEL_LOG, "a", encoding="utf-8", buffering=1)
+        kwargs = {
+            "start_new_session": True,
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+        }
+        if IS_WINDOWS and npx_exec.lower().endswith(".cmd"):
+            cmd = ["cmd", "/c", npx_exec, "-y", "localtunnel", "--port", str(port)]
+        else:
+            cmd = [npx_exec, "-y", "localtunnel", "--port", str(port)]
+        subprocess.Popen(cmd, **kwargs)
+    except Exception as e:
+        warn(f"Could not start localtunnel: {e}")
+        return None
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(1)
+        url = _find_localtunnel_url_from_log()
+        if url:
+            return url
+    return None
+
+def _find_localtunnel_url_from_log() -> str | None:
+    try:
+        import re
+        if not LOCALTUNNEL_LOG.exists():
+            return None
+        text = LOCALTUNNEL_LOG.read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r"https://[\w.-]+\.loca\.lt\b", text)
+        return m.group(0) if m else None
+    except Exception:
+        return None
+
+def _stop_localtunnel_processes():
+    try:
+        if IS_WINDOWS:
+            script = (
+                "Get-CimInstance Win32_Process "
+                "| Where-Object { $_.CommandLine -match 'localtunnel|\\.loca\\.lt' } "
+                "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            )
+            import subprocess
+            subprocess.run(["powershell", "-NoProfile", "-Command", script], check=False)
+        else:
+            import subprocess
+            subprocess.run(["pkill", "-f", "localtunnel"], check=False)
+    except Exception:
+        pass
+
+def _start_localtunnel(port: int, timeout: int = 25) -> str | None:
+    import time
+    npx_exec = shutil.which("npx") or shutil.which("npx.cmd")
+    if not npx_exec:
+        warn("Node.js (npx) not found. Cannot start localtunnel.")
+        return None
+
+    _stop_localtunnel_processes()
+    time.sleep(0.8)
+
+    info("Starting localtunnel in background...")
+    try:
+        LOCALTUNNEL_LOG.parent.mkdir(parents=True, exist_ok=True)
+        LOCALTUNNEL_LOG.write_text("")
+        log_handle = open(LOCALTUNNEL_LOG, "a", encoding="utf-8", buffering=1)
+        kwargs = {
+            "start_new_session": True,
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+        }
+        if IS_WINDOWS and npx_exec.lower().endswith(".cmd"):
+            cmd = ["cmd", "/c", npx_exec, "-y", "localtunnel", "--port", str(port)]
+        else:
+            cmd = [npx_exec, "-y", "localtunnel", "--port", str(port)]
+        subprocess.Popen(cmd, **kwargs)
+    except Exception as e:
+        warn(f"Could not start localtunnel: {e}")
+        return None
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(1)
+        url = _find_localtunnel_url_from_log()
+        if url:
+            return url
+    return None
 
 def _get_windows_pids_on_port(port: int) -> list[int]:
     """Return listener PIDs on Windows using Get-NetTCPConnection when available."""
@@ -907,7 +911,7 @@ def _check_port(port: int) -> int | None:
         if s.connect_ex(("127.0.0.1", port)) != 0:
             return None   # port is free
 
-    # Port is busy â€” try to find the PID
+    # Port is busy — try to find the PID
     try:
         if IS_WINDOWS:
             out = run_q(["netstat", "-ano"]).stdout
@@ -1064,7 +1068,7 @@ def _display_connect_qr(url: str, token: str):
         for _ in range(quiet):
             padded.append(list(empty_row))
 
-        print(f"  â”Œ{'â”€' * (padded_cols + 4)}â”")
+        print(f"  ┌{'─' * (padded_cols + 4)}┐")
         
         # Center the title within the inner frame
         inner_width = padded_cols + 4
@@ -1073,8 +1077,8 @@ def _display_connect_qr(url: str, token: str):
         if len(title) > inner_width - 2:
             title = title[:inner_width - 2]
         
-        print(f"  â”‚{title.center(inner_width)}â”‚")
-        print(f"  â”œ{'â”€' * inner_width}â”¤")
+        print(f"  │{title.center(inner_width)}│")
+        print(f"  ├{'─' * inner_width}┤")
 
         for y in range(0, padded_rows, 2):
             line_chars = []
@@ -1083,17 +1087,17 @@ def _display_connect_qr(url: str, token: str):
                 bottom = padded[y + 1][x] if y + 1 < padded_rows else 0
 
                 if top and bottom:
-                    line_chars.append("â–ˆ")
+                    line_chars.append("█")
                 elif top and not bottom:
-                    line_chars.append("â–€")
+                    line_chars.append("▀")
                 elif not top and bottom:
-                    line_chars.append("â–„")
+                    line_chars.append("▄")
                 else:
                     line_chars.append(" ")
 
-            print(f"  â”‚  {''.join(line_chars)}  â”‚")
+            print(f"  │  {''.join(line_chars)}  │")
 
-        print(f"  â””{'â”€' * (padded_cols + 4)}â”˜")
+        print(f"  └{'─' * (padded_cols + 4)}┘")
     ''')
 
     interpreters = []
@@ -1146,7 +1150,7 @@ def launch_backend():
     # Ensure upload endpoints won't crash FastAPI at import time.
     ensure_runtime_dependencies()
 
-    # â”€â”€ Port conflict check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Port conflict check ───────────────────────────────────────────────────
     PORT = 5000
     pid = _check_port(PORT)
     if pid is not None:
@@ -1159,7 +1163,7 @@ def launch_backend():
         print(f"  This is usually a previous SuperBrain server that wasn't stopped.")
         print(f"  Options:")
         print(f"    {BOLD}1{RESET}  Kill the existing process and start fresh  {DIM}(recommended){RESET}")
-        print(f"    {BOLD}2{RESET}  Exit â€” I'll stop it manually then re-run start.py")
+        print(f"    {BOLD}2{RESET}  Exit — I'll stop it manually then re-run start.py")
         nl()
         choice = input(f"  {BOLD}Choose [1/2]{RESET}: ").strip()
 
@@ -1180,7 +1184,7 @@ def launch_backend():
                 if IS_WINDOWS:
                     killed = _kill_pid_windows(pid)
                     if not killed:
-                        warn(f"PID {pid} is no longer active. Trying current listeners on port {PORT} â€¦")
+                        warn(f"PID {pid} is no longer active. Trying current listeners on port {PORT} …")
                 else:
                     os.kill(pid, _sig.SIGTERM)
                 time.sleep(1)
@@ -1208,7 +1212,7 @@ def launch_backend():
                         info(f"Run:  lsof -ti TCP:{PORT} -sTCP:LISTEN | xargs kill -9")
                     sys.exit(1)
             else:
-                # Unknown PID â€” try to kill all listeners we can find
+                # Unknown PID — try to kill all listeners we can find
                 extra_pids = _find_pids_on_port(PORT)
                 if not extra_pids:
                     err("Cannot determine PID automatically.")
@@ -1241,7 +1245,7 @@ def launch_backend():
                 info(f"Try manually:  kill -9 {pid}")
             sys.exit(1)
 
-    token = TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else "â€”"
+    token = TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else "—"
     local_ip = _detect_local_ip()
 
     # tunnel startup
@@ -1258,7 +1262,7 @@ def launch_backend():
         public_url = _start_ngrok(PORT)
         if public_url:
             tunnel_type = "ngrok"
-            ok(f"ngrok active  â†’  {GREEN}{BOLD}{public_url}{RESET}")
+            ok(f"ngrok active  →  {GREEN}{BOLD}{public_url}{RESET}")
         else:
             warn("ngrok failed. Falling back to localtunnel...")
 
@@ -1266,67 +1270,67 @@ def launch_backend():
         public_url = _start_localtunnel(PORT)
         if public_url:
             tunnel_type = "localtunnel"
-            ok(f"localtunnel active  â†’  {GREEN}{BOLD}{public_url}{RESET}")
+            ok(f"localtunnel active  →  {GREEN}{BOLD}{public_url}{RESET}")
         
     tunnel_line = ""
     tunnel_hint = ""
     
     if public_url:
-        tunnel_line = f"    Public URL   â†’  {GREEN}{BOLD}{public_url}{RESET}  {DIM}({tunnel_type}){RESET}"
-        tunnel_hint = f"           Â· public     â†’  {GREEN}{public_url}{RESET}"
+        tunnel_line = f"    Public URL   →  {GREEN}{BOLD}{public_url}{RESET}  {DIM}({tunnel_type}){RESET}"
+        tunnel_hint = f"           · public     →  {GREEN}{public_url}{RESET}"
     elif NGROK_ENABLED.exists():
-        tunnel_line = f"    Public URL   â†’  {YELLOW}(failed to start ngrok and localtunnel){RESET}"
-        tunnel_hint = f"           Â· public     â†’  run manually: {DIM}ngrok http {PORT}{RESET}"
+        tunnel_line = f"    Public URL   →  {YELLOW}(failed to start ngrok and localtunnel){RESET}"
+        tunnel_hint = f"           · public     →  run manually: {DIM}ngrok http {PORT}{RESET}"
     else:
-        tunnel_line = f"    Public URL   â†’  {YELLOW}(failed to start localtunnel){RESET}"
-        tunnel_hint = f"           Â· public     â†’  configure ngrok via {DIM}python start.py --reset{RESET} or ensure node/npx is installed"
+        tunnel_line = f"    Public URL   →  {YELLOW}(failed to start localtunnel){RESET}"
+        tunnel_hint = f"           · public     →  configure ngrok via {DIM}python start.py --reset{RESET} or ensure node/npx is installed"
 
-    # â”€â”€ Generate and display QR code â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Generate and display QR code ──────────────────────────────────────────
     qr_url = public_url if public_url else f"http://{local_ip}:{PORT}"
     _display_connect_qr(qr_url, token)
 
     print(f"""
   {GREEN}{BOLD}Backend is starting up!{RESET}
 
-    Local URL      â†’  {CYAN}http://127.0.0.1:{PORT}{RESET}
-    Network URL    â†’  {CYAN}http://{local_ip}:{PORT}{RESET}
-{(tunnel_line + chr(10)) if tunnel_line else ''}    API docs       â†’  {CYAN}http://127.0.0.1:{PORT}/docs{RESET}
-    Access Token   â†’  {BOLD}{MAGENTA}{token}{RESET}
+    Local URL      →  {CYAN}http://127.0.0.1:{PORT}{RESET}
+    Network URL    →  {CYAN}http://{local_ip}:{PORT}{RESET}
+{(tunnel_line + chr(10)) if tunnel_line else ''}    API docs       →  {CYAN}http://127.0.0.1:{PORT}/docs{RESET}
+    Access Token   →  {BOLD}{MAGENTA}{token}{RESET}
 
   {DIM}Keep this terminal open. Press Ctrl+C to stop the server.{RESET}
 
   {YELLOW}Mobile app setup:{RESET}
-    {BOLD}Option A â€” Scan QR code (easiest):{RESET}
-      1. Open the app  â†’  Settings  â†’  tap the {BOLD}QR icon{RESET} ðŸ“·
+    {BOLD}Option A — Scan QR code (easiest):{RESET}
+      1. Open the app  →  Settings  →  tap the {BOLD}QR icon{RESET} 📷
       2. Scan the QR code shown above
-      3. Done â€” auto-connected!
+      3. Done — auto-connected!
 
-    {BOLD}Option B â€” Manual setup:{RESET}
+    {BOLD}Option B — Manual setup:{RESET}
       1. Build / install the SuperBrain APK on your Android device.
-      2. Open the app  â†’  tap the âš™ settings icon.
+      2. Open the app  →  tap the ⚙ settings icon.
       3. Set {BOLD}Server URL{RESET} to:
-           Â· Same WiFi  â†’  http://{local_ip}:{PORT}
+           · Same WiFi  →  http://{local_ip}:{PORT}
 {tunnel_hint}
-           Â· Port fwd   â†’  http://<your-public-ip>:{PORT}
+           · Port fwd   →  http://<your-public-ip>:{PORT}
       4. Set {BOLD}Access Token{RESET} to: {BOLD}{MAGENTA}{token}{RESET}
-      5. Tap {BOLD}Save{RESET}  â†’  Connected!
+      5. Tap {BOLD}Save{RESET}  →  Connected!
 
   {YELLOW}Data Management:{RESET}
-    â€¢ {BOLD}Export:{RESET}   In app Settings  â†’  Data Import/Export  â†’  choose format (JSON/ZIP)
-    â€¢ {BOLD}Import:{RESET}   Upload backup file in app  â†’  Data Import/Export  â†’  select file
-    â€¢ {BOLD}Reset:{RESET}    Run  {BOLD}python reset.py{RESET}  for safe data cleanup options
+    • {BOLD}Export:{RESET}   In app Settings  →  Data Import/Export  →  choose format (JSON/ZIP)
+    • {BOLD}Import:{RESET}   Upload backup file in app  →  Data Import/Export  →  select file
+    • {BOLD}Reset:{RESET}    Run  {BOLD}python reset.py{RESET}  for safe data cleanup options
 
   {DIM}Security Note: Keep token.txt private. Anyone with this token can use your API.{RESET}
-  {DIM}The app securely stores your Access Token locally â€” it's never transmitted anywhere but your server.{RESET}
+  {DIM}The app securely stores your Access Token locally — it's never transmitted anywhere but your server.{RESET}
 """)
 
     os.chdir(BASE_DIR)
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), "-m", "uvicorn", "api:app",
                                  "--host", "0.0.0.0", "--port", str(PORT), "--reload"])
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
 # Main
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════════════
 
 def launch_backend_status():
     h1("SuperBrain Status")
@@ -1337,7 +1341,6 @@ def launch_backend_status():
 
     # Fetch ngrok status via API
     url = "NOT_FOUND"
-    tunnel_type = "tunnel"
     try:
         import urllib.request, json
         req = urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=2)
@@ -1345,20 +1348,12 @@ def launch_backend_status():
         for tunnel in data.get("tunnels", []):
             if tunnel.get("proto") == "https":
                 url = tunnel.get("public_url")
-                tunnel_type = "ngrok"
                 break
     except Exception:
         pass
         
     if url == "NOT_FOUND":
-        # Fallback to localtunnel log
-        url_lt = _find_localtunnel_url_from_log()
-        if url_lt:
-            url = url_lt
-            tunnel_type = "localtunnel"
-            
-    if url == "NOT_FOUND":
-        warn("Could not find a running ngrok or localtunnel URL. Is the server running?")
+        warn("Could not find a running ngrok URL. Is the server running?")
         nl()
         print("  Wait 5 seconds, or run 'superbrain-server' to start the server.")
         return
@@ -1370,10 +1365,11 @@ def launch_backend_status():
     network_url = f"http://{local_ip}:5000"
     
     nl()
-    print(f"    Local URL      â†’  {CYAN}{local_url}{RESET}")
-    print(f"    Network URL    â†’  {CYAN}{network_url}{RESET}")
-    print(f"    Public URL   â†’  {CYAN}{url}{RESET}  ({tunnel_type})")
-    print(f"    API docs       â†’  {CYAN}{local_url}/docs{RESET}")
+    print(f"    Local URL      \u2192  {CYAN}{local_url}{RESET}")
+    print(f"    Network URL    \u2192  {CYAN}{network_url}{RESET}")
+    print(f"    Public URL   \u2192  {CYAN}{url}{RESET}  (localtunnel)")
+    print(f"    API docs       \u2192  {CYAN}{local_url}/docs{RESET}")
+    print(f"    Access Token   \u2192  {BOLD}{MAGENTA}{token}{RESET}")
     nl()
 
 def main():
@@ -1396,8 +1392,8 @@ def main():
     reset_mode = "--reset" in sys.argv
 
     if SETUP_DONE.exists() and not reset_mode:
-        # Already configured â€” just launch
-        print(f"  {GREEN}Setup already complete.{RESET}  Starting backend â€¦")
+        # Already configured — just launch
+        print(f"  {GREEN}Setup already complete.{RESET}  Starting backend …")
         print(f"  {DIM}Run  python start.py --reset  to redo the setup wizard.{RESET}")
         launch_backend()
         return
@@ -1405,18 +1401,18 @@ def main():
     print(f"""
   Welcome to SuperBrain!  This wizard will guide you through:
 
-    1 Â· Create Python virtual environment
-    2 Â· Install all required packages
-    3 Â· Configure AI provider keys + Instagram credentials
-    4 Â· Set up an offline AI model via Ollama  (qwen3-vl:4b)
-    5 Â· Set up offline audio transcription     (Whisper + ffmpeg)
-    6 Â· Configure remote access (localtunnel or port forwarding)
-    7 Â· Generate Access Token & initialise database
+    1 · Create Python virtual environment
+    2 · Install all required packages
+    3 · Configure AI provider keys + Instagram credentials
+    4 · Set up an offline AI model via Ollama  (qwen3-vl:4b)
+    5 · Set up offline audio transcription     (Whisper + ffmpeg)
+    6 · Configure remote access (localtunnel or port forwarding)
+    7 · Generate Access Token & initialise database
 
   Press {BOLD}Enter{RESET} to accept defaults shown in [{DIM}brackets{RESET}].
   You can re-run this wizard any time with:  {BOLD}python start.py --reset{RESET}
 """)
-    input(f"  Press {BOLD}Enter{RESET} to begin â€¦ ")
+    input(f"  Press {BOLD}Enter{RESET} to begin … ")
 
     try:
         setup_venv()
@@ -1435,9 +1431,9 @@ def main():
     SETUP_DONE.write_text("ok")
 
     nl()
-    print(f"  {GREEN}{BOLD}{'â•'*60}{RESET}")
-    print(f"  {GREEN}{BOLD}  âœ“  Setup complete!{RESET}")
-    print(f"  {GREEN}{BOLD}{'â•'*60}{RESET}")
+    print(f"  {GREEN}{BOLD}{'═'*60}{RESET}")
+    print(f"  {GREEN}{BOLD}  ✓  Setup complete!{RESET}")
+    print(f"  {GREEN}{BOLD}{'═'*60}{RESET}")
     nl()
 
     if ask_yn("Start the backend now?", default=True):
@@ -1447,4 +1443,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
