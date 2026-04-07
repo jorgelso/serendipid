@@ -663,6 +663,9 @@ class ModelRouter:
             try:
                 self._refresh_openrouter_models()
             except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                raise RateLimitError("Quota limit hit")
+            raise e
                 print(f"⚠️  OpenRouter auto-refresh error: {e}")
             time.sleep(OPENROUTER_FREE_CACHE_HOURS * 3600)
 
@@ -707,6 +710,9 @@ class ModelRouter:
             resp.raise_for_status()
             all_models = resp.json().get("data", [])
         except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                raise RateLimitError("Quota limit hit")
+            raise e
             print(f"⚠️  OpenRouter model discovery failed: {e}")
             return
 
@@ -1100,6 +1106,9 @@ class ModelRouter:
                 return result
 
             except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                raise RateLimitError("Quota limit hit")
+            raise e
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
@@ -1144,6 +1153,9 @@ class ModelRouter:
                 return result
 
             except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                raise RateLimitError("Quota limit hit")
+            raise e
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)

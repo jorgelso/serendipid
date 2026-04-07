@@ -289,7 +289,15 @@ class AnalysisResponse(BaseModel):
 @app.get("/")
 async def root():
     """API information and health check (no authentication required)"""
+    
+    backend_id = "unknown"
+    backend_id_path = get_config_path("backend_id.txt")
+    if backend_id_path.exists():
+        backend_id = backend_id_path.read_text().strip()
+    
     return {
+        "backendId": backend_id,
+
         "name": "SuperBrain Instagram Analyzer API",
         "version": "1.02",
         "status": "operational",
