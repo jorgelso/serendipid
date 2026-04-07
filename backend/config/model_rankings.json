@@ -1,11 +1,11 @@
 {
   "groq_gpt_oss_20b": {
     "key": "groq_gpt_oss_20b",
-    "avg_response_s": 2.0711580976104056,
-    "success_count": 55,
+    "avg_response_s": 2.076474257804823,
+    "success_count": 56,
     "fail_count": 1,
     "down_until": null,
-    "last_used": "2026-04-07T19:17:14.551082",
+    "last_used": "2026-04-07T20:51:01.562950",
     "last_error": null,
     "base_priority": 0.5
   },
@@ -549,6 +549,46 @@
     "last_error": null,
     "base_priority": 22
   },
+  "dyn_google_gemma-4-26b-a4b-it_free": {
+    "key": "dyn_google_gemma-4-26b-a4b-it_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 23
+  },
+  "dyn_v_google_gemma-4-26b-a4b-it_free": {
+    "key": "dyn_v_google_gemma-4-26b-a4b-it_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 23
+  },
+  "dyn_google_gemma-4-31b-it_free": {
+    "key": "dyn_google_gemma-4-31b-it_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 24
+  },
+  "dyn_v_google_gemma-4-31b-it_free": {
+    "key": "dyn_v_google_gemma-4-31b-it_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 24
+  },
   "dyn_nvidia_nemotron-3-super-120b-a12b_free": {
     "key": "dyn_nvidia_nemotron-3-super-120b-a12b_free",
     "avg_response_s": null,
@@ -557,7 +597,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 23
+    "base_priority": 25
   },
   "dyn_openrouter_free": {
     "key": "dyn_openrouter_free",
@@ -567,7 +607,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 26
   },
   "dyn_v_openrouter_free": {
     "key": "dyn_v_openrouter_free",
@@ -577,7 +617,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 26
   },
   "dyn_arcee-ai_trinity-mini_free": {
     "key": "dyn_arcee-ai_trinity-mini_free",
@@ -587,7 +627,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 28
+    "base_priority": 30
   },
   "dyn_nvidia_nemotron-nano-9b-v2_free": {
     "key": "dyn_nvidia_nemotron-nano-9b-v2_free",
@@ -597,7 +637,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 29
+    "base_priority": 31
   },
   "dyn_minimax_minimax-m2_5_free": {
     "key": "dyn_minimax_minimax-m2_5_free",
@@ -607,7 +647,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 30
+    "base_priority": 32
   },
   "dyn_qwen_qwen3-coder_free": {
     "key": "dyn_qwen_qwen3-coder_free",
@@ -617,7 +657,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 31
+    "base_priority": 33
   },
   "dyn_liquid_lfm-2_5-1_2b-thinking_free": {
     "key": "dyn_liquid_lfm-2_5-1_2b-thinking_free",
@@ -627,7 +667,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 32
+    "base_priority": 34
   },
   "dyn_liquid_lfm-2_5-1_2b-instruct_free": {
     "key": "dyn_liquid_lfm-2_5-1_2b-instruct_free",
@@ -637,7 +677,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 33
+    "base_priority": 35
   },
   "dyn_arcee-ai_trinity-large-preview_free": {
     "key": "dyn_arcee-ai_trinity-large-preview_free",
@@ -647,7 +687,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 35
+    "base_priority": 37
   },
   "dyn_meta-llama_llama-3_2-3b-instruct_free": {
     "key": "dyn_meta-llama_llama-3_2-3b-instruct_free",
@@ -657,7 +697,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 39
+    "base_priority": 41
   },
   "dyn_google_gemma-3n-e2b-it_free": {
     "key": "dyn_google_gemma-3n-e2b-it_free",
@@ -667,7 +707,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 43
+    "base_priority": 45
   },
   "dyn_google_gemma-3-4b-it_free": {
     "key": "dyn_google_gemma-3-4b-it_free",
@@ -677,7 +717,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 44
+    "base_priority": 46
   },
   "dyn_v_google_gemma-3-4b-it_free": {
     "key": "dyn_v_google_gemma-3-4b-it_free",
@@ -687,7 +727,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 44
+    "base_priority": 46
   },
   "dyn_google_gemma-3n-e4b-it_free": {
     "key": "dyn_google_gemma-3n-e4b-it_free",
@@ -697,7 +737,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 45
+    "base_priority": 47
   },
   "dyn_google_gemma-3-12b-it_free": {
     "key": "dyn_google_gemma-3-12b-it_free",
@@ -707,7 +747,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 46
+    "base_priority": 48
   },
   "dyn_v_google_gemma-3-12b-it_free": {
     "key": "dyn_v_google_gemma-3-12b-it_free",
@@ -717,6 +757,6 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 46
+    "base_priority": 48
   }
 }
