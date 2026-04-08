@@ -610,13 +610,13 @@ class ApiService {
     }
   }
 
-  async setInstagramCredentials(username: string, password: string): Promise<any> {
+  async setInstagramCredentials(username: string, password?: string, sessionid?: string): Promise<any> {
     try {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
       const response = await axios.post(
         `${baseUrl}/settings/instagram`,
-        { username, password },
+        { username, password, sessionid },
         { headers, timeout: DEFAULT_TIMEOUT }
       );
       return response.data;

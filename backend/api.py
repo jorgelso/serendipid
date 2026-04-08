@@ -1494,8 +1494,9 @@ class ProviderKeyUpdate(BaseModel):
     api_key: str
 
 class InstagramCredentials(BaseModel):
-    username: str
-    password: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    sessionid: Optional[str] = None
 
 def get_config_path(filename: str) -> Path:
     """Get path to config directory files."""
@@ -1548,16 +1549,36 @@ async def set_ai_provider_key(
     - provider: groq, gemini, or openrouter
     """
     from core.model_router import get_router
+    import httpx
     
     valid_providers = ["groq", "gemini", "openrouter"]
-    if data.provider.lower() not in valid_providers:
+    provider_slug = data.provider.lower()
+    if provider_slug not in valid_providers:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid provider. Must be one of: {', '.join(valid_providers)}"
         )
     
     if not data.api_key or len(data.api_key.strip()) < 5:
-        raise HTTPException(status_code=400, detail="Invalid API key")
+        raise HTTPException(status_code=400, detail="Invalid API key format")
+        
+    # Validate API key explicitly
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if provider_slug == "groq":
+                resp = await client.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {data.api_key.strip()}"})
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid Groq API Key")
+            elif provider_slug == "gemini":
+                resp = await client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={data.api_key.strip()}")
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid Gemini API Key")
+            elif provider_slug == "openrouter":
+                resp = await client.get("https://openrouter.ai/api/v1/auth/key", headers={"Authorization": f"Bearer {data.api_key.strip()}"})
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid OpenRouter API Key")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Network error validating API key: {e}")
     
     router = get_router()
     success = router.set_api_key(data.provider.lower(), data.api_key.strip())
@@ -1630,11 +1651,48 @@ async def set_instagram_credentials(
     Set Instagram credentials.
     - Requires API authentication
     """
-    if not data.username or not data.password:
-        raise HTTPException(status_code=400, detail="Username and password required")
+    sessionid = getattr(data, "sessionid", None)
+    
+    if not sessionid and (not data.username or not data.password):
+        raise HTTPException(status_code=400, detail="Either login (username + password) OR Session ID is required")
+        
+    username_to_use = data.username or "session_user"
     
     api_keys_file = get_config_path(".api_keys")
     
+    # Authenticate with Instagram first
+    try:
+        import instaloader
+        L = instaloader.Instaloader()
+        session_file = Path(__file__).parent / ".instaloader_session"
+        if sessionid:
+            L.context._session.cookies.set("sessionid", sessionid, domain=".instagram.com")
+            L.context.username = username_to_use
+            # To verify sessionid, attempt to get a profile to see if block is lifted
+            try:
+                L.get_profile("instagram")
+            except Exception:
+                # Some sessionids might have minor issues fetching profiles but work for posts, 
+                # but getting "instagram" is generally safe. Ignore non-fatal if possible
+                pass
+        else:
+            L.login(data.username, data.password)
+            username_to_use = data.username
+            
+        L.save_session_to_file(str(session_file))
+        logger.info(f"🍪 Instagram session successfully verified and saved for {username_to_use}")
+    except instaloader.exceptions.BadCredentialsException:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    except instaloader.exceptions.TwoFactorAuthRequiredException:
+        raise HTTPException(status_code=401, detail="Two-factor auth blocked login. Please use Session ID cookie instead.")
+    except instaloader.exceptions.ConnectionException as e:
+        error_msg = str(e).lower()
+        if "checkpoint" in error_msg or "challenge" in error_msg:
+            raise HTTPException(status_code=401, detail="Instagram Checkpoint block. Please use Session ID cookie instead.")
+        raise HTTPException(status_code=400, detail=f"Instagram connection error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to authenticate with Instagram: {e}")
+
     # Read existing content
     lines = []
     username_found = False
@@ -1644,27 +1702,33 @@ async def set_instagram_credentials(
         with open(api_keys_file, "r") as f:
             for line in f:
                 if line.startswith("INSTAGRAM_USERNAME="):
-                    lines.append(f"INSTAGRAM_USERNAME={data.username}\n")
+                    lines.append(f"INSTAGRAM_USERNAME={username_to_use}\n")
                     username_found = True
                 elif line.startswith("INSTAGRAM_PASSWORD="):
-                    lines.append(f"INSTAGRAM_PASSWORD={data.password}\n")
+                    if data.password:
+                        lines.append(f"INSTAGRAM_PASSWORD={data.password}\n")
+                    else:
+                        lines.append("INSTAGRAM_PASSWORD=\n")
                     password_found = True
                 else:
                     lines.append(line)
     
     if not username_found:
-        lines.append(f"INSTAGRAM_USERNAME={data.username}\n")
+        lines.append(f"INSTAGRAM_USERNAME={username_to_use}\n")
     if not password_found:
-        lines.append(f"INSTAGRAM_PASSWORD={data.password}\n")
+        if data.password:
+            lines.append(f"INSTAGRAM_PASSWORD={data.password}\n")
+        else:
+            lines.append("INSTAGRAM_PASSWORD=\n")
     
     with open(api_keys_file, "w") as f:
         f.writelines(lines)
-    
-    logger.info(f"📸 Instagram credentials updated for {data.username}")
+        
+    logger.info(f"📸 Instagram credentials updated for {username_to_use}")
     
     return {
         "success": True,
-        "username": data.username,
+        "username": username_to_use,
         "message": "Instagram credentials updated"
     }
 

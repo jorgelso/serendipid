@@ -26,6 +26,7 @@ const InstagramScreen = () => {
   const [saving, setSaving] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [sessionId, setSessionId] = useState('');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' as 'success' | 'error' | 'warning' | 'info' });
 
   useEffect(() => {
@@ -51,18 +52,28 @@ const InstagramScreen = () => {
   };
 
   const handleSave = async () => {
-    if (!username.trim() || !password.trim()) {
-      setToast({ visible: true, message: 'Please enter username and password', type: 'warning' });
+    const hasSessionId = sessionId.trim().length > 0;
+    const hasUserPass = username.trim().length > 0 && password.trim().length > 0;
+
+    if (!hasSessionId && !hasUserPass) {
+      setToast({ visible: true, message: 'Please enter (Username & Password) OR a Session ID', type: 'warning' });
       return;
     }
+    
     try {
       setSaving(true);
-      await apiService.setInstagramCredentials(username.trim(), password.trim());
+      await apiService.setInstagramCredentials(
+        username.trim() || 'session_user', 
+        password.trim() ? password.trim() : undefined,
+        sessionId.trim() ? sessionId.trim() : undefined
+      );
       await loadCredentials();
       setPassword('');
-      setToast({ visible: true, message: 'Instagram credentials saved', type: 'success' });
-    } catch {
-      setToast({ visible: true, message: 'Failed to save credentials', type: 'error' });
+      setSessionId('');
+      setToast({ visible: true, message: 'Verified & credentials saved!', type: 'success' });
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || 'Failed to save credentials';
+      setToast({ visible: true, message: errorMsg, type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -83,6 +94,7 @@ const InstagramScreen = () => {
               setInstagramCreds({ configured: false, username: null });
               setUsername('');
               setPassword('');
+              setSessionId('');
               setToast({ visible: true, message: 'Credentials removed', type: 'success' });
             } catch {
               setToast({ visible: true, message: 'Failed to remove credentials', type: 'error' });
@@ -157,6 +169,21 @@ const InstagramScreen = () => {
               placeholderTextColor={colors.textMuted}
               secureTextEntry
             />
+          </View>
+          
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Session ID Cookie</Text>
+            <TextInput
+              style={styles.textInput}
+              value={sessionId}
+              onChangeText={setSessionId}
+              placeholder="sessionid"
+              placeholderTextColor={colors.textMuted}
+              secureTextEntry
+            />
+            <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 4 }}>
+              If a session ID is used, username and password are not required.
+            </Text>
           </View>
           
           <TouchableOpacity

@@ -53,9 +53,10 @@ const AIProviderScreen = () => {
       await apiService.setAiProviderKey(selectedProvider, providerKey.trim());
       await loadProviders();
       setProviderKey('');
-      setToast({ visible: true, message: 'API key saved successfully', type: 'success' });
-    } catch (e) {
-      setToast({ visible: true, message: 'Failed to save API key', type: 'error' });
+      setToast({ visible: true, message: 'Verified & saved successfully!', type: 'success' });
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || 'Failed to save or verify API key';
+      setToast({ visible: true, message: errorMsg, type: 'error' });
     } finally {
       setSaving(false);
     }
