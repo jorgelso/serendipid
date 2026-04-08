@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
@@ -26,6 +27,7 @@ const AIProviderScreen = () => {
   const [saving, setSaving] = useState(false);
   const [providerKey, setProviderKey] = useState('');
   const [selectedProvider, setSelectedProvider] = useState('gemini');
+  const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' as 'success' | 'error' | 'warning' | 'info' });
 
   useEffect(() => {
@@ -63,26 +65,20 @@ const AIProviderScreen = () => {
   };
 
   const handleDelete = (provider: string) => {
-    Alert.alert(
-      'Delete API Key',
-      `Are you sure you want to remove the ${provider} API key?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await apiService.deleteAiProviderKey(provider);
-              await loadProviders();
-              setToast({ visible: true, message: 'API key removed', type: 'success' });
-            } catch {
-              setToast({ visible: true, message: 'Failed to remove API key', type: 'error' });
-            }
-          },
-        },
-      ]
-    );
+    setShowDeleteModal(provider);
+  };
+
+  const confirmDelete = async () => {
+    if (!showDeleteModal) return;
+    const provider = showDeleteModal;
+    try {
+      setShowDeleteModal(null);
+      await apiService.deleteAiProviderKey(provider);
+      await loadProviders();
+      setToast({ visible: true, message: 'API key removed', type: 'success' });
+    } catch {
+      setToast({ visible: true, message: 'Failed to remove API key', type: 'error' });
+    }
   };
 
   const providerLabels: Record<string, string> = {
@@ -233,7 +229,38 @@ const AIProviderScreen = () => {
           </Text>
         </View>
       </ScrollView>
-
+      <Modal
+        visible={!!showDeleteModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowDeleteModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModalContent}>
+            <View style={styles.deleteIconContainer}>
+              <Ionicons name="trash" size={40} color={colors.error} />
+            </View>
+            <Text style={styles.deleteTitle}>Delete API Key?</Text>
+            <Text style={styles.deleteMessage}>
+              Are you sure you want to remove the {providerLabels[showDeleteModal || '']} API key? This action cannot be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalButtonCancel}
+                onPress={() => setShowDeleteModal(null)}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButtonDelete}
+                onPress={confirmDelete}
+              >
+                <Text style={styles.modalButtonDeleteText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <CustomToast
         visible={toast.visible}
         message={toast.message}
@@ -426,6 +453,70 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+  },
+  deleteModalContent: {
+    backgroundColor: colors.background,
+    borderRadius: 24,
+    padding: 24,
+    marginHorizontal: 20,
+    alignItems: 'center',
+  },
+  deleteIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.backgroundCard,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  deleteTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  deleteMessage: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButtonCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+  },
+  modalButtonCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  modalButtonDelete: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: colors.error,
+    alignItems: 'center',
+  },
+  modalButtonDeleteText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 
