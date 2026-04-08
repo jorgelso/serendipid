@@ -61,6 +61,8 @@ services:
       - superbrain-temp:/app/temp
       # Uploads
       - superbrain-uploads:/app/static/uploads
+      # Extracted ZIP Thumbnails
+      - superbrain-thumbnails:/app/static/thumbnails
       # Logs
       - superbrain-logs:/app/logs
     
@@ -115,6 +117,8 @@ volumes:
   superbrain-temp:
     driver: local
   superbrain-uploads:
+    driver: local
+  superbrain-thumbnails:
     driver: local
   superbrain-logs:
     driver: local

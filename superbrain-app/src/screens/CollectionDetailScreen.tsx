@@ -21,6 +21,7 @@ import { Post } from '../types';
 import { colors } from '../theme/colors';
 import { collectionsService } from '../services/collections';
 import postsCache from '../services/postsCache';
+import apiService from '../services/api';
 import CustomToast from '../components/CustomToast';
 import { cancelPostWatchLaterNotification } from '../services/notificationService';
 
