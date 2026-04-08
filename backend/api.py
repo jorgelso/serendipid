@@ -570,13 +570,13 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
             logger.warning(f"⚠️  [{shortcode}] main.py stderr:\n{stderr[:1000]}")
         
         if returncode == 2:
-            # main.py detected quota exhaustion and queued item for retry.
+            # main.py detected quota exhaustion (Instagram block or AI) and queued item for retry.
             # NOTE: Do NOT remove from queue here — main.py already called
             # queue_for_retry() which set status='retry'. Removing would lose it.
-            logger.info(f"⏰ [{shortcode}] Quota exhausted — queued for automatic retry")
+            logger.info(f"⏰ [{shortcode}] Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours.")
             raise HTTPException(
                 status_code=202,
-                detail="API quota exhausted. Your request has been queued for automatic retry in 24 hours."
+                detail="Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours."
             )
         
         if returncode != 0:

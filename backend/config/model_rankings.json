@@ -1,11 +1,11 @@
 {
   "groq_gpt_oss_20b": {
     "key": "groq_gpt_oss_20b",
-    "avg_response_s": 2.076474257804823,
-    "success_count": 56,
+    "avg_response_s": 1.6824798610496439,
+    "success_count": 67,
     "fail_count": 1,
     "down_until": null,
-    "last_used": "2026-04-07T20:51:01.562950",
+    "last_used": "2026-04-08T07:38:04.817302",
     "last_error": null,
     "base_priority": 0.5
   },
@@ -323,8 +323,8 @@
     "key": "gemini_25_flash_lite_vision",
     "avg_response_s": 6.709401964075168,
     "success_count": 14,
-    "fail_count": 11,
-    "down_until": "2026-04-07T19:21:49.576562",
+    "fail_count": 14,
+    "down_until": "2026-04-08T07:42:57.074461",
     "last_used": "2026-02-24T09:45:09.831171",
     "last_error": "No module named 'google.generativeai'",
     "base_priority": 1.5
@@ -333,8 +333,8 @@
     "key": "gemini_25_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 14,
-    "down_until": "2026-04-07T19:21:49.574579",
+    "fail_count": 17,
+    "down_until": "2026-04-08T07:42:57.067497",
     "last_used": null,
     "last_error": "No module named 'google.generativeai'",
     "base_priority": 2
@@ -353,8 +353,8 @@
     "key": "gemini_3_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 13,
-    "down_until": "2026-04-07T19:21:49.575578",
+    "fail_count": 16,
+    "down_until": "2026-04-08T07:42:57.067497",
     "last_used": null,
     "last_error": "No module named 'google.generativeai'",
     "base_priority": 3
@@ -363,8 +363,8 @@
     "key": "gemini_31_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 12,
-    "down_until": "2026-04-07T19:21:49.577584",
+    "fail_count": 15,
+    "down_until": "2026-04-08T07:42:57.074461",
     "last_used": null,
     "last_error": "No module named 'google.generativeai'",
     "base_priority": 3.5
@@ -373,8 +373,8 @@
     "key": "gemini_20_flash_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 11,
-    "down_until": "2026-04-07T19:21:49.578193",
+    "fail_count": 14,
+    "down_until": "2026-04-08T07:42:57.077651",
     "last_used": null,
     "last_error": "No module named 'google.generativeai'",
     "base_priority": 4
@@ -383,8 +383,8 @@
     "key": "gemini_20_flash_lite_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 11,
-    "down_until": "2026-04-07T19:21:49.578884",
+    "fail_count": 14,
+    "down_until": "2026-04-08T07:42:57.077651",
     "last_used": null,
     "last_error": "No module named 'google.generativeai'",
     "base_priority": 4.5
@@ -393,19 +393,19 @@
     "key": "gemini_15_flash_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 11,
-    "down_until": "2026-04-07T19:21:49.579924",
+    "fail_count": 14,
+    "down_until": "2026-04-08T07:42:57.079755",
     "last_used": null,
     "last_error": "No module named 'google.generativeai'",
     "base_priority": 4.8
   },
   "groq_llama4_scout_vision": {
     "key": "groq_llama4_scout_vision",
-    "avg_response_s": 1.616974180643797,
-    "success_count": 34,
+    "avg_response_s": 1.2924692601270893,
+    "success_count": 42,
     "fail_count": 0,
     "down_until": null,
-    "last_used": "2026-04-07T19:17:07.761951",
+    "last_used": "2026-04-08T07:37:59.761209",
     "last_error": null,
     "base_priority": 5
   },
@@ -489,26 +489,6 @@
     "last_error": "No module named 'ollama'",
     "base_priority": 100
   },
-  "dyn_qwen_qwen3_6-plus_free": {
-    "key": "dyn_qwen_qwen3_6-plus_free",
-    "avg_response_s": null,
-    "success_count": 0,
-    "fail_count": 0,
-    "down_until": null,
-    "last_used": null,
-    "last_error": null,
-    "base_priority": 20
-  },
-  "dyn_v_qwen_qwen3_6-plus_free": {
-    "key": "dyn_v_qwen_qwen3_6-plus_free",
-    "avg_response_s": null,
-    "success_count": 0,
-    "fail_count": 0,
-    "down_until": null,
-    "last_used": null,
-    "last_error": null,
-    "base_priority": 20
-  },
   "dyn_google_lyria-3-pro-preview": {
     "key": "dyn_google_lyria-3-pro-preview",
     "avg_response_s": null,
@@ -517,7 +497,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 21
+    "base_priority": 20
   },
   "dyn_v_google_lyria-3-pro-preview": {
     "key": "dyn_v_google_lyria-3-pro-preview",
@@ -527,7 +507,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 21
+    "base_priority": 20
   },
   "dyn_google_lyria-3-clip-preview": {
     "key": "dyn_google_lyria-3-clip-preview",
@@ -537,7 +517,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 22
+    "base_priority": 21
   },
   "dyn_v_google_lyria-3-clip-preview": {
     "key": "dyn_v_google_lyria-3-clip-preview",
@@ -547,7 +527,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 22
+    "base_priority": 21
   },
   "dyn_google_gemma-4-26b-a4b-it_free": {
     "key": "dyn_google_gemma-4-26b-a4b-it_free",
@@ -557,7 +537,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 23
+    "base_priority": 22
   },
   "dyn_v_google_gemma-4-26b-a4b-it_free": {
     "key": "dyn_v_google_gemma-4-26b-a4b-it_free",
@@ -567,7 +547,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 23
+    "base_priority": 22
   },
   "dyn_google_gemma-4-31b-it_free": {
     "key": "dyn_google_gemma-4-31b-it_free",
@@ -577,7 +557,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 23
   },
   "dyn_v_google_gemma-4-31b-it_free": {
     "key": "dyn_v_google_gemma-4-31b-it_free",
@@ -587,7 +567,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 23
   },
   "dyn_nvidia_nemotron-3-super-120b-a12b_free": {
     "key": "dyn_nvidia_nemotron-3-super-120b-a12b_free",
@@ -597,7 +577,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 25
+    "base_priority": 24
   },
   "dyn_openrouter_free": {
     "key": "dyn_openrouter_free",
@@ -607,7 +587,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 26
+    "base_priority": 25
   },
   "dyn_v_openrouter_free": {
     "key": "dyn_v_openrouter_free",
@@ -617,7 +597,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 26
+    "base_priority": 25
   },
   "dyn_arcee-ai_trinity-mini_free": {
     "key": "dyn_arcee-ai_trinity-mini_free",
@@ -627,7 +607,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 30
+    "base_priority": 29
   },
   "dyn_nvidia_nemotron-nano-9b-v2_free": {
     "key": "dyn_nvidia_nemotron-nano-9b-v2_free",
@@ -637,7 +617,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 31
+    "base_priority": 30
   },
   "dyn_minimax_minimax-m2_5_free": {
     "key": "dyn_minimax_minimax-m2_5_free",
@@ -647,7 +627,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 32
+    "base_priority": 31
   },
   "dyn_qwen_qwen3-coder_free": {
     "key": "dyn_qwen_qwen3-coder_free",
@@ -657,7 +637,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 33
+    "base_priority": 32
   },
   "dyn_liquid_lfm-2_5-1_2b-thinking_free": {
     "key": "dyn_liquid_lfm-2_5-1_2b-thinking_free",
@@ -667,7 +647,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 34
+    "base_priority": 33
   },
   "dyn_liquid_lfm-2_5-1_2b-instruct_free": {
     "key": "dyn_liquid_lfm-2_5-1_2b-instruct_free",
@@ -677,7 +657,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 35
+    "base_priority": 34
   },
   "dyn_arcee-ai_trinity-large-preview_free": {
     "key": "dyn_arcee-ai_trinity-large-preview_free",
@@ -687,7 +667,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 37
+    "base_priority": 36
   },
   "dyn_meta-llama_llama-3_2-3b-instruct_free": {
     "key": "dyn_meta-llama_llama-3_2-3b-instruct_free",
@@ -697,7 +677,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 41
+    "base_priority": 40
   },
   "dyn_google_gemma-3n-e2b-it_free": {
     "key": "dyn_google_gemma-3n-e2b-it_free",
@@ -707,7 +687,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 45
+    "base_priority": 44
   },
   "dyn_google_gemma-3-4b-it_free": {
     "key": "dyn_google_gemma-3-4b-it_free",
@@ -717,7 +697,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 46
+    "base_priority": 45
   },
   "dyn_v_google_gemma-3-4b-it_free": {
     "key": "dyn_v_google_gemma-3-4b-it_free",
@@ -727,7 +707,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 46
+    "base_priority": 45
   },
   "dyn_google_gemma-3n-e4b-it_free": {
     "key": "dyn_google_gemma-3n-e4b-it_free",
@@ -737,7 +717,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 47
+    "base_priority": 46
   },
   "dyn_google_gemma-3-12b-it_free": {
     "key": "dyn_google_gemma-3-12b-it_free",
@@ -747,7 +727,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 48
+    "base_priority": 47
   },
   "dyn_v_google_gemma-3-12b-it_free": {
     "key": "dyn_v_google_gemma-3-12b-it_free",
@@ -757,6 +737,6 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 48
+    "base_priority": 47
   }
 }
