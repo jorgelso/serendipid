@@ -52,6 +52,10 @@ class ApiService {
     }
   }
 
+  public get currentApiUrl(): string {
+    return this.apiUrl || process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+  }
+
   async setApiToken(token: string) {
     const normalizedToken = normalizeAccessToken(token);
     if (!normalizedToken) {

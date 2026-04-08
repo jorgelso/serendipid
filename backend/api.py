@@ -132,6 +132,11 @@ _active_processes: dict = {}        # shortcode -> subprocess.Popen
 _active_processes_lock = threading.Lock()
 
 _STATIC_DIR = Path(__file__).parent / "static"
+_THUMBNAILS_DIR = _STATIC_DIR / "thumbnails"
+_THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -1270,6 +1275,7 @@ async def reset_database(
 
 @app.get("/export")
 async def export_data(
+    background_tasks: __import__('fastapi').BackgroundTasks,
     token: str = Depends(verify_token),
     limit: int = Query(default=10000, ge=1, le=50000, description="Max posts to export"),
     offset: int = Query(default=0, ge=0, description="Offset for pagination"),
@@ -1280,45 +1286,81 @@ async def export_data(
     - Requires API authentication
     - Supports pagination with limit and offset
     """
+    import tempfile
+    import os
+    import httpx
+    
     try:
         db = get_db()
         
         # Get posts with pagination using SQLite
         posts = db.get_all_posts(limit=limit, offset=offset)
+        # Convert sqlite3.Row objects to fully mutable dictionaries
+        posts_list = [dict(p) for p in posts]
         
-        # Get all collections
         collections = db.get_all_collections()
-        
-        # Get stats
         stats = db.get_stats()
         
         export_payload = {
             "version": "1.0",
             "exported_at": datetime.now().isoformat(),
-            "posts": posts,
+            "posts": posts_list,
             "collections": collections,
             "stats": stats
         }
         
         if format.lower() == "zip":
-            # Create a zip file in memory
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                # Write main export data
+            # Create a zip file on disk to avoid memory explosion
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+            zip_path = tmp.name
+            tmp.close()
+            
+            async def download_image(client, sem, post_dict):
+                url = post_dict.get('thumbnail_url') or post_dict.get('thumbnail')
+                if not url or url.startswith("/static/"):
+                    return None
+                    
+                shortcode = post_dict.get('shortcode')
+                if not shortcode: return None
+                
+                ext = "jpg"
+                if ".png" in url.lower(): ext = "png"
+                elif ".webp" in url.lower(): ext = "webp"
+                
+                path_in_zip = f"thumbnails/{shortcode}.{ext}"
+                try:
+                    async with sem:
+                        resp = await client.get(url, follow_redirects=True, timeout=12.0)
+                        if resp.status_code == 200:
+                            post_dict['thumbnail'] = f"/static/{path_in_zip}"
+                            return (path_in_zip, resp.content)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch thumbnail for {shortcode}: {e}")
+                return None
+
+            # Fetch all thumbnails concurrently in batches
+            sem = asyncio.Semaphore(15)
+            tasks = []
+            async with httpx.AsyncClient(verify=False) as client:
+                for post in export_payload["posts"]:
+                    tasks.append(download_image(client, sem, post))
+                
+                downloaded_images = await asyncio.gather(*tasks)
+
+            # Write everything to the zip sequentially to save RAM
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                # The export_payload now has updated 'thumbnail' fields pointing locally
                 zip_file.writestr("superbrain_export.json", json.dumps(export_payload, default=str))
-            
-            # Reset buffer pointer
-            zip_buffer.seek(0)
-            
-            # Return as streaming response
+                for res in downloaded_images:
+                    if res:
+                        path_in_zip, content = res
+                        zip_file.writestr(path_in_zip, content)
+                        
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"superbrain_export_{timestamp}.zip"
             
-            return StreamingResponse(
-                iter([zip_buffer.getvalue()]), 
-                media_type="application/zip", 
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
-            )
+            background_tasks.add_task(os.remove, zip_path)
+            return FileResponse(zip_path, media_type="application/zip", filename=filename)
         
         # Default JSON response
         return export_payload
@@ -1351,6 +1393,7 @@ async def import_data_file(
     Import data from a ZIP or JSON file.
     - Requires API authentication
     - mode=merge or replace
+    - Extracts thumbnails from ZIP archive if present
     """
     try:
         content = await file.read()
@@ -1370,6 +1413,17 @@ async def import_data_file(
                     
                     with z.open(target_file) as f:
                         data = json.load(f)
+                    
+                    # Extract any custom image thumbnails from /thumbnails directory to the static folder mapped statically
+                    thumbnails_dir = _STATIC_DIR / "thumbnails"
+                    thumbnails_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    for name in z.namelist():
+                        if name.startswith("thumbnails/") and not name.endswith("/"):
+                            img_filename = name.split("/")[-1]
+                            with z.open(name) as zf, open(thumbnails_dir / img_filename, "wb") as out_f:
+                                out_f.write(zf.read())
+                                
             except zipfile.BadZipFile:
                 raise HTTPException(status_code=400, detail="Invalid ZIP file")
         else:

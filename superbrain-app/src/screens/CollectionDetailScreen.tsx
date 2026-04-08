@@ -125,7 +125,12 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
 
   const getPostImageUrl = (post: Post): string => {
     if (post.thumbnail_url) return post.thumbnail_url;
-    if (post.thumbnail) return post.thumbnail;
+    if (post.thumbnail) {
+      if (post.thumbnail.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${post.thumbnail}`;
+      }
+      return post.thumbnail;
+    }
     if (post.content_type === 'youtube') {
       const ytMatch = (post.url || '').match(
         /(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/embed\/|.*\/shorts\/))([\w-]{11})/

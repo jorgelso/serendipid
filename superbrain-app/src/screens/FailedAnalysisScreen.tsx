@@ -56,7 +56,12 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
   };
 
   const getThumbnailUrl = (fp: FailedPost): string => {
-    if (fp.thumbnail_url) return fp.thumbnail_url;
+    if (fp.thumbnail_url) {
+      if (fp.thumbnail_url.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${fp.thumbnail_url}`;
+      }
+      return fp.thumbnail_url;
+    }
     if (fp.content_type === 'instagram') {
       return `https://www.instagram.com/p/${fp.shortcode}/media/?size=m`;
     }

@@ -56,7 +56,12 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
 
   const getPostImageUrl = (post: Post) => {
     if (post.thumbnail_url) return post.thumbnail_url;
-    if (post.thumbnail) return post.thumbnail;
+    if (post.thumbnail) {
+      if (post.thumbnail.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${post.thumbnail}`;
+      }
+      return post.thumbnail;
+    }
     return `https://www.instagram.com/p/${post.shortcode}/media/?size=l`;
   };
 
