@@ -13,20 +13,12 @@ import { collectionsService } from '../services/collections';
 import { Collection } from '../types';
 import { schedulePostWatchLaterNotification, sendImmediateWatchLaterNotification, sendImmediateSavedNotification } from '../services/notificationService';
 import { getCollectionIconName, getCollectionIconColor } from '../constants/icons';
+import { DEFAULT_CATEGORIES, CATEGORY_ICONS } from '../constants/categories';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PostDetail'>;
 
-const CATEGORIES = [
-  { id: 'product', name: 'Product', icon: 'cube' },
-  { id: 'places', name: 'Places', icon: 'location' },
-  { id: 'food', name: 'Food', icon: 'restaurant' },
-  { id: 'fashion', name: 'Fashion', icon: 'shirt' },
-  { id: 'fitness', name: 'Fitness', icon: 'fitness' },
-  { id: 'education', name: 'Education', icon: 'book' },
-  { id: 'entertainment', name: 'Entertainment', icon: 'film' },
-  { id: 'pets', name: 'Pets', icon: 'paw' },
-  { id: 'other', name: 'Other', icon: 'pin' },
-];
+// Filter out 'all' from categories to use for the edit dropdown
+const CATEGORIES = DEFAULT_CATEGORIES.filter(c => c.id !== 'all');
 
 const PostDetailScreen = ({ route, navigation }: Props) => {
   const { post } = route.params;
@@ -78,8 +70,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
   };
 
   const getCategoryIcon = (category: string) => {
-    const cat = CATEGORIES.find(c => c.id === category);
-    return cat ? cat.icon : 'pin';
+    return CATEGORY_ICONS[category.toLowerCase()] || CATEGORY_ICONS['other'];
   };
 
   const loadCollections = async () => {

@@ -24,17 +24,13 @@ import postsCache from '../services/postsCache';
 import apiService from '../services/api';
 import CustomToast from '../components/CustomToast';
 import { cancelPostWatchLaterNotification } from '../services/notificationService';
+import { getCollectionIconName, getCollectionIconColor } from '../constants/icons';
+import { CATEGORY_ICONS } from '../constants/categories';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CollectionDetail'>;
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
-
-const getCollectionIconName = (id: string, icon: string) => {
-  if (id === 'default_watch_later') return 'time';
-  if (icon === 'clock') return 'time';
-  return icon || 'folder';
-};
 
 const CollectionDetailScreen = ({ route, navigation }: Props) => {
   const { collection } = route.params;
@@ -147,18 +143,7 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
   };
 
   const getCategoryIcon = (category: string) => {
-    const categoryMap: { [key: string]: string } = {
-      'product': '📦',
-      'places': '📍',
-      'food': '🍔',
-      'fashion': '👗',
-      'fitness': '💪',
-      'education': '📚',
-      'entertainment': '🎬',
-      'pets': '🐾',
-      'other': '📌'
-    };
-    return categoryMap[category] || '📌';
+    return CATEGORY_ICONS[category.toLowerCase()] || CATEGORY_ICONS['other'];
   };
 
   const getInstagramImageUrl = (shortcode: string) => {
@@ -204,8 +189,8 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
           style={styles.postGradient}
         >
           {post.category ? (
-            <View style={[styles.categoryBadgeSmall, { backgroundColor: categoryColor }]}>
-              <Text style={styles.categoryBadgeTextSmall}>{getCategoryIcon(post.category)}</Text>
+            <View style={[styles.categoryBadgeSmall, { backgroundColor: categoryColor, justifyContent: 'center' }]}>
+              <Ionicons name={getCategoryIcon(post.category) as any} size={14} color="#fff" />
             </View>
           ) : null}
           <Text style={styles.postTitle} numberOfLines={2}>
