@@ -138,21 +138,12 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
     return `https://www.instagram.com/p/${post.shortcode}/media/?size=l`;
   };
 
-  const normalizeCategory = (category: string | undefined): string => {
-    if (!category) return '';
-    const mapped = category.trim().toLowerCase();
-    if (mapped === 'workout') return 'fitness';
-    if (mapped === 'recipe') return 'food';
-    return mapped;
-  };
-
   const getCategoryColor = (category: string) => {
-    const normalized = normalizeCategory(category);
-    return colors.categories[normalized as keyof typeof colors.categories] || colors.categories.other;
+    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getCategoryIcon = (category: string) => {
-    return CATEGORY_ICONS[normalizeCategory(category)] || CATEGORY_ICONS['other'];
+    return CATEGORY_ICONS[category.trim().toLowerCase()] || CATEGORY_ICONS['other'];
   };
 
   const getInstagramImageUrl = (shortcode: string) => {
@@ -197,14 +188,11 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
           colors={['transparent', 'rgba(0,0,0,0.85)']}
           style={styles.postGradient}
         >
-          {post.category ? (() => {
-            const normCat = normalizeCategory(post.category);
-            return (
-              <View style={[styles.categoryBadgeSmall, { backgroundColor: getCategoryColor(normCat), justifyContent: 'center' }]}>
-                <Ionicons name={getCategoryIcon(normCat) as any} size={14} color="#fff" />
-              </View>
-            );
-          })() : null}
+          {post.category ? (
+            <View style={[styles.categoryBadgeSmall, { backgroundColor: getCategoryColor(post.category), justifyContent: 'center' }]}>
+              <Ionicons name={getCategoryIcon(post.category) as any} size={14} color="#fff" />
+            </View>
+          ) : null}
           <Text style={styles.postTitle} numberOfLines={2}>
             {post.title || 'Untitled'}
           </Text>

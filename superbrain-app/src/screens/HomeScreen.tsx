@@ -418,48 +418,20 @@ const HomeScreen = () => {
     setToast({ visible: true, message, type });
   };
 
-  const normalizeCategory = (category: string | undefined): string => {
-    if (!category) return '';
-    const mapped = category.trim().toLowerCase();
-    if (mapped === 'workout') return 'fitness';
-    if (mapped === 'recipe') return 'food';
-    return mapped;
-  };
-
   const filteredPosts = posts.filter(post => {
     const matchesSearch = searchQuery === '' ||
       (post.title && post.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (post.summary && post.summary.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (post.tags && post.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase())));
 
-    const normalizedCategory = normalizeCategory(post.category);
-    const matchesCategory = selectedCategory === 'all' || normalizedCategory === selectedCategory;
+    const matchesCategory = selectedCategory === 'all' || post.category === selectedCategory;
 
     return matchesSearch && matchesCategory;
   });
 
   const getCategoryColor = (category: string) => {
-    const normalized = normalizeCategory(category);
-    if (!normalized) return colors.categories.other;
-    return colors.categories[normalized as keyof typeof colors.categories] || colors.categories.other;
-  };
-
-  const getCategoryIcon = (category: string) => {
-    const categoryMap: { [key: string]: string } = {
-      'product': '📦',
-      'places': '📍',
-      'recipe': '🍳',
-      'food': '🍳',
-      'software': '💻',
-      'book': '📖',
-      'fitness': '💪',
-      'film': '🎬',
-      'tv shows': '📺',
-      'event': '🎪',
-      'other': '📌',
-      'uncategorized': '❓'
-    };
-    return categoryMap[category?.trim()?.toLowerCase()] || '📌';
+    if (!category) return colors.categories.other;
+    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getPostImageUrl = (post: Post) => {
@@ -639,15 +611,12 @@ const HomeScreen = () => {
             style={styles.landscapeCardGradient}
           >
             <View style={styles.landscapeCardRow}>
-              {post.category ? (() => {
-                const normCat = normalizeCategory(post.category);
-                return (
-                  <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(normCat), flexDirection: 'row', alignItems: 'center' }]}>
-                    <Ionicons name={(CATEGORY_ICONS[normCat] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" style={{ marginRight: 4 }} />
-                    <Text style={styles.categoryBadgeText}>{normCat.toUpperCase()}</Text>
-                  </View>
-                );
-              })() : null}
+              {post.category ? (
+                <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(post.category), flexDirection: 'row', alignItems: 'center' }]}>
+                  <Ionicons name={(CATEGORY_ICONS[post.category.trim().toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" style={{ marginRight: 4 }} />
+                  <Text style={styles.categoryBadgeText}>{post.category.toUpperCase()}</Text>
+                </View>
+              ) : null}
             </View>
             <Text style={styles.landscapeCardTitle} numberOfLines={2}>
               {post.title || 'Untitled'}
@@ -717,14 +686,11 @@ const HomeScreen = () => {
           colors={['transparent', 'rgba(0,0,0,0.85)']}
           style={styles.compactCardGradient}
         >
-          {post.category ? (() => {
-            const normCat = normalizeCategory(post.category);
-            return (
-              <View style={[styles.categoryBadgeSmall, { backgroundColor: getCategoryColor(normCat) }]}>
-                <Ionicons name={(CATEGORY_ICONS[normCat] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
-              </View>
-            );
-          })() : null}
+          {post.category ? (
+            <View style={[styles.categoryBadgeSmall, { backgroundColor: getCategoryColor(post.category) }]}>
+              <Ionicons name={(CATEGORY_ICONS[post.category.trim().toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
+            </View>
+          ) : null}
           <Text style={styles.compactCardTitle} numberOfLines={2}>
             {post.title || 'Untitled'}
           </Text>
