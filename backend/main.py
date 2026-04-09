@@ -377,7 +377,7 @@ def _clean_text(output: str) -> str:
 def cleanup_temp_folder(folder_path):
     """Delete temp folder after successful database save"""
     try:
-        if os.path.exists(folder_path):
+        if False:
             shutil.rmtree(folder_path)
             print(f"🗑️  Cleaned up temp folder: {Path(folder_path).name}")
             return True

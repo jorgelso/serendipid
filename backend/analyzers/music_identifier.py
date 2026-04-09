@@ -20,6 +20,7 @@ import asyncio
 import subprocess
 import tempfile
 from pathlib import Path
+import json
 
 # Ensure backend root is on sys.path when called as a subprocess
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,7 +30,6 @@ try:
     _HAS_SHAZAM = True
 except ImportError:
     _HAS_SHAZAM = False
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Audio helpers
@@ -77,24 +77,24 @@ def _extract_segment(audio_path: str, start_sec: float,
 
 def _segment_positions(duration: float) -> list[float]:
     """Return evenly-spread start-second offsets to probe.
+    Enhanced to grab more sections of a song (often intro/outro are voiceless).
 
     Rules:
-      <= 20 s  -> [0]                              (short clip, try as-is)
-      <= 50 s  -> [0, ~50%]                        (2 positions)
-      <= 90 s  -> [0, ~33%, ~66%]                  (3 positions)
-      <= 180 s -> [0, ~25%, ~50%, ~75%]            (4 positions)
-      > 180 s  -> [0, ~20%, ~40%, ~60%, ~80%]      (5 positions)
+      <= 20 s  -> [0, 5]                             (short clip, try start & middle)
+      <= 50 s  -> [0, ~33%, ~66%]                    (3 positions)
+      <= 90 s  -> [0, ~25%, ~50%, ~75%]              (4 positions)
+      <= 180 s -> [0, ~20%, ~40%, ~60%, ~80%]        (5 positions)
+      > 180 s  -> [0, ~15%, ~30%, ~45%, ~60%, ~75%]  (6 positions)
     """
     if duration <= 20:
-        return [0.0]
+        return [0.0, min(5.0, duration * 0.4)]
     if duration <= 50:
-        return [0.0, duration * 0.50]
-    if duration <= 90:
         return [0.0, duration * 0.33, duration * 0.66]
-    if duration <= 180:
+    if duration <= 90:
         return [0.0, duration * 0.25, duration * 0.50, duration * 0.75]
-    return [0.0, duration * 0.20, duration * 0.40,
-            duration * 0.60, duration * 0.80]
+    if duration <= 180:
+        return [0.0, duration * 0.20, duration * 0.40, duration * 0.60, duration * 0.80]
+    return [0.0, duration * 0.15, duration * 0.30, duration * 0.45, duration * 0.60, duration * 0.75]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -286,7 +286,7 @@ async def identify_music(audio_path: str) -> None:
     """Identify music from *audio_path* using optimized Shazam multi-segment."""
 
     print("=" * 70)
-    print("MUSIC IDENTIFIER  (Shazam – optimized multi-segment)")
+    print("MUSIC IDENTIFIER  (Shazam – optimized multi-segment tracking)")
     print("=" * 70)
     print()
 

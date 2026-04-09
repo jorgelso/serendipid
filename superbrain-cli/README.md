@@ -63,6 +63,15 @@ GitHub Packages is separate from the npmjs package page and may not appear in th
 # Start server
 superbrain-server
 
+# Show connection QR code & running server info
+superbrain-server status
+
+# Update the backend components
+superbrain-server update
+
+# Configure Ngrok tunnel
+superbrain-server ngrok
+
 # Open interactive reset menu
 superbrain-server reset
 

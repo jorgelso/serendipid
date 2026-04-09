@@ -256,10 +256,12 @@ What this does on first run:
 Useful commands:
 
 ```bash
-superbrain-server status       # Show connection QR code & running server info
-superbrain-server reset        # Open interactive reset menu
-superbrain-server reset --all  # Force complete data wipe
-npx -y superbrain-server@latest reset
+superbrain-server               # Starts the backend engine
+superbrain-server status        # Show connection QR code & running server info
+superbrain-server update        # Update the backend components
+superbrain-server ngrok         # Configure Ngrok tunnel
+superbrain-server reset         # Open interactive reset menu
+superbrain-server reset --all   # Force complete data wipe
 ```
 
 ### Method 2: Docker Setup
