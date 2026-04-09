@@ -21,7 +21,7 @@ lxml_html_clean>=0.1.0
 htmldate>=1.9.0
 
 # ── Audio Transcription ───────────────────────────────────────────────────────
-openai-whisper>=20231117
+# Note: openai-whisper is installed gracefully via start.py to handle ARM devices. DO NOT put it here.
 
 # ── Music Identification ──────────────────────────────────────────────────────
 shazamio>=0.4.0
