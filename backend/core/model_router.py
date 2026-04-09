@@ -489,6 +489,9 @@ def _has_image_input(m: Dict) -> bool:
     return "image" in str(mods)
 
 
+class RateLimitError(Exception):
+    pass
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  MODEL ROUTER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -707,10 +710,10 @@ class ModelRouter:
             resp.raise_for_status()
             all_models = resp.json().get("data", [])
         except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
-                raise RateLimitError("Quota limit hit")
-            raise e
-            print(f"⚠️  OpenRouter model discovery failed: {e}")
+            # if "429" in str(e) or "quota" in str(e).lower():
+            #     raise RateLimitError("Quota limit hit")
+            # raise e
+            print(f"⚠️  OpenRouter free model discovery failed: {e}")
             return
 
         # Filter for free models (pricing.prompt == 0 or :free suffix)
@@ -1103,8 +1106,9 @@ class ModelRouter:
                 return result
 
             except Exception as e:
-                if "429" in str(e) or "quota" in str(e).lower():
-                    raise RateLimitError("Quota limit hit")
+                # Do not immediately abort on quota, try next model
+                # if "429" in str(e) or "quota" in str(e).lower():
+                #     raise RateLimitError("Quota limit hit")
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
@@ -1149,8 +1153,9 @@ class ModelRouter:
                 return result
 
             except Exception as e:
-                if "429" in str(e) or "quota" in str(e).lower():
-                    raise RateLimitError("Quota limit hit")
+                # Do not immediately abort on quota, try next model
+                # if "429" in str(e) or "quota" in str(e).lower():
+                #     raise RateLimitError("Quota limit hit")
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
