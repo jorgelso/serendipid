@@ -65,12 +65,21 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
     }
   };
 
+  const normalizeCategory = (category: string | undefined): string => {
+    if (!category) return '';
+    const mapped = category.trim().toLowerCase();
+    if (mapped === 'workout') return 'fitness';
+    if (mapped === 'recipe') return 'food';
+    return mapped;
+  };
+
   const getCategoryColor = (category: string) => {
-    return colors.categories[category as keyof typeof colors.categories] || colors.categories.other;
+    const normalized = normalizeCategory(category);
+    return colors.categories[normalized as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getCategoryIcon = (category: string) => {
-    return CATEGORY_ICONS[category.toLowerCase()] || CATEGORY_ICONS['other'];
+    return CATEGORY_ICONS[normalizeCategory(category)] || CATEGORY_ICONS['other'];
   };
 
   const loadCollections = async () => {
@@ -251,12 +260,15 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
           />
         </TouchableOpacity>
 
-        {post.category ? (
-          <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(post.category) }]}>
-            <Ionicons name={getCategoryIcon(post.category) as any} size={14} color="#fff" />
-            <Text style={styles.categoryBadgeText}>{post.category.toUpperCase()}</Text>
-          </View>
-        ) : null}
+        {post.category ? (() => {
+          const normCat = normalizeCategory(post.category);
+          return (
+            <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(normCat) }]}>
+              <Ionicons name={getCategoryIcon(normCat) as any} size={14} color="#fff" />
+              <Text style={styles.categoryBadgeText}>{normCat.toUpperCase()}</Text>
+            </View>
+          );
+        })() : null}
 
         {(() => {
           const ct = getContentTypeLabel(post.content_type);

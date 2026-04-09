@@ -1,11 +1,11 @@
 {
   "groq_gpt_oss_20b": {
     "key": "groq_gpt_oss_20b",
-    "avg_response_s": 1.476613248725698,
-    "success_count": 81,
+    "avg_response_s": 1.4352304218377498,
+    "success_count": 83,
     "fail_count": 6,
     "down_until": null,
-    "last_used": "2026-04-09T18:25:59.312220",
+    "last_used": "2026-04-09T20:27:23.841879",
     "last_error": null,
     "base_priority": 0.5
   },

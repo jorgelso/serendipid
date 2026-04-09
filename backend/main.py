@@ -138,7 +138,7 @@ Generate a report in this EXACT format:
 [Music/song name if found, or "No background music" or "Voiceover only"]
 
 📂 CATEGORY:
-[Choose ONE from: product, places, recipe, food, software, book, tv shows, fitness, film, event]
+[Choose ONE from: product, places, food, software, book, tv shows, fitness, film, event]
 
 Be specific, concise, and actionable. Focus on useful information."""
 
@@ -251,7 +251,7 @@ def parse_summary(summary_text):
         print(f"⚠️ Error parsing summary: {e}")
 
     # Fallback: Auto-detect category if empty or unrecognised
-    valid_categories = {'product', 'places', 'recipe', 'software', 'book',
+    valid_categories = {'product', 'places', 'software', 'book',
                         'tv shows', 'fitness', 'film', 'event', 'food', 'other'}
     if not category or category not in valid_categories:
         category = auto_detect_category(summary_text, title, summary, tags)
@@ -271,8 +271,7 @@ def auto_detect_category(summary_text, title, summary, tags):
     category_keywords = {
         'product': ['camera', 'device', 'gadget', 'tech', 'phone', 'laptop', 'review', 'unbox', 'product', 'dji', 'osmo', 'action cam'],
         'places': ['travel', 'trip', 'visit', 'destination', 'village', 'city', 'mountain', 'beach', 'hotel', 'itinerary', 'sikkim', 'location'],
-        'recipe': ['recipe', 'cooking', 'dish', 'ingredients', 'cook', 'bake'],
-        'food': ['food', 'meal', 'cuisine', 'restaurant', 'cafe', 'dining', 'eat'],
+        'food': ['food', 'meal', 'cuisine', 'restaurant', 'cafe', 'dining', 'eat', 'recipe', 'cooking', 'dish', 'ingredients', 'cook', 'bake'],
         'software': ['app', 'software', 'code', 'programming', 'developer', 'api', 'python', 'javascript'],
         'book': ['book', 'novel', 'author', 'read', 'literature', 'story', 'chapter'],
         'fitness': ['workout', 'fitness', 'exercise', 'gym', 'training', 'muscle', 'cardio', 'yoga'],

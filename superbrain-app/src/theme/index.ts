@@ -56,7 +56,6 @@ export const colors = {
   categories: {
     product: '#f59e0b',    // Amber
     places: '#3b82f6',     // Blue
-    recipe: '#ef4444',     // Red
     food: '#ef4444',       // Red (alias)
     software: '#0ea5e9',   // Sky
     book: '#b45309',       // Amber-700

@@ -462,7 +462,7 @@ const LibraryScreen = () => {
             <TextInput
               ref={createInputRef}
               style={styles.modalInput}
-              placeholder="e.g., Travel, Recipes, Inspiration"
+              placeholder="e.g., Travel, Food, Inspiration"
               placeholderTextColor={colors.textMuted}
               value={newCollectionName}
               onChangeText={setNewCollectionName}
@@ -661,7 +661,7 @@ const LibraryScreen = () => {
                 </View>
                 <View style={styles.tipTextWrap}>
                   <Text style={styles.tipTitle}>Collections</Text>
-                  <Text style={styles.tipDesc}>Organise your saves into custom collections — travel, recipes, workouts, anything you like.</Text>
+                  <Text style={styles.tipDesc}>Organise your saves into custom collections — travel, meals, fitness, anything you like.</Text>
                 </View>
               </View>
             </View>

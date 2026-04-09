@@ -310,9 +310,14 @@ const HomeScreen = () => {
       // Clear analyzing state for posts that are now done on the server
       const prevAnalyzing = postsCache.getAnalyzingPosts();
       for (const shortcode of prevAnalyzing) {
-        const serverPost = fetchedPosts.find(p => p.shortcode === shortcode);
+        const placeholderUrl = (cachedPosts || []).find(cp => cp.shortcode === shortcode)?.url;
+        const serverPost = fetchedPosts.find(p => p.shortcode === shortcode || (placeholderUrl && p.url === placeholderUrl));
         if (serverPost && !serverPost.processing) {
           await postsCache.markAnalysisComplete(shortcode);
+          // If the backend generated a different shortcode, purge the frontend's temporary placeholder
+          if (serverPost.shortcode !== shortcode) {
+            await postsCache.removePostFromCache(shortcode);
+          }
         }
       }
 
@@ -322,7 +327,7 @@ const HomeScreen = () => {
       if (fetchedPosts.length > 0) {
         // Server returned real data — merge with analyzing placeholders
         const analyzingPlaceholders = (cachedPosts || []).filter(
-          p => stillAnalyzing.includes(p.shortcode) && !fetchedPosts.find(fp => fp.shortcode === p.shortcode)
+          p => stillAnalyzing.includes(p.shortcode) && !fetchedPosts.find(fp => fp.shortcode === p.shortcode || (p.url && fp.url === p.url))
         );
 
         const mergedPosts = [
@@ -413,20 +418,30 @@ const HomeScreen = () => {
     setToast({ visible: true, message, type });
   };
 
+  const normalizeCategory = (category: string | undefined): string => {
+    if (!category) return '';
+    const mapped = category.trim().toLowerCase();
+    if (mapped === 'workout') return 'fitness';
+    if (mapped === 'recipe') return 'food';
+    return mapped;
+  };
+
   const filteredPosts = posts.filter(post => {
     const matchesSearch = searchQuery === '' ||
       (post.title && post.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (post.summary && post.summary.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (post.tags && post.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase())));
 
-    const matchesCategory = selectedCategory === 'all' || post.category === selectedCategory;
+    const normalizedCategory = normalizeCategory(post.category);
+    const matchesCategory = selectedCategory === 'all' || normalizedCategory === selectedCategory;
 
     return matchesSearch && matchesCategory;
   });
 
   const getCategoryColor = (category: string) => {
-    if (!category) return colors.categories.other;
-    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
+    const normalized = normalizeCategory(category);
+    if (!normalized) return colors.categories.other;
+    return colors.categories[normalized as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getCategoryIcon = (category: string) => {
@@ -624,11 +639,15 @@ const HomeScreen = () => {
             style={styles.landscapeCardGradient}
           >
             <View style={styles.landscapeCardRow}>
-              {post.category ? (
-                <View style={[styles.categoryBadge, { backgroundColor: categoryColor }]}>
-                  <Text style={styles.categoryBadgeText}>{post.category.toUpperCase()}</Text>
-                </View>
-              ) : null}
+              {post.category ? (() => {
+                const normCat = normalizeCategory(post.category);
+                return (
+                  <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(normCat), flexDirection: 'row', alignItems: 'center' }]}>
+                    <Ionicons name={(CATEGORY_ICONS[normCat] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" style={{ marginRight: 4 }} />
+                    <Text style={styles.categoryBadgeText}>{normCat.toUpperCase()}</Text>
+                  </View>
+                );
+              })() : null}
             </View>
             <Text style={styles.landscapeCardTitle} numberOfLines={2}>
               {post.title || 'Untitled'}
@@ -698,11 +717,14 @@ const HomeScreen = () => {
           colors={['transparent', 'rgba(0,0,0,0.85)']}
           style={styles.compactCardGradient}
         >
-          {post.category ? (
-            <View style={[styles.categoryBadgeSmall, { backgroundColor: categoryColor }]}>
-              <Ionicons name={(CATEGORY_ICONS[post.category.trim().toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
-            </View>
-          ) : null}
+          {post.category ? (() => {
+            const normCat = normalizeCategory(post.category);
+            return (
+              <View style={[styles.categoryBadgeSmall, { backgroundColor: getCategoryColor(normCat) }]}>
+                <Ionicons name={(CATEGORY_ICONS[normCat] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
+              </View>
+            );
+          })() : null}
           <Text style={styles.compactCardTitle} numberOfLines={2}>
             {post.title || 'Untitled'}
           </Text>

@@ -80,8 +80,8 @@ function _buildContent(
     return { title: '👀 You are missing something', body: `"${name}" is feeling neglected in your Watch Later.` };
   }
 
-  if (cat.includes('food') || cat.includes('recipe'))
-    return { title: '🤤 We are hungry too!', body: `That recipe for "${name}" isn't going to cook itself!` };
+  if (cat.includes('food'))
+    return { title: '🤤 We are hungry too!', body: `That food for "${name}" isn't going to cook itself!` };
   if (cat.includes('fitness') || cat.includes('workout'))
     return { title: '💪 No excuses today!', body: `Your muscles called. They want you to do "${name}".` };
 
@@ -394,8 +394,8 @@ export async function sendAnalysisCompleteNotification(post: Post): Promise<void
       title = '🧠 🌐 Page Analyzed';
       body = `"${name}" has been saved with AI summary.`;
     } else if (cat.includes('food') || cat.includes('recipe')) {
-      title = '🧠 🍳 Recipe Saved';
-      body = `"${name}" — analyzed and ready to cook!`;
+      title = '🧠 🍳 Webpage Saved';
+      body = `"${name}" — analyzed and ready to read!`;
     } else if (cat.includes('fitness') || cat.includes('workout')) {
       title = '🧠 💪 Workout Saved';
       body = `"${name}" — analyzed and ready for action!`;

@@ -58,7 +58,7 @@ any products/places/tools mentioned, and the overall purpose of the page]
 [N/A — web page]
 
 📂 CATEGORY:
-[Choose exactly ONE from: product, places, recipe, food, software, book, tv shows, fitness, film, event, other]
+[Choose exactly ONE from: product, places, food, software, book, tv shows, fitness, film, event, other]
 
 Be specific and factual. Extract real names, numbers, and details from the content."""
 

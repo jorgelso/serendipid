@@ -45,7 +45,7 @@ identifiable background music, write "No background music". If it's voiceover
 only, write "Voiceover only".]
 
 📂 CATEGORY:
-[Choose exactly ONE from: product, places, recipe, food, software, book, tv shows, fitness, film, event, other]
+[Choose exactly ONE from: product, places, food, software, book, tv shows, fitness, film, event, other]
 
 Be specific, accurate, and extractive — pull out real names, numbers, and facts from the video."""
 
