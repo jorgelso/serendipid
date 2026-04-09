@@ -231,7 +231,14 @@ def queue_worker():
                             _active_processes[shortcode] = process
 
                         # Wait for completion
-                        process.wait()
+                        try:
+                            process.wait(timeout=600)
+                        except subprocess.TimeoutExpired:
+                            logger.error(f"❌ [{shortcode}] Process timed out after 10 minutes. Killing...")
+                            process.kill()
+                            process.wait()
+                            db.remove_from_queue(shortcode)
+                            continue
 
                         with _active_processes_lock:
                             _active_processes.pop(shortcode, None)
@@ -568,7 +575,26 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
                 _active_processes.pop(shortcode, None)
             return proc.returncode, ''.join(lines), proc.stderr.read()
 
-        returncode, stdout, stderr = await asyncio.to_thread(_run_subprocess)
+        try:
+            returncode, stdout, stderr = await asyncio.wait_for(
+                asyncio.to_thread(_run_subprocess),
+                timeout=600
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"❌ [{shortcode}] Analysis reached 10-minute timeout. Forcing termination.")
+            with _active_processes_lock:
+                proc = _active_processes.pop(shortcode, None)
+            if proc:
+                try:
+                    proc.kill()
+                    proc.wait()
+                except Exception:
+                    pass
+            db.remove_from_queue(shortcode)
+            raise HTTPException(
+                status_code=504,
+                detail="Analysis timed out. The process took longer than the 10-minute allowed maximum."
+            )
         
         if stderr.strip():
             # Log stderr from main.py to help diagnose issues
@@ -1317,7 +1343,18 @@ async def export_data(
             
             async def download_image(client, sem, post_dict):
                 url = post_dict.get('thumbnail_url') or post_dict.get('thumbnail')
-                if not url or url.startswith("/static/"):
+                if not url:
+                    return None
+                    
+                if url.startswith("/static/"):
+                    local_path = url.replace("/static/", "", 1)
+                    full_path = _STATIC_DIR / local_path
+                    try:
+                        if full_path.exists():
+                            with open(full_path, "rb") as f:
+                                return (local_path, f.read())
+                    except Exception as e:
+                        logger.error(f"Failed bundling local image {url}: {e}")
                     return None
                     
                 shortcode = post_dict.get('shortcode')

@@ -58,20 +58,25 @@ def _extract_segment(audio_path: str, start_sec: float,
     try:
         fd, seg_path = tempfile.mkstemp(suffix=".mp3")
         os.close(fd)
-        subprocess.run(
+        proc = subprocess.run(
             ["ffmpeg", "-y",
              "-ss", str(int(start_sec)),
              "-t",  str(int(duration)),
              "-i",  audio_path,
              "-acodec", "libmp3lame", "-q:a", "3",
              seg_path],
-            capture_output=True, timeout=30,
+            capture_output=True, text=True, timeout=60,
         )
+        
         if os.path.getsize(seg_path) > 1024:
             return seg_path
+        else:
+            print(f"(ffmpeg extracted <1024 bytes! stderr: {proc.stderr[:200]})")
+            
         os.remove(seg_path)
         return None
-    except Exception:
+    except Exception as e:
+        print(f"(ffmpeg failed: {e})")
         return None
 
 
@@ -103,11 +108,13 @@ def _segment_positions(duration: float) -> list[float]:
 
 async def _shazam_recognize_file(shazam, path: str) -> dict | None:
     try:
-        result = await shazam.recognize(path)
+        result = await asyncio.wait_for(shazam.recognize(path), timeout=25.0)
         if result and "track" in result:
             return result
-    except Exception:
-        pass
+    except asyncio.TimeoutError:
+        print("(shazam request timeout)")
+    except Exception as e:
+        print(f"(shazam error: {e})")
     return None
 
 
