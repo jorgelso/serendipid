@@ -108,12 +108,13 @@ def _segment_positions(duration: float) -> list[float]:
 
 async def _shazam_recognize_file(shazam, path: str) -> dict | None:
     try:
-        # t2.micro instances easily take 30+ seconds to generate audio fingerprints
-        result = await asyncio.wait_for(shazam.recognize(path), timeout=60.0)
+        # t2.micro intances do heavy FFT math in python, which can take ~1.5 seconds per 1 second of audio.
+        # A 20s slice takes ~30-40s on standard micro instance caps.
+        result = await asyncio.wait_for(shazam.recognize(path), timeout=120.0)
         if result and "track" in result:
             return result
     except asyncio.TimeoutError:
-        print("(shazam request timeout)")
+        print("(shazam request timeout 120s)")
     except Exception as e:
         print(f"(shazam error: {e})")
     return None
@@ -140,7 +141,7 @@ async def _shazam_multi_segment(audio_path: str) -> dict | None:
         label = f"@{int(start)}s" if start > 0 else "start"
         print(f"   [Shazam] {i}/{total} {label}...", end=" ", flush=True)
 
-        if start == 0:
+        if False:  # Prevent using full file which causes 100% CPU lock on EC2 t2.micro
             # Try the original file first (no re-encoding overhead)
             result = await _shazam_recognize_file(shazam, audio_path)
         else:

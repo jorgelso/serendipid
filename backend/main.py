@@ -83,9 +83,12 @@ def generate_final_summary(results, instagram_url):
         music_info = "MUSIC:\n"
         for item in results['music_identification']:
             output = item['output']
-            if '🎵 Song:' in output:
-                song = output.split('🎵 Song:')[1].split('\n')[0].strip()
-                artist = output.split('👤 Artist:')[1].split('\n')[0].strip() if '👤 Artist:' in output else 'Unknown'
+            if 'Song:' in output:
+                song_line = [line for line in output.split('\n') if 'Song:' in line][0]
+                artist_line = [line for line in output.split('\n') if 'Artist:' in line]
+                
+                song = song_line.split('Song:')[1].strip()
+                artist = artist_line[0].split('Artist:')[1].strip() if artist_line else 'Unknown'
                 music_info += f"- {song} by {artist}\n"
             elif 'No match found' in output:
                 music_info += "- No music identified (likely voiceover/no background music)\n"
@@ -230,6 +233,12 @@ def parse_summary(summary_text):
                 raw_tags = _tm.group(1).strip()
         if raw_tags:
             tags = [t.strip() for t in re.split(r'[\s,]+', raw_tags) if t.strip()]
+
+        music = _parse_field(summary_text, "🎵", "MUSIC")
+        if not music:
+            _mm = re.search(r'(?:^|\n)\s*\*{0,2}MUSIC\*{0,2}:?\s*([^\n]+)', summary_text, re.IGNORECASE)
+            if _mm:
+                music = _mm.group(1).strip()
 
         # Category: grab first word/phrase that matches a known category
         raw_cat = _parse_field(summary_text, "📂", "CATEGORY").lower()
