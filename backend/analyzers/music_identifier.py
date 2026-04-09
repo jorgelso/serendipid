@@ -108,7 +108,8 @@ def _segment_positions(duration: float) -> list[float]:
 
 async def _shazam_recognize_file(shazam, path: str) -> dict | None:
     try:
-        result = await asyncio.wait_for(shazam.recognize(path), timeout=25.0)
+        # t2.micro instances easily take 30+ seconds to generate audio fingerprints
+        result = await asyncio.wait_for(shazam.recognize(path), timeout=60.0)
         if result and "track" in result:
             return result
     except asyncio.TimeoutError:

@@ -1346,6 +1346,9 @@ async def export_data(
                 if not url:
                     return None
                     
+                shortcode = post_dict.get('shortcode')
+                if not shortcode: return None
+
                 if url.startswith("/static/"):
                     local_path = url.replace("/static/", "", 1)
                     full_path = _STATIC_DIR / local_path
@@ -1356,10 +1359,24 @@ async def export_data(
                     except Exception as e:
                         logger.error(f"Failed bundling local image {url}: {e}")
                     return None
-                    
-                shortcode = post_dict.get('shortcode')
-                if not shortcode: return None
-                
+
+                # Handle base64 encoded data URIs commonly saved by main.py
+                if url.startswith("data:image/"):
+                    try:
+                        import base64
+                        header, encoded = url.split(',', 1)
+                        ext = "jpg"
+                        if "png" in header.lower(): ext = "png"
+                        elif "webp" in header.lower(): ext = "webp"
+                        
+                        img_data = base64.b64decode(encoded)
+                        path_in_zip = f"thumbnails/{shortcode}.{ext}"
+                        post_dict['thumbnail'] = f"/static/{path_in_zip}"
+                        return (path_in_zip, img_data)
+                    except Exception as e:
+                        logger.error(f"Failed decoding base64 image for {shortcode}: {e}")
+                        return None
+                        
                 ext = "jpg"
                 if ".png" in url.lower(): ext = "png"
                 elif ".webp" in url.lower(): ext = "webp"
