@@ -826,6 +826,30 @@ def main():
     # Extract structured data from summary for database
     title, summary_text, tags, music, category = parse_summary(final_summary)
     
+    # OVERRIDE LLM MUSIC WITH DIRECT SHAZAM OUTPUT TO PRESERVE LINKS
+    if results.get('music_identification'):
+        for item in results['music_identification']:
+            out = item['output']
+            if 'Song:' in out:
+                song = [l.split('Song:')[1].strip() for l in out.split('\n') if 'Song:' in l][0]
+                artist_line = [l.split('Artist:')[1].strip() for l in out.split('\n') if 'Artist:' in l]
+                artist = artist_line[0] if artist_line else 'Unknown'
+                link = ""
+                spot_line = [l.split('Spotify:')[1].strip() for l in out.split('\n') if 'Spotify:' in l]
+                apple_line = [l.split('Apple Music:')[1].strip() for l in out.split('\n') if 'Apple Music:' in l]
+                if spot_line:
+                    link = spot_line[0]
+                elif apple_line:
+                    link = apple_line[0]
+                music = f"{song} by {artist}"
+                if link:
+                    music += f" | {link}"
+                break
+            elif 'No match found' in out:
+                music = "No music identified"
+                break
+
+    
     # Get additional metadata from info.txt if available
     username = ""
     likes = 0

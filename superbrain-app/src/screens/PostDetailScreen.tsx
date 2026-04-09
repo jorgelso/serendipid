@@ -298,10 +298,23 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
         {post.content_type !== 'webpage' && post.music && post.music !== 'No music identified' && post.music !== '' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Music</Text>
-            <View style={styles.musicCard}>
-              <Ionicons name="musical-notes" size={24} color={colors.primary} />
-              <Text style={styles.musicText}>{post.music}</Text>
-            </View>
+            {post.music.includes(' | ') ? (
+              <TouchableOpacity 
+                style={styles.musicCardLink} 
+                onPress={() => Linking.openURL(post.music.split(' | ')[1].trim())}
+              >
+                <View style={styles.musicCardContent}>
+                  <Ionicons name="musical-notes" size={24} color={colors.primary} />
+                  <Text style={styles.musicTextLink}>{post.music.split(' | ')[0]}</Text>
+                </View>
+                <Ionicons name="open-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.musicCard}>
+                <Ionicons name="musical-notes" size={24} color={colors.primary} />
+                <Text style={styles.musicText}>{post.music}</Text>
+              </View>
+            )}
           </View>
         ) : null}
 
@@ -693,6 +706,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     gap: 12,
+  },
+  musicCardLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.backgroundCard,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primaryGlow || 'rgba(99, 102, 241, 0.3)',
+  },
+  musicCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  musicTextLink: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.primaryLight || colors.primary,
+    fontWeight: '500',
   },
   musicText: {
     flex: 1,
