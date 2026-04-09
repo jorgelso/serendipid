@@ -298,21 +298,21 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
         {post.content_type !== 'webpage' && post.music && post.music !== 'No music identified' && post.music !== '' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Music</Text>
-            {post.music.includes(' | ') ? (
+            {post.music.includes('|') ? (
               <TouchableOpacity 
                 style={styles.musicCardLink} 
-                onPress={() => Linking.openURL(post.music.split(' | ')[1].trim())}
+                onPress={() => Linking.openURL(post.music.split('|')[1].trim())}
               >
                 <View style={styles.musicCardContent}>
                   <Ionicons name="musical-notes" size={24} color={colors.primary} />
-                  <Text style={styles.musicTextLink}>{post.music.split(' | ')[0]}</Text>
+                  <Text style={styles.musicTextLink} numberOfLines={1}>{post.music.split('|')[0].trim()}</Text>
                 </View>
                 <Ionicons name="open-outline" size={20} color={colors.primary} />
               </TouchableOpacity>
             ) : (
               <View style={styles.musicCard}>
                 <Ionicons name="musical-notes" size={24} color={colors.primary} />
-                <Text style={styles.musicText}>{post.music}</Text>
+                <Text style={styles.musicText}>{post.music.trim()}</Text>
               </View>
             )}
           </View>
