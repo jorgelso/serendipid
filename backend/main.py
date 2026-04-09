@@ -138,7 +138,7 @@ Generate a report in this EXACT format:
 [Music/song name if found, or "No background music" or "Voiceover only"]
 
 📂 CATEGORY:
-[Choose ONE from: product, places, recipe, software, book, tv shows, workout, film, event]
+[Choose ONE from: product, places, recipe, food, software, book, tv shows, fitness, film, event]
 
 Be specific, concise, and actionable. Focus on useful information."""
 
@@ -252,7 +252,7 @@ def parse_summary(summary_text):
 
     # Fallback: Auto-detect category if empty or unrecognised
     valid_categories = {'product', 'places', 'recipe', 'software', 'book',
-                        'tv shows', 'workout', 'film', 'event', 'other'}
+                        'tv shows', 'fitness', 'film', 'event', 'food', 'other'}
     if not category or category not in valid_categories:
         category = auto_detect_category(summary_text, title, summary, tags)
 
@@ -271,10 +271,11 @@ def auto_detect_category(summary_text, title, summary, tags):
     category_keywords = {
         'product': ['camera', 'device', 'gadget', 'tech', 'phone', 'laptop', 'review', 'unbox', 'product', 'dji', 'osmo', 'action cam'],
         'places': ['travel', 'trip', 'visit', 'destination', 'village', 'city', 'mountain', 'beach', 'hotel', 'itinerary', 'sikkim', 'location'],
-        'recipe': ['recipe', 'cooking', 'food', 'dish', 'ingredients', 'cook', 'bake', 'meal', 'cuisine'],
+        'recipe': ['recipe', 'cooking', 'dish', 'ingredients', 'cook', 'bake'],
+        'food': ['food', 'meal', 'cuisine', 'restaurant', 'cafe', 'dining', 'eat'],
         'software': ['app', 'software', 'code', 'programming', 'developer', 'api', 'python', 'javascript'],
         'book': ['book', 'novel', 'author', 'read', 'literature', 'story', 'chapter'],
-        'workout': ['workout', 'fitness', 'exercise', 'gym', 'training', 'muscle', 'cardio', 'yoga'],
+        'fitness': ['workout', 'fitness', 'exercise', 'gym', 'training', 'muscle', 'cardio', 'yoga'],
         'film': ['movie', 'film', 'cinema', 'actor', 'actress', 'director', 'trailer', 'premiere'],
         'tv shows': ['series', 'episode', 'season', 'show', 'tv show', 'streaming', 'netflix'],
         'event': ['event', 'concert', 'festival', 'conference', 'meetup', 'workshop', 'seminar']

@@ -216,7 +216,7 @@ const HomeScreen = () => {
           mergedById.set(id, {
             id,
             name: existing?.name || c.name,
-            icon: existing?.icon || CATEGORY_ICONS[c.name.toLowerCase()] || 'pricetag-outline',
+            icon: existing?.icon || CATEGORY_ICONS[c.name.trim().toLowerCase()] || 'pricetag-outline',
             count: c.count,
           });
         }
@@ -269,8 +269,9 @@ const HomeScreen = () => {
       if (failedList.length > 0) {
         for (const fp of failedList) {
           if (postsCache.isAnalyzing(fp.shortcode)) {
-            postsCache.markAnalysisComplete(fp.shortcode);
-          }
+              postsCache.markAnalysisComplete(fp.shortcode);
+            }
+            await postsCache.removePostFromCache(fp.shortcode);
         }
       }
 
@@ -424,7 +425,8 @@ const HomeScreen = () => {
   });
 
   const getCategoryColor = (category: string) => {
-    return colors.categories[category as keyof typeof colors.categories] || colors.categories.other;
+    if (!category) return colors.categories.other;
+    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getCategoryIcon = (category: string) => {
@@ -435,7 +437,6 @@ const HomeScreen = () => {
       'food': '🍳',
       'software': '💻',
       'book': '📖',
-      'workout': '💪',
       'fitness': '💪',
       'film': '🎬',
       'tv shows': '📺',
@@ -443,7 +444,7 @@ const HomeScreen = () => {
       'other': '📌',
       'uncategorized': '❓'
     };
-    return categoryMap[category?.toLowerCase()] || '📌';
+    return categoryMap[category?.trim()?.toLowerCase()] || '📌';
   };
 
   const getPostImageUrl = (post: Post) => {
@@ -699,7 +700,7 @@ const HomeScreen = () => {
         >
           {post.category ? (
             <View style={[styles.categoryBadgeSmall, { backgroundColor: categoryColor }]}>
-              <Ionicons name={(CATEGORY_ICONS[post.category.toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
+              <Ionicons name={(CATEGORY_ICONS[post.category.trim().toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
             </View>
           ) : null}
           <Text style={styles.compactCardTitle} numberOfLines={2}>

@@ -324,6 +324,7 @@ class PostsCacheService {
       const entry: FailedPost = { shortcode, url, title: title || url, thumbnail_url, content_type, failedAt: new Date().toISOString() };
       this.failedPostsCache = [entry, ...existing.filter(p => p.shortcode !== shortcode)];
       await AsyncStorage.setItem(FAILED_POSTS_KEY, JSON.stringify(this.failedPostsCache));
+      await this.removePostFromCache(shortcode);
     } catch (error) {
       console.error('Error marking post as failed:', error);
     }

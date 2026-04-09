@@ -58,7 +58,7 @@ any products/places/tools mentioned, and the overall purpose of the page]
 [N/A — web page]
 
 📂 CATEGORY:
-[Choose exactly ONE from: product, places, recipe, software, book, tv shows, workout, film, event, other]
+[Choose exactly ONE from: product, places, recipe, food, software, book, tv shows, fitness, film, event, other]
 
 Be specific and factual. Extract real names, numbers, and details from the content."""
 
@@ -287,8 +287,9 @@ def _fetch_reddit(url: str, timeout: int) -> tuple[str, str, str] | None:
 
 # Proxies tried left-to-right; {url} is replaced with the full article URL.
 _MEDIUM_PROXIES = [
-    "https://scribe.rip/{url}",       # scribe mirrors the article cleanly
-    "https://freedium.cfd/{url}",     # alternative (sometimes down)
+    "https://readmedium.com/en/{url}",  # readmedium works
+    "https://scribe.rip/{url}",         # scribe mirrors the article cleanly
+    "https://freedium.cfd/{url}",       # alternative (sometimes down)
 ]
 
 
@@ -359,26 +360,25 @@ def _parse_proxy_page(html: str, orig_url: str) -> tuple[str, str, str]:
     return title, "\n".join(lines), thumbnail, proxy_author, proxy_date
 
 
-def _fetch_medium(url: str, timeout: int) -> tuple[str, str, str] | None:
-    """
-    Try each Medium proxy in order; return first successful result.
-    """
+def _fetch_medium(url: str, timeout: int) -> tuple[str, str, str, str, str] | None:
+    # Use r.jina.ai to cleanly extract Medium articles (bypasses Cloudflare).
     import requests
-
-    for proxy_tpl in _MEDIUM_PROXIES:
-        proxy_url = proxy_tpl.format(url=url)
-        try:
-            print(f"    [medium] Trying {proxy_url[:55]}...")
-            r = requests.get(proxy_url, headers=_HEADERS,
-                             timeout=timeout, allow_redirects=True)
-            r.raise_for_status()
-            title, text, thumbnail, auth, pd = _parse_proxy_page(r.text, url)
-            if len(text) > 200:
-                return title, text, thumbnail, auth, pd
-            print(f"    [medium] {proxy_url[:40]} returned too little text")
-        except Exception as e:
-            print(f"    [medium] {proxy_url[:40]} failed: {e}")
-
+    try:
+        print(f"    [medium] Fetching via r.jina.ai...")
+        jina_url = f"https://r.jina.ai/{url}"
+        r = requests.get(jina_url, headers={"Accept": "application/json"}, timeout=timeout)
+        r.raise_for_status()
+        data = r.json().get("data", {})
+        title = data.get("title", "")
+        text = data.get("content", "")
+        author = data.get("author", "")
+        image = data.get("image", "")
+        if text and len(text) > 200:
+            return title, text, image, author, ""
+        print("    [medium] r.jina.ai returned too little text")
+    except Exception as e:
+        print(f"    [medium] r.jina.ai failed: {e}")
+    
     return None
 
 
