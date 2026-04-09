@@ -410,6 +410,12 @@ OLLAMA_MODEL = "qwen3-vl:4b"   # vision-language model, fits ~6 GB VRAM / ~8 GB 
 def setup_ollama():
     h1("Step 4 of 7 — Offline AI Model (Ollama)")
 
+    machine = platform.machine().lower()
+    is_arm = any(arch in machine for arch in ["arm", "aarch64"])
+    if is_arm:
+        info(f"ARM device detected ({machine}) — skipping Ollama local installation (heavy resource/unsupported).")
+        return
+
     keys = _load_saved_api_keys()
     has_cloud_key = any(keys.get(k) for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY"))
 
@@ -546,6 +552,12 @@ WHISPER_MODELS = {
 
 def setup_whisper():
     h1("Step 5 of 7 — Offline Audio Transcription (Whisper)")
+
+    machine = platform.machine().lower()
+    is_arm = any(arch in machine for arch in ["arm", "aarch64"])
+    if is_arm:
+        info(f"ARM device detected ({machine}) — skipping local Whisper installation to prevent wheel build failures.")
+        return
 
     keys = _load_saved_api_keys()
     has_groq_key = bool(keys.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY"))
