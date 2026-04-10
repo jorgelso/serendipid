@@ -19,12 +19,6 @@ npm install -g superbrain-server
 superbrain-server
 ```
 
-### Beta channel
-
-```bash
-npx -y superbrain-server@beta
-```
-
 ### GitHub Packages (auth + install)
 
 Note: This is only needed for GitHub Packages. It is not required for npmjs (`superbrain-server`) installs.
@@ -35,8 +29,6 @@ Use a GitHub token with `read:packages`, then run:
 npm config set @sidinsearch:registry https://npm.pkg.github.com
 npm config set //npm.pkg.github.com/:_authToken YOUR_GITHUB_TOKEN
 npx -y @sidinsearch/superbrain-server@latest
-# beta channel
-npx -y @sidinsearch/superbrain-server@beta
 ```
 
 GitHub Packages docs: https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry
