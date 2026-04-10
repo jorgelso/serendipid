@@ -249,6 +249,17 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         }).catch(() => {
           setPost(prev => prev ? { ...prev, title: defaultTitle } : null);
         });
+      } else if (urlType === 'webpage') {
+        fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/im);
+            const fetchedTitle = titleMatch ? titleMatch[1].trim() : defaultTitle;
+            setPost(prev => prev ? { ...prev, title: fetchedTitle } : null);
+          })
+          .catch(() => {
+            setPost(prev => prev ? { ...prev, title: defaultTitle } : null);
+          });
       } else {
         setPost(prev => prev ? { ...prev, title: defaultTitle } : null);
       }
@@ -514,14 +525,24 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         {/* Post Preview */}
         {post && (
           <View style={styles.postPreview}>
-            <Image 
-              source={{ uri: post.thumbnail_url }} 
-              style={styles.thumbnail}
-              resizeMode="cover"
-            />
+            {post.content_type === 'webpage' ? (
+              <View style={[styles.thumbnail, { backgroundColor: colors.backgroundSecondary, justifyContent: 'center', alignItems: 'center' }]}>
+                {post.thumbnail_url ? (
+                  <Image source={{ uri: post.thumbnail_url }} style={{ width: 36, height: 36, borderRadius: 4 }} resizeMode="contain" />
+                ) : (
+                  <Ionicons name="document-text-outline" size={32} color={colors.textSecondary} />
+                )}
+              </View>
+            ) : (
+              <Image 
+                source={{ uri: post.thumbnail_url }} 
+                style={styles.thumbnail}
+                resizeMode="cover"
+              />
+            )}
             <View style={styles.postInfo}>
               <Text style={styles.postUrl} numberOfLines={1}>{url}</Text>
-              <Text style={styles.postTitle}>{post.title || 'Instagram Post'}</Text>
+              <Text style={styles.postTitle} numberOfLines={2}>{post.title || 'Website'}</Text>
             </View>
           </View>
         )}
