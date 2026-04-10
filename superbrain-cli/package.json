@@ -17,9 +17,11 @@
   "homepage": "https://github.com/sidinsearch/superbrain#readme",
   "author": "sidinsearch",
   "license": "MIT",
-  "dependencies": {},
   "files": [
     "bin/",
     "payload/"
-  ]
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
 }
