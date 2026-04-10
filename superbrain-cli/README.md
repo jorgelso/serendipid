@@ -1,26 +1,10 @@
-# superbrain-server
-
-One-command installer and launcher for the SuperBrain backend.
-
-Run the backend on any machine without cloning the repository.
-
-## Install and Run
-
-### Recommended (no global install)
-
-```bash
-npx -y superbrain-server@latest
-```
-
-### Global install (optional)
-
-```bash
+﻿
+\\\ash
 npm install -g superbrain-server
 superbrain-server
-```
+\\\
 
 ### GitHub Packages (auth + install)
-
 Note: This is only needed for GitHub Packages. It is not required for npmjs (`superbrain-server`) installs.
 
 Use a GitHub token with `read:packages`, then run:
