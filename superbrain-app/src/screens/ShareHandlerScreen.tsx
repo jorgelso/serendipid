@@ -42,10 +42,17 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
 
   useEffect(() => {
     getSharedUrl();
-  }, []);
+  }, [route.params?.url]);
 
   const getSharedUrl = async () => {
     try {
+      // Reset state for new shares
+      setProcessing(true);
+      setPost(null);
+      setError(null);
+      setIsSaving(false);
+      setShowCollections(false);
+
       // Try to get URL from route params first
       if (route.params?.url) {
         const decodedUrl = decodeURIComponent(route.params.url);
