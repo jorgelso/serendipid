@@ -526,13 +526,17 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         {post && (
           <View style={styles.postPreview}>
             {post.content_type === 'webpage' ? (
-              <View style={[styles.thumbnail, { backgroundColor: colors.backgroundSecondary, justifyContent: 'center', alignItems: 'center' }]}>
-                {post.thumbnail_url ? (
-                  <Image source={{ uri: post.thumbnail_url }} style={{ width: 36, height: 36, borderRadius: 4 }} resizeMode="contain" />
-                ) : (
+              post.thumbnail_url ? (
+                <Image 
+                  source={{ uri: post.thumbnail_url }} 
+                  style={[styles.thumbnail, { backgroundColor: colors.backgroundSecondary }]}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.thumbnail, { backgroundColor: colors.backgroundSecondary, justifyContent: 'center', alignItems: 'center' }]}>
                   <Ionicons name="document-text-outline" size={32} color={colors.textSecondary} />
-                )}
-              </View>
+                </View>
+              )
             ) : (
               <Image 
                 source={{ uri: post.thumbnail_url }} 
