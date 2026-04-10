@@ -60,7 +60,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
   const getContentTypeLabel = (type?: string) => {
     switch (type) {
       case 'youtube':  return { icon: 'logo-youtube', label: 'YouTube' };
-      case 'webpage':  return { icon: 'globe-outline', label: 'Web Page' };
+      case 'webpage':  return { icon: 'globe-outline', label: 'Website' };
       default:         return { icon: 'logo-instagram', label: 'Instagram' };
     }
   };
@@ -331,7 +331,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
         <TouchableOpacity style={styles.linkButton} onPress={handleOpenInstagram}>
           <Text style={styles.linkButtonText}>
             {post.content_type === 'youtube' ? 'Open in YouTube' :
-             post.content_type === 'webpage' ? 'Open Web Page' :
+             post.content_type === 'webpage' ? 'Open Website' :
              'Open in Instagram'}
           </Text>
         </TouchableOpacity>

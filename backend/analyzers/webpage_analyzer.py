@@ -369,12 +369,18 @@ def _fetch_medium(url: str, timeout: int) -> tuple[str, str, str, str, str] | No
         r = requests.get(jina_url, headers={"Accept": "application/json"}, timeout=timeout)
         r.raise_for_status()
         data = r.json().get("data", {})
-        title = data.get("title", "")
+        metadata = data.get("metadata", {})
+        title = data.get("title", "") or metadata.get("title", "")
         text = data.get("content", "")
-        author = data.get("author", "")
-        image = data.get("image", "")
+        author = metadata.get("author", "") or metadata.get("article:author", "") or data.get("author", "")
+        image = metadata.get("og:image", "") or metadata.get("twitter:image:src", "")
+        post_date = metadata.get("article:published_time", "")
+        if post_date:
+            post_date = post_date[:10]  # Just YYYY-MM-DD
+        if not image:
+            image = _get_favicon_url(url)
         if text and len(text) > 200:
-            return title, text, image, author, ""
+            return title, text, image, author, post_date
         print("    [medium] r.jina.ai returned too little text")
     except Exception as e:
         print(f"    [medium] r.jina.ai failed: {e}")

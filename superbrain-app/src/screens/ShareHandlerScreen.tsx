@@ -142,12 +142,20 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
     return `WP_${h.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0')}`;
   };
 
-  const buildThumbnailUrl = (type: string, shortcode: string, ytId: string | null): string => {
+  const buildThumbnailUrl = (type: string, shortcode: string, ytId: string | null, sourceUrl: string): string => {
     if (type === 'youtube' && ytId)
       return `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
     if (type === 'instagram')
       return `https://www.instagram.com/p/${shortcode}/media/?size=m`;
-    return ''; // webpage: no preview thumbnail
+    if (type === 'webpage' && sourceUrl) {
+      try {
+        const origin = new URL(sourceUrl).origin;
+        return `https://www.google.com/s2/favicons?sz=128&domain_url=${origin}`;
+      } catch (e) {
+        return '';
+      }
+    }
+    return '';
   };
 
   // ── Main URL handler ──────────────────────────────────────────────────────
@@ -208,10 +216,10 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         return;
       }
 
-      const thumbnailUrl = buildThumbnailUrl(urlType, shortcode, ytId);
+      const thumbnailUrl = buildThumbnailUrl(urlType, shortcode, ytId, url);
       const defaultTitle =
         urlType === 'youtube' ? 'YouTube Video' :
-        urlType === 'webpage' ? 'Web Page' :
+        urlType === 'webpage' ? 'Website' :
         'Instagram Post';
 
       const tempPost: Post = {
