@@ -349,7 +349,7 @@ SuperBrain backend launcher is published in two registries:
 
 - npmjs: [superbrain-server](https://www.npmjs.com/package/superbrain-server)
   - Stable install: `npx -y superbrain-server@latest`
-  - Beta install: `npx -y superbrain-server@beta`
+
 - GitHub Packages: `@sidinsearch/superbrain-server`
   - One-time auth + install block (`read:packages` token required):
   - Note: only needed for GitHub Packages. Not needed for npmjs (`superbrain-server`) installs.
@@ -358,8 +358,7 @@ SuperBrain backend launcher is published in two registries:
 npm config set @sidinsearch:registry https://npm.pkg.github.com
 npm config set //npm.pkg.github.com/:_authToken YOUR_GITHUB_TOKEN
 npx -y @sidinsearch/superbrain-server@latest
-# beta channel
-npx -y @sidinsearch/superbrain-server@beta
+
 ```
 
 GitHub Packages docs: [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)
@@ -445,17 +444,17 @@ EAS returns a download URL + QR code when done. No Android Studio required.
 
 The repo includes:
 
-- [build workflow](.github/workflows/build.yml): On push to `main` or `beta`, it builds APK, uploads artifact, publishes the GitHub npm package, and updates the release with `superbrain.apk`
+- [build workflow](.github/workflows/build.yml): On push to `main`, it builds APK, uploads artifact, publishes the GitHub npm package, and updates the release with `superbrain.apk`
 - [release APK workflow](.github/workflows/release-apk.yml): Optional tag/release-driven APK pipeline for versioned tags
 
 Automatic release targets:
 
 1. Push to `main` updates release tag `latest` (stable).
-2. Push to `beta` updates release tag `beta-latest` (pre-release).
+
 
 How to get the newest APK from Actions artifacts:
 
-1. Push your changes to `beta` or `main`.
+1. Push your changes to `main`.
 2. Open **GitHub → Actions → Build APK (Gradle)**.
 3. Open the latest successful run.
 4. Download the artifact named like `superbrain-release-<run_number>`.
@@ -478,7 +477,7 @@ cd android
 
 Use this push-based flow to keep GitHub release + APK + GitHub Packages aligned.
 
-1. Push changes to `beta` or `main`.
+1. Push changes to `main`.
 2. `.github/workflows/build.yml` runs automatically and does all of the following:
   - Builds release APK.
   - Uploads APK as an Actions artifact.
@@ -491,7 +490,7 @@ Use this push-based flow to keep GitHub release + APK + GitHub Packages aligned.
 Recommended release notes install line:
 
 ```bash
-npx -y superbrain-server@beta
+npx -y superbrain-server@latest
 ```
 
 For stable releases, use:
@@ -502,11 +501,11 @@ npx -y superbrain-server@latest
 
 Verification checklist:
 
-1. `latest` (main) or `beta-latest` (beta) release contains `superbrain.apk`.
+1. `latest` (main)  release contains `superbrain.apk`.
 2. Repository **Packages** tab shows `@sidinsearch/superbrain-server`.
 3. Install checks:
-  - npmjs: `npx -y superbrain-server@beta` (or `@latest`)
-  - GitHub Packages: `npx -y @sidinsearch/superbrain-server@beta` (or `@latest`)
+  - npmjs: `npx -y superbrain-server@latest`
+  - GitHub Packages: `npx -y @sidinsearch/superbrain-server@latest`
 
 ---
 
@@ -631,3 +630,5 @@ This project is licensed under the **[GNU Affero General Public License v3.0](LI
   &nbsp;·&nbsp;
   <a href="LICENSE">AGPL-3.0 License</a>
 </p>
+
+
