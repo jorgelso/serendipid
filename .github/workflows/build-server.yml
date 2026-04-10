@@ -1,0 +1,77 @@
+name: Build and Publish Server Package
+
+on:
+  push:
+    branches: [main, beta]
+    paths:
+      - 'backend/**'
+      - 'superbrain-cli/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-publish-server:
+    name: Build & Publish Server Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve package metadata
+        id: meta
+        shell: bash
+        run: |
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+          OWNER_LC="${GITHUB_REPOSITORY_OWNER,,}"
+          VERSION_BASE=$(node -e "const v=require('./superbrain-cli/package.json').version; console.log(v.split('-')[0]);")
+          SAFE_BRANCH=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]')
+          VERSION="${VERSION_BASE}-${SAFE_BRANCH}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+
+          if [ "$BRANCH_NAME" = "beta" ]; then
+            DIST_TAG="beta"
+          else
+            DIST_TAG="latest"
+          fi
+
+          {
+            echo "dist_tag=$DIST_TAG"
+            echo "owner_scope=@${OWNER_LC}"
+            echo "package_version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare package payload
+        run: node scripts/build.js
+        working-directory: superbrain-cli
+
+      - name: Set GitHub Packages publish metadata
+        shell: bash
+        run: |
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+          cd superbrain-cli
+          npm pkg set "name=${{ steps.meta.outputs.owner_scope }}/superbrain-server"
+          npm pkg set "version=${{ steps.meta.outputs.package_version }}"
+          npm pkg set "repository=${REPO_URL}"
+          npm pkg set "publishConfig.registry=https://npm.pkg.github.com"
+
+      - name: Configure npm auth for GitHub Packages
+        shell: bash
+        run: |
+          echo "${{ steps.meta.outputs.owner_scope }}:registry=https://npm.pkg.github.com" > ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish package to GitHub Packages
+        run: npm publish --tag "${{ steps.meta.outputs.dist_tag }}"
+        working-directory: superbrain-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

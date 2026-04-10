@@ -1,8 +1,10 @@
-name: Build APK (Gradle)
+name: Build SuperBrain App (APK)
 
 on:
   push:
     branches: [main, beta]
+    paths:
+      - 'superbrain-app/**'
   workflow_dispatch:
     inputs:
       build_type:
@@ -16,7 +18,7 @@ permissions:
 
 jobs:
   build:
-    name: Build, Release, and Publish
+    name: Build and Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -128,31 +130,3 @@ jobs:
           generate_release_notes: true
           overwrite_files: true
           files: superbrain.apk
-
-      - name: Prepare package payload
-        run: node scripts/build.js
-        working-directory: superbrain-cli
-
-      - name: Set GitHub Packages publish metadata
-        shell: bash
-        run: |
-          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
-          cd superbrain-cli
-          npm pkg set "name=${{ steps.meta.outputs.owner_scope }}/superbrain-server"
-          npm pkg set "version=${{ steps.meta.outputs.package_version }}"
-          npm pkg set "repository=${REPO_URL}"
-          npm pkg set "publishConfig.registry=https://npm.pkg.github.com"
-
-      - name: Configure npm auth for GitHub Packages
-        shell: bash
-        run: |
-          echo "${{ steps.meta.outputs.owner_scope }}:registry=https://npm.pkg.github.com" > ~/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish package to GitHub Packages
-        run: npm publish --tag "${{ steps.meta.outputs.dist_tag }}"
-        working-directory: superbrain-cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
