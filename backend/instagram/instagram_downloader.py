@@ -43,15 +43,17 @@ except ImportError:
 BACKEND_DIR     = pathlib.Path(__file__).parent.parent
 TEMP_DIR        = BACKEND_DIR / "temp"
 IL_SESSION_FILE = BACKEND_DIR / ".instaloader_session"
-API_KEYS_FILE   = BACKEND_DIR / ".api_keys"
+API_KEYS_FILE   = BACKEND_DIR / "config" / ".api_keys"
+LEGACY_API_KEYS_FILE = BACKEND_DIR / ".api_keys"
 
 
 # ── Credential loader ─────────────────────────────────────────────────────────
 def _load_credentials() -> tuple[str, str]:
     """Read INSTAGRAM_USERNAME / INSTAGRAM_PASSWORD from .api_keys or env."""
     creds: dict[str, str] = {}
-    if API_KEYS_FILE.exists():
-        for line in API_KEYS_FILE.read_text(encoding="utf-8").splitlines():
+    key_file = API_KEYS_FILE if API_KEYS_FILE.exists() else LEGACY_API_KEYS_FILE
+    if key_file.exists():
+        for line in key_file.read_text(encoding="utf-8", errors="ignore").splitlines():
             line = line.strip()
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")
@@ -83,20 +85,22 @@ def _unique_folder(base: pathlib.Path, name: str) -> pathlib.Path:
 
 
 def extract_audio_from_video(video_path: str, audio_path: str) -> bool:
-    """Extract audio track from a video file and save as MP3."""
-    if not MOVIEPY_AVAILABLE:
-        print("  ⚠ moviepy not installed — skipping audio extraction")
-        return False
+    """Extract audio track from a video file using ffmpeg to save memory and time."""
+    import subprocess
     try:
-        print("  Extracting audio...")
-        video = VideoFileClip(video_path)
-        if video.audio is not None:
-            video.audio.write_audiofile(audio_path, verbose=False, logger=None)
-            video.close()
+        print("  Extracting audio via ffmpeg...")
+        # Extract audio track to MP3, skip video, use low bitrate since we only need Shazam/Whisper
+        proc = subprocess.run([
+            "ffmpeg", "-y", "-i", video_path,
+            "-vn", "-acodec", "libmp3lame", "-q:a", "3",
+            audio_path
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        
+        if proc.returncode == 0 and os.path.exists(audio_path) and os.path.getsize(audio_path) > 1024:
             print(f"  ✓ Audio saved: {os.path.basename(audio_path)}")
             return True
-        video.close()
-        print("  ⚠ No audio track in video")
+            
+        print(f"  ⚠️ No audio track found or ffmpeg failed (code: {proc.returncode})")
         return False
     except Exception as e:
         print(f"  ⚠ Audio extraction failed: {e}")
@@ -147,6 +151,8 @@ def _download_via_instaloader(url: str) -> str | None:
 
     # Load saved instaloader session if one exists (set up by instagram_login.py)
     username, _ = _load_credentials()
+    if not username and not IL_SESSION_FILE.exists():
+        print("  ℹ No Instagram credentials/session found — anonymous mode may fail for some posts.")
     if IL_SESSION_FILE.exists() and username:
         try:
             L.load_session_from_file(username, str(IL_SESSION_FILE))

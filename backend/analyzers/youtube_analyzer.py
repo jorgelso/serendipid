@@ -45,7 +45,7 @@ identifiable background music, write "No background music". If it's voiceover
 only, write "Voiceover only".]
 
 📂 CATEGORY:
-[Choose exactly ONE from: product, places, recipe, software, book, tv shows, workout, film, event, other]
+[Choose exactly ONE from: product, places, food, software, book, tv shows, fitness, film, event, other]
 
 Be specific, accurate, and extractive — pull out real names, numbers, and facts from the video."""
 
@@ -201,7 +201,7 @@ def get_youtube_thumbnail(youtube_url: str) -> str:
 def _load_gemini_key() -> str:
     creds: dict[str, str] = {}
     if API_KEYS_FILE.exists():
-        for line in API_KEYS_FILE.read_text(encoding="utf-8").splitlines():
+        for line in API_KEYS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
             line = line.strip()
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")

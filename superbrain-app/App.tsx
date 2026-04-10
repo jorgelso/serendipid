@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Linking from 'expo-linking';
 import { Platform, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Screens
 import SplashScreen from './src/screens/SplashScreen';
@@ -15,6 +16,11 @@ import PostDetailScreen from './src/screens/PostDetailScreen';
 import CollectionDetailScreen from './src/screens/CollectionDetailScreen';
 import ShareHandlerScreen from './src/screens/ShareHandlerScreen';
 import FailedAnalysisScreen from './src/screens/FailedAnalysisScreen';
+import RetryQueueScreen from './src/screens/RetryQueueScreen';
+import AIProviderScreen from './src/screens/AIProviderScreen';
+import InstagramScreen from './src/screens/InstagramScreen';
+import DataImportExportScreen from './src/screens/DataImportExportScreen';
+import QRScannerScreen from './src/screens/QRScannerScreen';
 
 // API Service
 import apiService from './src/services/api';
@@ -30,7 +36,11 @@ export type RootStackParamList = {
   PostDetail: { post: Post };
   CollectionDetail: { collection: Collection };
   ShareHandler: { url?: string };
-  FailedAnalysis: undefined;
+  FailedAnalysis: undefined;        RetryQueue: undefined;
+  AIProvider: undefined;
+  Instagram: undefined;
+  DataImportExport: undefined;
+  QRScanner: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -53,7 +63,25 @@ export default function App() {
         await handleMarkAsWatched(shortcode);
       } else if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
         // User tapped the notification itself — navigate to Home so they see the post
-        if (navigationRef.current) {
+        if (shortcode) {
+          setTimeout(async () => {
+            try {
+              const cachedJson = await AsyncStorage.getItem('@superbrain_posts_cache');
+              let fullPost = null;
+              if (cachedJson) {
+                const posts = JSON.parse(cachedJson);
+                fullPost = posts.find((p: any) => p.shortcode === shortcode);
+              }
+              if (fullPost && navigationRef.current) {
+                navigationRef.current.navigate('PostDetail', { post: fullPost });
+              } else if (navigationRef.current) {
+                navigationRef.current.navigate('Home');
+              }
+            } catch (e) {
+              if (navigationRef.current) navigationRef.current.navigate('Home');
+            }
+          }, 300);
+        } else if (navigationRef.current) {
           navigationRef.current.navigate('Home');
         }
       }
@@ -116,8 +144,26 @@ export default function App() {
           await handleMarkAsWatched(shortcode);
         } else if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
           // Tapped notification body — navigate to Home after app loads
-          setTimeout(() => {
-            if (navigationRef.current) navigationRef.current.navigate('Home');
+          setTimeout(async () => {
+            if (shortcode) {
+              try {
+                const cachedJson = await AsyncStorage.getItem('@superbrain_posts_cache');
+                let fullPost = null;
+                if (cachedJson) {
+                  const posts = JSON.parse(cachedJson);
+                  fullPost = posts.find((p: any) => p.shortcode === shortcode);
+                }
+                if (fullPost && navigationRef.current) {
+                  navigationRef.current.navigate('PostDetail', { post: fullPost });
+                } else if (navigationRef.current) {
+                  navigationRef.current.navigate('Home');
+                }
+              } catch (e) {
+                if (navigationRef.current) navigationRef.current.navigate('Home');
+              }
+            } else if (navigationRef.current) {
+              navigationRef.current.navigate('Home');
+            }
           }, 500);
         }
       }
@@ -204,6 +250,31 @@ export default function App() {
             name="FailedAnalysis"
             component={FailedAnalysisScreen}
             options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="RetryQueue"
+            component={RetryQueueScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="AIProvider"
+            component={AIProviderScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="Instagram"
+            component={InstagramScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="DataImportExport"
+            component={DataImportExportScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="QRScanner"
+            component={QRScannerScreen}
+            options={{ animation: 'slide_from_bottom' }}
           />
         </Stack.Navigator>
       </NavigationContainer>

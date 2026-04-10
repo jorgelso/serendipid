@@ -20,6 +20,7 @@ import asyncio
 import subprocess
 import tempfile
 from pathlib import Path
+import json
 
 # Ensure backend root is on sys.path when called as a subprocess
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,7 +30,6 @@ try:
     _HAS_SHAZAM = True
 except ImportError:
     _HAS_SHAZAM = False
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Audio helpers
@@ -58,43 +58,48 @@ def _extract_segment(audio_path: str, start_sec: float,
     try:
         fd, seg_path = tempfile.mkstemp(suffix=".mp3")
         os.close(fd)
-        subprocess.run(
+        proc = subprocess.run(
             ["ffmpeg", "-y",
              "-ss", str(int(start_sec)),
              "-t",  str(int(duration)),
              "-i",  audio_path,
              "-acodec", "libmp3lame", "-q:a", "3",
              seg_path],
-            capture_output=True, timeout=30,
+            capture_output=True, text=True, timeout=60,
         )
+        
         if os.path.getsize(seg_path) > 1024:
             return seg_path
+        else:
+            print(f"(ffmpeg extracted <1024 bytes! stderr: {proc.stderr[:200]})")
+            
         os.remove(seg_path)
         return None
-    except Exception:
+    except Exception as e:
+        print(f"(ffmpeg failed: {e})")
         return None
 
 
 def _segment_positions(duration: float) -> list[float]:
     """Return evenly-spread start-second offsets to probe.
+    Enhanced to grab more sections of a song (often intro/outro are voiceless).
 
     Rules:
-      <= 20 s  -> [0]                              (short clip, try as-is)
-      <= 50 s  -> [0, ~50%]                        (2 positions)
-      <= 90 s  -> [0, ~33%, ~66%]                  (3 positions)
-      <= 180 s -> [0, ~25%, ~50%, ~75%]            (4 positions)
-      > 180 s  -> [0, ~20%, ~40%, ~60%, ~80%]      (5 positions)
+      <= 20 s  -> [0, 5]                             (short clip, try start & middle)
+      <= 50 s  -> [0, ~33%, ~66%]                    (3 positions)
+      <= 90 s  -> [0, ~25%, ~50%, ~75%]              (4 positions)
+      <= 180 s -> [0, ~20%, ~40%, ~60%, ~80%]        (5 positions)
+      > 180 s  -> [0, ~15%, ~30%, ~45%, ~60%, ~75%]  (6 positions)
     """
     if duration <= 20:
-        return [0.0]
+        return [0.0, min(5.0, duration * 0.4)]
     if duration <= 50:
-        return [0.0, duration * 0.50]
-    if duration <= 90:
         return [0.0, duration * 0.33, duration * 0.66]
-    if duration <= 180:
+    if duration <= 90:
         return [0.0, duration * 0.25, duration * 0.50, duration * 0.75]
-    return [0.0, duration * 0.20, duration * 0.40,
-            duration * 0.60, duration * 0.80]
+    if duration <= 180:
+        return [0.0, duration * 0.20, duration * 0.40, duration * 0.60, duration * 0.80]
+    return [0.0, duration * 0.15, duration * 0.30, duration * 0.45, duration * 0.60, duration * 0.75]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,11 +108,15 @@ def _segment_positions(duration: float) -> list[float]:
 
 async def _shazam_recognize_file(shazam, path: str) -> dict | None:
     try:
-        result = await shazam.recognize(path)
+        # t2.micro intances do heavy FFT math in python, which can take ~1.5 seconds per 1 second of audio.
+        # A 20s slice takes ~30-40s on standard micro instance caps.
+        result = await asyncio.wait_for(shazam.recognize(path), timeout=120.0)
         if result and "track" in result:
             return result
-    except Exception:
-        pass
+    except asyncio.TimeoutError:
+        print("(shazam request timeout 120s)")
+    except Exception as e:
+        print(f"(shazam error: {e})")
     return None
 
 
@@ -132,7 +141,7 @@ async def _shazam_multi_segment(audio_path: str) -> dict | None:
         label = f"@{int(start)}s" if start > 0 else "start"
         print(f"   [Shazam] {i}/{total} {label}...", end=" ", flush=True)
 
-        if start == 0:
+        if False:  # Prevent using full file which causes 100% CPU lock on EC2 t2.micro
             # Try the original file first (no re-encoding overhead)
             result = await _shazam_recognize_file(shazam, audio_path)
         else:
@@ -286,7 +295,7 @@ async def identify_music(audio_path: str) -> None:
     """Identify music from *audio_path* using optimized Shazam multi-segment."""
 
     print("=" * 70)
-    print("MUSIC IDENTIFIER  (Shazam – optimized multi-segment)")
+    print("MUSIC IDENTIFIER  (Shazam – optimized multi-segment tracking)")
     print("=" * 70)
     print()
 

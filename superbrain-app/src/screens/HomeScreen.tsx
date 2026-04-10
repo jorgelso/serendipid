@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
+  FlatList,
   TextInput,
   TouchableOpacity,
   Image,
@@ -13,6 +14,7 @@ import {
   Dimensions,
   Modal,
   BackHandler,
+  Animated,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,31 +22,28 @@ import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import apiService from '../services/api';
 import postsCache from '../services/postsCache';
-import collectionsService from '../services/collections';
-import { scheduleAllWatchLaterNotifications, sendImmediateWatchLaterNotification, sendImmediateSavedNotification } from '../services/notificationService';
+import { collectionsService } from '../services/collections';
+import {
+  scheduleAllWatchLaterNotifications,
+  requestNotificationPermissionAfterOnboarding,
+  sendImmediateWatchLaterNotification,
+  sendImmediateSavedNotification,
+} from '../services/notificationService';
 import { Post, Collection } from '../types';
 import { colors } from '../theme/colors';
 import { RootStackParamList } from '../../App';
 import CustomToast from '../components/CustomToast';
+import BottomNav from '../components/BottomNav';
+import { getCollectionIconName, getCollectionIconColor } from '../constants/icons';
+import { DEFAULT_CATEGORIES, CATEGORY_ICONS } from '../constants/categories';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
-
-const CATEGORIES = [
-  { id: 'all', name: 'All', icon: '🌟' },
-  { id: 'product', name: 'Product', icon: '📦' },
-  { id: 'places', name: 'Places', icon: '📍' },
-  { id: 'food', name: 'Food', icon: '🍔' },
-  { id: 'fashion', name: 'Fashion', icon: '👗' },
-  { id: 'fitness', name: 'Fitness', icon: '💪' },
-  { id: 'education', name: 'Education', icon: '📚' },
-  { id: 'entertainment', name: 'Entertainment', icon: '🎬' },
-  { id: 'pets', name: 'Pets', icon: '🐾' },
-];
 
 const HomeScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -62,15 +61,23 @@ const HomeScreen = () => {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'warning' | 'info' });
   const [isInitialized, setIsInitialized] = useState(false);
   const [isConfigured, setIsConfigured] = useState(true);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadPostsRef = useRef<(forceRefresh?: boolean) => Promise<void>>(undefined);
   const prevProcessingRef = useRef<number>(0); // tracks backend processing_count across poll ticks
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [shouldShowOnboardingOnInit, setShouldShowOnboardingOnInit] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const lastFocusRefreshRef = useRef(0);
 
   useEffect(() => {
-    initializeAndLoad();
-    checkFirstLaunch();
+    const bootstrap = async () => {
+      const shouldDeferNotificationPrompt = await checkFirstLaunch();
+      await initializeAndLoad(shouldDeferNotificationPrompt);
+    };
+
+    bootstrap();
+
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
@@ -78,6 +85,13 @@ const HomeScreen = () => {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (isInitialized && shouldShowOnboardingOnInit) {
+      const t = setTimeout(() => setShowOnboarding(true), 30);
+      return () => clearTimeout(t);
+    }
+  }, [isInitialized, shouldShowOnboardingOnInit]);
 
   // Exit app when back is pressed on HomeScreen (it is the root screen)
   useFocusEffect(
@@ -95,53 +109,129 @@ const HomeScreen = () => {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       if (isInitialized) {
-        console.log('HomeScreen - Screen focused, refreshing...');
+        const now = Date.now();
+        if (now - lastFocusRefreshRef.current < 5000) {
+          return;
+        }
+        lastFocusRefreshRef.current = now;
         loadPosts(false); // Don't force refresh, let cache-first strategy work
       }
     });
     return unsubscribe;
   }, [navigation, isInitialized]);
 
-  const checkFirstLaunch = async () => {
+  const checkFirstLaunch = async (): Promise<boolean> => {
     try {
       const seen = await AsyncStorage.getItem('@superbrain_onboarded');
-      if (seen) return;
+      if (seen) return false;
       // Existing install upgrading — user already has data, skip tutorial
       const existingPosts = await AsyncStorage.getItem('@superbrain_posts_cache');
       const existingCollections = await AsyncStorage.getItem('@superbrain_collections');
-      if (existingPosts || existingCollections) {
+
+      const hasExistingPosts = (() => {
+        if (!existingPosts) return false;
+        try {
+          const parsed = JSON.parse(existingPosts);
+          return Array.isArray(parsed) && parsed.length > 0;
+        } catch {
+          return true;
+        }
+      })();
+
+      const hasMeaningfulCollections = (() => {
+        if (!existingCollections) return false;
+        try {
+          const parsed = JSON.parse(existingCollections);
+          if (!Array.isArray(parsed)) return false;
+          return parsed.some((c: any) => {
+            const hasPosts = Array.isArray(c?.postIds) && c.postIds.length > 0;
+            const isDefaultWatchLater = c?.id === 'default_watch_later';
+            return hasPosts || !isDefaultWatchLater;
+          });
+        } catch {
+          return true;
+        }
+      })();
+
+      if (hasExistingPosts || hasMeaningfulCollections) {
         await AsyncStorage.setItem('@superbrain_onboarded', '1');
-        return;
+        return false;
       }
-      setTimeout(() => setShowOnboarding(true), 700);
+
+      // Mark to show onboarding once app initialization completes.
+      setShouldShowOnboardingOnInit(true);
+      return true;
     } catch { /* ignore */ }
+    return false;
   };
 
   const dismissOnboarding = async () => {
     try { await AsyncStorage.setItem('@superbrain_onboarded', '1'); } catch { /* ignore */ }
     setShowOnboarding(false);
+    setShouldShowOnboardingOnInit(false);
     setOnboardingStep(0);
+
+    // Prompt for notifications only after onboarding walkthrough is finished.
+    requestNotificationPermissionAfterOnboarding().catch(() => {});
+    scheduleAllWatchLaterNotifications().catch(() => {});
   };
 
   const ONBOARDING_STEPS = [
     {
-      icon: '🧠',
+      iconName: 'sparkles-outline',
       title: 'Welcome to SuperBrain',
-      description: 'Your personal second brain. Save posts from Instagram, YouTube, and Websites — no need to endlessly scroll through your saves. Find anything fast with search and filters.',
+      description: 'Save from Instagram, YouTube, and web in one place. Find everything fast with AI search and smart tagging.',
     },
     {
-      icon: '↗️',
+      iconName: 'share-outline',
       title: 'Save from Anywhere',
-      description: 'Open any Instagram post, YouTube video, or Website → tap Share → select SuperBrain. Done. Your content is saved and analyzed instantly.',
+      description: 'Open any social post or website → tap Share → select SuperBrain. Your content is saved and analyzed instantly.',
     },
     {
-      icon: '📱',
+      iconName: 'layers-outline',
       title: 'Explore Your Feed',
-      description: 'Scroll through your saves, filter by category, or search. Tap a post to see full details. Long-press to select and delete multiple posts at once.',
+      description: 'Scroll through your saves, filter by category, or search. Tap a post to see details. Long-press to delete multiple.',
+    },
+    {
+      iconName: 'settings-outline',
+      title: 'Connect Your Backend',
+      description: 'Head to Settings to add your Server URL and Token. You can also configure AI providers and Instagram credentials.',
     },
   ];
 
-  const initializeAndLoad = async () => {    try {
+  const loadCategories = async () => {
+    try {
+      const cats = await apiService.getCategories();
+      if (cats && cats.length > 0) {
+        // Always keep full default pill set visible, then overlay live counts from backend.
+        const mergedById = new Map(
+          DEFAULT_CATEGORIES
+            .filter(c => c.id !== 'all')
+            .map(c => [c.id, { ...c, count: 0 }])
+        );
+
+        for (const c of cats) {
+          const id = c.id.toLowerCase();
+          const existing = mergedById.get(id);
+          mergedById.set(id, {
+            id,
+            name: existing?.name || c.name,
+            icon: existing?.icon || CATEGORY_ICONS[c.name.trim().toLowerCase()] || 'pricetag-outline',
+            count: c.count,
+          });
+        }
+
+        const merged = Array.from(mergedById.values());
+        const totalCount = merged.reduce((sum, c) => sum + c.count, 0);
+        setCategories([{ id: 'all', name: 'All', icon: 'star', count: totalCount }, ...merged]);
+      }
+    } catch (e) {
+      console.warn('Failed to load categories, using defaults:', e);
+    }
+  };
+
+  const initializeAndLoad = async (deferNotificationPrompt: boolean = false) => {
+    try {
       await apiService.initialize();
       const token = await apiService.getApiToken();
       if (!token) {
@@ -151,14 +241,17 @@ const HomeScreen = () => {
         return;
       }
       setIsConfigured(true);
-      // Await backend sync first, THEN reschedule notifications
-      // This ensures fresh-install users get notifications restored after backend pull
-      try {
-        await collectionsService.syncFromBackend();
-      } catch { /* offline — local cache used */ }
+      // Fire categories, collections sync, and posts loading in parallel
+      // for faster first paint
+      const [, ,] = await Promise.all([
+        loadCategories(),
+        collectionsService.syncFromBackend().catch(() => { /* offline */ }),
+        loadPosts(false),
+      ]);
       // Reschedule Watch Later notifications with (possibly restored) collection data
-      scheduleAllWatchLaterNotifications().catch(() => {});
-      await loadPosts(false); // Use cache-first strategy even on initial load
+      if (!deferNotificationPrompt) {
+        scheduleAllWatchLaterNotifications().catch(() => { });
+      }
       setIsInitialized(true);
     } catch (error) {
       console.error('Error initializing:', error);
@@ -176,8 +269,9 @@ const HomeScreen = () => {
       if (failedList.length > 0) {
         for (const fp of failedList) {
           if (postsCache.isAnalyzing(fp.shortcode)) {
-            postsCache.markAnalysisComplete(fp.shortcode);
-          }
+              postsCache.markAnalysisComplete(fp.shortcode);
+            }
+            await postsCache.removePostFromCache(fp.shortcode);
         }
       }
 
@@ -191,10 +285,9 @@ const HomeScreen = () => {
       // Always load and display cached posts immediately (non-blocking)
       const cachedPosts = await postsCache.getCachedPosts();
       if (cachedPosts && cachedPosts.length > 0) {
-        console.log('HomeScreen - Loaded from cache:', cachedPosts.length, 'posts');
         setPosts(cachedPosts);
         setLoading(false); // Clear loading immediately when we have cache
-        
+
         // If cache is valid and not forcing refresh, we're done —
         // BUT only skip the server fetch if there are NO analyzing posts.
         // When posts are in-flight we must reach the watcher startup logic below.
@@ -204,25 +297,27 @@ const HomeScreen = () => {
             return;
           }
         }
-        
+
         // If we got here, we'll fetch in background but UI is already showing cached posts
       } else {
         // No cache, show loading spinner
         setLoading(true);
       }
-      
+
       // Fetch from server in background (UI already showing if we have cache)
-      console.log('HomeScreen - Fetching from server in background...');
       const fetchedPosts = await apiService.getRecentPosts(50);
-      console.log('HomeScreen - Fetched', fetchedPosts.length, 'posts from server');
-      
+
       // Clear analyzing state for posts that are now done on the server
       const prevAnalyzing = postsCache.getAnalyzingPosts();
       for (const shortcode of prevAnalyzing) {
-        const serverPost = fetchedPosts.find(p => p.shortcode === shortcode);
+        const placeholderUrl = (cachedPosts || []).find(cp => cp.shortcode === shortcode)?.url;
+        const serverPost = fetchedPosts.find(p => p.shortcode === shortcode || (placeholderUrl && p.url === placeholderUrl));
         if (serverPost && !serverPost.processing) {
           await postsCache.markAnalysisComplete(shortcode);
-          console.log('HomeScreen - Analysis complete for:', shortcode);
+          // If the backend generated a different shortcode, purge the frontend's temporary placeholder
+          if (serverPost.shortcode !== shortcode) {
+            await postsCache.removePostFromCache(shortcode);
+          }
         }
       }
 
@@ -232,23 +327,20 @@ const HomeScreen = () => {
       if (fetchedPosts.length > 0) {
         // Server returned real data — merge with analyzing placeholders
         const analyzingPlaceholders = (cachedPosts || []).filter(
-          p => stillAnalyzing.includes(p.shortcode) && !fetchedPosts.find(fp => fp.shortcode === p.shortcode)
+          p => stillAnalyzing.includes(p.shortcode) && !fetchedPosts.find(fp => fp.shortcode === p.shortcode || (p.url && fp.url === p.url))
         );
 
         const mergedPosts = [
           ...analyzingPlaceholders,
-          ...fetchedPosts.filter(p => !stillAnalyzing.includes(p.shortcode)),
+          ...fetchedPosts,
         ];
-
         setPosts(mergedPosts);
         await postsCache.savePosts(mergedPosts);
       } else if (hasAnalyzing && cachedPosts && cachedPosts.length > 0) {
         // Server returned empty (busy/error) but we have cached posts — keep them intact
         // DON'T overwrite cache; just make sure UI is showing cached data
-        console.log('HomeScreen - Server returned empty during analysis, keeping cached posts');
         setPosts(cachedPosts);
       } else if (!cachedPosts || cachedPosts.length === 0) {
-        console.log('HomeScreen - No posts found anywhere');
         showToast('No posts yet — share something to get started!', 'info');
       }
 
@@ -257,7 +349,6 @@ const HomeScreen = () => {
         if (hasAnalyzing && !pollIntervalRef.current) {
           // Start a lightweight /queue-status poller instead of calling /recent every tick.
           // Only fires a full loadPosts when backend signals it just finished processing.
-          console.log('HomeScreen - Starting queue-status watcher');
           // Pre-seed synchronously so the FIRST interval tick sees wasActive=true.
           // Without this, prevProcessingRef starts at 0 and the first tick misses
           // the wasActive && nowIdle transition if the backend finishes quickly.
@@ -267,14 +358,13 @@ const HomeScreen = () => {
             if (total === 0) {
               // Backend already finished by the time we seeded — kick a refresh immediately
               // and stop the watcher so we don't loop endlessly.
-              console.log('HomeScreen - Backend already idle on seed, refreshing now');
               clearInterval(pollIntervalRef.current!);
               pollIntervalRef.current = null;
               loadPostsRef.current?.(true);
             } else {
               prevProcessingRef.current = total;
             }
-          }).catch(() => {});
+          }).catch(() => { });
 
           pollIntervalRef.current = setInterval(async () => {
             try {
@@ -287,11 +377,9 @@ const HomeScreen = () => {
 
               if (wasActive && nowIdle) {
                 // Backend just finished — fetch the completed post now
-                console.log('HomeScreen - Backend finished processing, refreshing...');
                 loadPostsRef.current?.(true);
               } else if (nowIdle && postsCache.getAnalyzingPosts().length === 0) {
                 // Nothing left to track — stop watching
-                console.log('HomeScreen - Nothing analyzing, stopping watcher');
                 clearInterval(pollIntervalRef.current!);
                 pollIntervalRef.current = null;
               }
@@ -299,20 +387,18 @@ const HomeScreen = () => {
           }, 2000);
 
         } else if (!hasAnalyzing && pollIntervalRef.current) {
-          console.log('HomeScreen - Stopping watcher, all posts analyzed');
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
         }
       }
     } catch (error: any) {
       console.error('Error loading posts:', error);
-      
+
       // Only show error if we don't have cached posts
       const cachedPosts = await postsCache.getCachedPosts();
       if (!cachedPosts || cachedPosts.length === 0) {
         showToast('Failed to load posts: ' + (error.message || 'Unknown error'), 'error');
       } else {
-        console.log('HomeScreen - Using cached posts after server error');
         setPosts(cachedPosts);
       }
     } finally {
@@ -337,43 +423,34 @@ const HomeScreen = () => {
       (post.title && post.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (post.summary && post.summary.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (post.tags && post.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase())));
-    
+
     const matchesCategory = selectedCategory === 'all' || post.category === selectedCategory;
-    
+
     return matchesSearch && matchesCategory;
   });
 
   const getCategoryColor = (category: string) => {
-    return colors.categories[category as keyof typeof colors.categories] || colors.categories.other;
-  };
-
-  const getCategoryIcon = (category: string) => {
-    const categoryMap: { [key: string]: string } = {
-      'product': '📦',
-      'places': '📍',
-      'food': '🍔',
-      'fashion': '👗',
-      'fitness': '💪',
-      'education': '📚',
-      'entertainment': '🎬',
-      'pets': '🐾',
-      'other': '📌'
-    };
-    return categoryMap[category] || '📌';
+    if (!category) return colors.categories.other;
+    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getPostImageUrl = (post: Post) => {
     // Use backend-provided thumbnail (YouTube, webpage) or fall back to Instagram CDN
     if (post.thumbnail_url) return post.thumbnail_url;
-    if (post.thumbnail) return post.thumbnail;
+    if (post.thumbnail) {
+      if (post.thumbnail.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${post.thumbnail}`;
+      }
+      return post.thumbnail;
+    }
     return `https://www.instagram.com/p/${post.shortcode}/media/?size=l`;
   };
 
-  const getContentTypeIcon = (post: Post) => {
+  const renderContentTypeIcon = (post: Post) => {
     switch (post.content_type) {
-      case 'youtube':  return '▶️';
-      case 'webpage':  return '🌐';
-      default:         return '📸'; // instagram
+      case 'youtube': return <Ionicons name="logo-youtube" size={14} color="#fff" />;
+      case 'webpage': return <Ionicons name="globe-outline" size={14} color="#fff" />;
+      default: return <Ionicons name="logo-instagram" size={14} color="#fff" />; // instagram
     }
   };
 
@@ -437,12 +514,12 @@ const HomeScreen = () => {
       if (collectionId === 'default_watch_later') {
         for (const shortcode of toAdd) {
           const post = posts.find(p => p.shortcode === shortcode);
-          if (post) sendImmediateWatchLaterNotification(post).catch(() => {});
+          if (post) sendImmediateWatchLaterNotification(post).catch(() => { });
         }
       } else {
         for (const shortcode of toAdd) {
           const post = posts.find(p => p.shortcode === shortcode);
-          if (post) sendImmediateSavedNotification(post).catch(() => {});
+          if (post) sendImmediateSavedNotification(post).catch(() => { });
         }
       }
 
@@ -535,7 +612,8 @@ const HomeScreen = () => {
           >
             <View style={styles.landscapeCardRow}>
               {post.category ? (
-                <View style={[styles.categoryBadge, { backgroundColor: categoryColor }]}>
+                <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(post.category), flexDirection: 'row', alignItems: 'center' }]}>
+                  <Ionicons name={(CATEGORY_ICONS[post.category.trim().toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" style={{ marginRight: 4 }} />
                   <Text style={styles.categoryBadgeText}>{post.category.toUpperCase()}</Text>
                 </View>
               ) : null}
@@ -544,7 +622,10 @@ const HomeScreen = () => {
               {post.title || 'Untitled'}
             </Text>
             <View style={styles.cardFooter}>
-              <Text style={styles.username}>{getContentTypeIcon(post)} {post.username || 'unknown'}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {renderContentTypeIcon(post)}
+                <Text style={[styles.username, { marginLeft: 4 }]}>{post.username || 'unknown'}</Text>
+              </View>
               {post.likes && post.likes > 0 ? (
                 <Text style={styles.likes}>{post.likes} likes</Text>
               ) : null}
@@ -573,7 +654,7 @@ const HomeScreen = () => {
     }
 
     const isAnalyzing = postsCache.isAnalyzing(post.shortcode);
-    
+
     return (
       <TouchableOpacity
         key={post.shortcode}
@@ -606,14 +687,17 @@ const HomeScreen = () => {
           style={styles.compactCardGradient}
         >
           {post.category ? (
-            <View style={[styles.categoryBadgeSmall, { backgroundColor: categoryColor }]}>
-              <Text style={styles.categoryBadgeTextSmall}>{getCategoryIcon(post.category)}</Text>
+            <View style={[styles.categoryBadgeSmall, { backgroundColor: getCategoryColor(post.category) }]}>
+              <Ionicons name={(CATEGORY_ICONS[post.category.trim().toLowerCase()] || CATEGORY_ICONS['other']) as any} size={14} color="#fff" />
             </View>
           ) : null}
           <Text style={styles.compactCardTitle} numberOfLines={2}>
             {post.title || 'Untitled'}
           </Text>
-          <Text style={styles.compactUsername} numberOfLines={1}>{getContentTypeIcon(post)} {post.username || 'unknown'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+            {renderContentTypeIcon(post)}
+            <Text style={[styles.compactUsername, { marginLeft: 4 }]} numberOfLines={1}>{post.username || 'unknown'}</Text>
+          </View>
         </LinearGradient>
         {isAnalyzing ? (
           <View style={styles.analyzingOverlay}>
@@ -637,51 +721,60 @@ const HomeScreen = () => {
     );
   };
 
-  // Build grid: YT/web = full-width landscape, instagram = paired compact rows
-  const buildGridRows = (posts: Post[]) => {
-    const elements: React.ReactElement[] = [];
+  // Build flat data for FlatList: converts posts into row items
+  // Each item is either a single landscape card or a pair of compact cards
+  type GridItem =
+    | { type: 'landscape'; post: Post; index: number }
+    | { type: 'pair'; left: Post; right: Post | null; leftIndex: number; rightIndex: number };
+
+  const buildGridData = useCallback((posts: Post[]): GridItem[] => {
+    const items: GridItem[] = [];
     let i = 0;
     while (i < posts.length) {
       const post = posts[i];
       if (post.content_type === 'youtube' || post.content_type === 'webpage') {
-        elements.push(renderPost(post, i));
+        items.push({ type: 'landscape', post, index: i });
         i++;
       } else {
-        const next = i + 1 < posts.length ? posts[i + 1] : null;
-        if (next && next.content_type !== 'youtube' && next.content_type !== 'webpage') {
-          elements.push(
-            <View key={`row-${i}`} style={styles.compactRow}>
-              {renderPost(post, i)}
-              {renderPost(next, i + 1)}
-            </View>
-          );
-          i += 2;
-        } else {
-          // Lone card — fills full row width via flex: 1
-          elements.push(
-            <View key={`row-${i}`} style={styles.compactRow}>
-              {renderPost(post, i)}
-            </View>
-          );
-          i++;
-        }
+        const next = i + 1 < posts.length && posts[i + 1].content_type !== 'youtube' && posts[i + 1].content_type !== 'webpage'
+          ? posts[i + 1] : null;
+        items.push({ type: 'pair', left: post, right: next, leftIndex: i, rightIndex: i + 1 });
+        i += next ? 2 : 1;
       }
     }
-    return elements;
-  };
+    return items;
+  }, []);
+
+  const gridData = React.useMemo(() => buildGridData(filteredPosts), [filteredPosts, buildGridData]);
+
+  const renderGridItem = useCallback(({ item }: { item: GridItem }) => {
+    if (item.type === 'landscape') {
+      return renderPost(item.post, item.index);
+    }
+    return (
+      <View style={styles.compactRow}>
+        {renderPost(item.left, item.leftIndex)}
+        {item.right ? renderPost(item.right, item.rightIndex) : <View style={{ flex: 1 }} />}
+      </View>
+    );
+  }, [selectionMode, selectedPosts, posts]);
+
+  const getItemKey = useCallback((item: GridItem) => {
+    return item.type === 'landscape' ? item.post.shortcode : `pair-${item.left.shortcode}`;
+  }, []);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      
+
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>SuperBrain</Text>
           <Text style={styles.headerSubtitle}>{filteredPosts.length} saved posts</Text>
         </View>
         {selectionMode ? (
-          <TouchableOpacity 
-            style={styles.cancelButton} 
+          <TouchableOpacity
+            style={styles.cancelButton}
             onPress={() => {
               setSelectionMode(false);
               setSelectedPosts(new Set());
@@ -694,7 +787,7 @@ const HomeScreen = () => {
 
       <View style={styles.searchContainer}>
         <View style={styles.searchIconContainer}>
-          <Text style={styles.searchIconText}>🔍</Text>
+          <Ionicons name="search" size={20} color={colors.textMuted} />
         </View>
         <TextInput
           style={styles.searchInput}
@@ -705,7 +798,7 @@ const HomeScreen = () => {
         />
         {searchQuery !== '' && (
           <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
-            <Text style={styles.clearIcon}>✕</Text>
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
@@ -716,36 +809,44 @@ const HomeScreen = () => {
         style={styles.categoriesContainer}
         contentContainerStyle={styles.categoriesContent}
       >
-        {CATEGORIES.map(category => (
-          <TouchableOpacity
-            key={category.id}
-            style={[
-              styles.categoryChip,
-              selectedCategory === category.id && styles.categoryChipActive,
-            ]}
-            onPress={() => {
-              setSelectedCategory(category.id);
-            }}
-          >
-            <Text style={styles.categoryIcon}>{category.icon}</Text>
-            <Text
+        {categories.map(category => {
+          const categoryColor = getCategoryColor(category.id);
+          const isActive = selectedCategory === category.id;
+          return (
+            <TouchableOpacity
+              key={category.id}
               style={[
-                styles.categoryText,
-                selectedCategory === category.id && styles.categoryTextActive,
+                styles.categoryChip,
+                isActive && { backgroundColor: categoryColor, borderColor: categoryColor },
               ]}
+              onPress={() => {
+                setSelectedCategory(category.id);
+              }}
             >
-              {category.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Ionicons
+                name={(category.icon || 'star') as any}
+                size={18}
+                color={isActive ? '#fff' : categoryColor}
+              />
+              <Text
+                style={[
+                  styles.categoryText,
+                  isActive && styles.categoryTextActive,
+                ]}
+              >
+                {category.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       {/* Selection Actions */}
       {selectionMode ? (
         <View style={styles.actionsBar}>
           <View style={styles.actionsRow}>
-            <TouchableOpacity 
-              style={styles.actionButton} 
+            <TouchableOpacity
+              style={styles.actionButton}
               onPress={handleSelectAll}
             >
               <Text style={styles.actionButtonText}>
@@ -754,14 +855,14 @@ const HomeScreen = () => {
             </TouchableOpacity>
             {selectedPosts.size > 0 ? (
               <>
-                <TouchableOpacity 
-                  style={styles.actionButtonPrimary} 
+                <TouchableOpacity
+                  style={styles.actionButtonPrimary}
                   onPress={handleShowCollections}
                 >
                   <Text style={styles.actionButtonPrimaryText}>Add to Library</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.actionButtonDelete} 
+                <TouchableOpacity
+                  style={styles.actionButtonDelete}
                   onPress={handleDeletePosts}
                 >
                   <Text style={styles.actionButtonDeleteText}>Delete</Text>
@@ -782,9 +883,11 @@ const HomeScreen = () => {
         </View>
       ) : !isConfigured ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>⚙️</Text>
+          <View style={styles.setupIconContainer}>
+            <Ionicons name="key-outline" size={48} color={colors.primary} />
+          </View>
           <Text style={styles.emptyTitle}>Setup Required</Text>
-          <Text style={styles.emptyText}>Configure your server URL and API token to get started.</Text>
+          <Text style={styles.emptyText}>Configure your Access Token and Server URL to continue.</Text>
           <TouchableOpacity
             style={styles.setupButton}
             onPress={() => navigation.navigate('Settings')}
@@ -794,14 +897,19 @@ const HomeScreen = () => {
         </View>
       ) : filteredPosts.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📭</Text>
+          <View style={[styles.setupIconContainer, { backgroundColor: 'rgba(107, 114, 128, 0.1)' }]}>
+            <Ionicons name="documents-outline" size={48} color={colors.textMuted} />
+          </View>
           <Text style={styles.emptyTitle}>No Posts Found</Text>
           <Text style={styles.emptyText}>
             {searchQuery ? 'Try a different search term' : 'Start analyzing share content to build your library'}
           </Text>
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={gridData}
+          renderItem={renderGridItem}
+          keyExtractor={getItemKey}
           style={styles.postsContainer}
           contentContainerStyle={styles.postsContent}
           refreshControl={
@@ -812,44 +920,15 @@ const HomeScreen = () => {
               colors={[colors.primary]}
             />
           }
-        >
-          <View style={styles.postsGrid}>
-            {buildGridRows(filteredPosts)}
-          </View>
-        </ScrollView>
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          initialNumToRender={6}
+          showsVerticalScrollIndicator={false}
+        />
       )}
 
-      <View style={styles.bottomNav}>
-        <TouchableOpacity 
-          style={styles.navItemActive} 
-          onPress={() => navigation.navigate('Home')}
-        >
-          <View style={styles.navIconContainer}>
-            <Text style={styles.navIconTextActive}>🏠</Text>
-          </View>
-          <Text style={styles.navLabelActive}>Home</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => navigation.navigate('Library')}
-        >
-          <View style={styles.navIconContainer}>
-            <Text style={styles.navIconText}>📚</Text>
-          </View>
-          <Text style={styles.navLabel}>Library</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => navigation.navigate('Settings')}
-        >
-          <View style={styles.navIconContainer}>
-            <Text style={styles.navIconText}>⚙️</Text>
-          </View>
-          <Text style={styles.navLabel}>Settings</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNav activeTab="Home" />
 
       {/* Collections Modal */}
       <Modal
@@ -863,7 +942,7 @@ const HomeScreen = () => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add to Collection</Text>
               <TouchableOpacity onPress={() => setShowCollectionsModal(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -874,7 +953,7 @@ const HomeScreen = () => {
               </View>
             ) : collections.length === 0 ? (
               <View style={styles.emptyCollections}>
-                <Text style={styles.emptyIcon}>📂</Text>
+                <Ionicons name="folder-open" size={64} color={colors.textMuted} />
                 <Text style={styles.emptyCollectionsTitle}>No Collections</Text>
                 <Text style={styles.emptyText}>Create collections in the Library tab first</Text>
                 <TouchableOpacity
@@ -896,7 +975,11 @@ const HomeScreen = () => {
                     onPress={() => handleAddToCollection(collection.id)}
                   >
                     <View style={styles.collectionItemLeft}>
-                      <Text style={styles.collectionItemIcon}>{collection.icon}</Text>
+                      <Ionicons
+                        name={getCollectionIconName(collection.id, collection.icon) as any}
+                        size={28}
+                        color={getCollectionIconColor(collection.id, collection.icon)}
+                      />
                       <View>
                         <Text style={styles.collectionItemName}>{collection.name}</Text>
                         <Text style={styles.collectionItemCount}>
@@ -954,15 +1037,11 @@ const HomeScreen = () => {
         onHide={() => setToast({ ...toast, visible: false })}
       />
 
-      {/* ── Onboarding Tutorial Modal ─────────────────────────── */}
-      <Modal
-        visible={showOnboarding}
-        transparent
-        animationType="fade"
-        onRequestClose={dismissOnboarding}
-      >
-        <View style={styles.onboardingOverlay}>
-          <View style={styles.onboardingCard}>
+      {/* ── Onboarding Tutorial (absolute overlay — non-blocking) ──── */}
+      {showOnboarding && (
+        <View style={styles.onboardingOverlay} pointerEvents="box-none">
+          <View style={styles.onboardingBackdrop} />
+          <View style={styles.onboardingCard} pointerEvents="auto">
             {/* Header gradient strip */}
             <View style={styles.onboardingHeader}>
               <Text style={styles.onboardingHeaderLabel}>SUPERBRAIN</Text>
@@ -970,7 +1049,16 @@ const HomeScreen = () => {
 
             {/* Step content */}
             <View style={styles.onboardingBody}>
-              <Text style={styles.onboardingIcon}>{ONBOARDING_STEPS[onboardingStep].icon}</Text>
+              {onboardingStep === 0 ? (
+                <Text style={styles.onboardingEmoji}>🧠</Text>
+              ) : (
+                <Ionicons
+                  name={ONBOARDING_STEPS[onboardingStep].iconName as any}
+                  size={48}
+                  color={colors.primary}
+                  style={styles.onboardingIcon}
+                />
+              )}
               <Text style={styles.onboardingTitle}>{ONBOARDING_STEPS[onboardingStep].title}</Text>
               <Text style={styles.onboardingDesc}>{ONBOARDING_STEPS[onboardingStep].description}</Text>
             </View>
@@ -1002,11 +1090,16 @@ const HomeScreen = () => {
                     setOnboardingStep(s => s + 1);
                   } else {
                     dismissOnboarding();
+                    if (!isConfigured) {
+                      navigation.navigate('Settings');
+                    }
                   }
                 }}
               >
                 <Text style={styles.onboardingBtnPrimaryText}>
-                  {onboardingStep < ONBOARDING_STEPS.length - 1 ? 'Next →' : 'Get Started 🚀'}
+                  {onboardingStep < ONBOARDING_STEPS.length - 1
+                    ? 'Next'
+                    : !isConfigured ? 'Go to Settings' : 'Get Started'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1021,7 +1114,7 @@ const HomeScreen = () => {
             </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      )}
     </View>
   );
 };
@@ -1036,18 +1129,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
+    paddingTop: 56,
+    paddingBottom: 16,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 4,
+    marginBottom: 2,
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textMuted,
+    fontWeight: '500',
   },
   searchContainer: {
     flexDirection: 'row',
@@ -1055,14 +1150,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundCard,
     marginHorizontal: 20,
     marginBottom: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
   },
   searchIconContainer: {
-    marginRight: 8,
+    marginRight: 10,
   },
   searchIconText: {
     fontSize: 18,
@@ -1070,7 +1165,8 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: colors.text,
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '400',
   },
   clearButton: {
     padding: 4,
@@ -1080,34 +1176,34 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   categoriesContainer: {
-    maxHeight: 50,
-    marginBottom: 8,
+    maxHeight: 48,
+    marginBottom: 6,
   },
   categoriesContent: {
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 14,
+    gap: 8,
   },
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginRight: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     backgroundColor: colors.backgroundCard,
-    borderRadius: 24,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.border,
-    minHeight: 44,
+    minHeight: 36,
+    gap: 6,
   },
   categoryChipActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
   categoryIcon: {
-    fontSize: 22,
-    marginRight: 8,
-    lineHeight: 28,
-    includeFontPadding: false,
+    width: 20,
+    height: 20,
+    marginRight: 6,
   },
   categoryText: {
     fontSize: 13,
@@ -1117,6 +1213,20 @@ const styles = StyleSheet.create({
   categoryTextActive: {
     color: '#fff',
     fontWeight: '600',
+  },
+  categoryCountBadge: {
+    marginLeft: 6,
+    backgroundColor: colors.primary + '30',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  categoryCountText: {
+    fontSize: 10,
+    color: colors.primary,
+    fontWeight: '700',
   },
   loadingContainer: {
     flex: 1,
@@ -1135,7 +1245,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyIcon: {
-    fontSize: 64,
+    fontSize: 48,
+      height: 48,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     marginBottom: 16,
   },
   emptyTitle: {
@@ -1145,10 +1259,22 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptyText: {
-    fontSize: 14,
-    color: colors.textMuted,
+    fontSize: 15,
+    color: colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 20,
+    paddingHorizontal: 32,
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  setupIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)', // Primary color with 10% opacity
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    marginTop: -10,
   },
   setupButton: {
     marginTop: 20,
@@ -1200,7 +1326,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   categoryBadgeText: {
     fontSize: 11,
@@ -1230,10 +1356,12 @@ const styles = StyleSheet.create({
   landscapeCard: {
     width: '100%',
     height: Math.round((width - 40) * 9 / 16),
-    marginBottom: 16,
+    marginBottom: 14,
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   landscapeCardImage: {
     width: '100%',
@@ -1245,18 +1373,19 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 14,
-    paddingTop: 32,
+    paddingTop: 40,
     justifyContent: 'flex-end',
   },
   landscapeCardRow: {
     flexDirection: 'row',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   landscapeCardTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.text,
     marginBottom: 6,
+    letterSpacing: -0.1,
   },
   playOverlay: {
     position: 'absolute',
@@ -1285,9 +1414,11 @@ const styles = StyleSheet.create({
   compactCard: {
     flex: 1,
     height: 220,
-    borderRadius: 12,
+    borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   compactCardImage: {
     width: '100%',
@@ -1299,57 +1430,42 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 12,
+    paddingTop: 40,
     justifyContent: 'flex-end',
   },
   categoryBadgeSmall: {
     alignSelf: 'flex-start',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   categoryBadgeTextSmall: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#fff',
   },
   compactCardTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 4,
+    marginBottom: 3,
+    lineHeight: 18,
   },
   compactUsername: {
     fontSize: 11,
-    color: colors.textSecondary,
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    backgroundColor: colors.backgroundCard,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingBottom: 24,
-    paddingTop: 16,
-    height: 80,
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navItemActive: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '500',
   },
   navIconContainer: {
     marginBottom: 6,
+  },
+  navIcon: {
+    width: 24,
+    height: 24,
+    marginBottom: 4,
   },
   navIconText: {
     fontSize: 26,
@@ -1358,17 +1474,6 @@ const styles = StyleSheet.create({
   navIconTextActive: {
     fontSize: 26,
     color: colors.primary,
-  },
-  navLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  navLabelActive: {
-    fontSize: 11,
-    color: colors.primary,
-    fontWeight: '600',
-    marginTop: 2,
   },
   cancelButton: {
     paddingHorizontal: 16,
@@ -1385,7 +1490,7 @@ const styles = StyleSheet.create({
   },
   actionsBar: {
     paddingHorizontal: 20,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   actionsRow: {
     flexDirection: 'row',
@@ -1551,6 +1656,11 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: 'center',
   },
+  emptyCollectionsIconImage: {
+    width: 64,
+    height: 64,
+    marginBottom: 16,
+  },
   emptyCollectionsTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -1579,7 +1689,7 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: colors.backgroundCard,
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -1629,7 +1739,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   deleteMessage: {
     fontSize: 15,
@@ -1668,61 +1778,83 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  // ── Onboarding ──────────────────────────────────────────────
+  // ── Onboarding (absolute overlay) ─────────────────────────────────────
   onboardingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9998,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
     paddingHorizontal: 24,
   },
+  onboardingBackdrop: {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.88)',
+  },
   onboardingCard: {
-    width: '100%',
+    width: '100%' as const,
     backgroundColor: colors.backgroundCard,
-    borderRadius: 20,
-    overflow: 'hidden',
+    borderRadius: 24,
+    overflow: 'hidden' as const,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.08)',
+    zIndex: 1,
   },
   onboardingHeader: {
     backgroundColor: colors.primary,
     paddingVertical: 10,
-    alignItems: 'center',
+    alignItems: 'center' as const,
   },
   onboardingHeaderLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '700' as const,
     color: '#fff',
     letterSpacing: 3,
   },
   onboardingBody: {
     paddingHorizontal: 28,
-    paddingTop: 32,
+    paddingTop: 36,
     paddingBottom: 8,
-    alignItems: 'center',
-    minHeight: 220,
-    justifyContent: 'center',
+    alignItems: 'center' as const,
+    minHeight: 230,
+    justifyContent: 'center' as const,
   },
   onboardingIcon: {
-    fontSize: 56,
+      marginBottom: 16,
+      height: 48,
+    },
+  onboardingEmoji: {
+    fontSize: 48,
+      height: 48,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     marginBottom: 16,
   },
   onboardingTitle: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '700' as const,
     color: colors.text,
-    textAlign: 'center',
+    textAlign: 'center' as const,
     marginBottom: 14,
+    letterSpacing: -0.3,
   },
   onboardingDesc: {
     fontSize: 15,
     color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 23,
+    textAlign: 'center' as const,
+    lineHeight: 24,
   },
   onboardingDots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+    flexDirection: 'row' as const,
+    justifyContent: 'center' as const,
     gap: 8,
     marginTop: 24,
     marginBottom: 4,
@@ -1734,12 +1866,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   onboardingDotActive: {
-    width: 24,
+    width: 28,
     backgroundColor: colors.primary,
   },
   onboardingActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+    flexDirection: 'row' as const,
+    justifyContent: 'center' as const,
     gap: 12,
     paddingHorizontal: 28,
     paddingTop: 20,
@@ -1748,31 +1880,31 @@ const styles = StyleSheet.create({
   onboardingBtnPrimary: {
     flex: 1,
     backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center' as const,
   },
   onboardingBtnPrimaryText: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '700' as const,
     color: '#fff',
   },
   onboardingBtnSecondary: {
     flex: 1,
     backgroundColor: colors.backgroundSecondary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center' as const,
     borderWidth: 1,
     borderColor: colors.border,
   },
   onboardingBtnSecondaryText: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '600' as const,
     color: colors.textSecondary,
   },
   onboardingSkip: {
-    alignItems: 'center',
+    alignItems: 'center' as const,
     paddingVertical: 14,
     paddingBottom: 20,
   },
@@ -1783,3 +1915,4 @@ const styles = StyleSheet.create({
 });
 
 export default HomeScreen;
+

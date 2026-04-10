@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { FailedPost, Post } from '../types';
@@ -55,18 +56,23 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
   };
 
   const getThumbnailUrl = (fp: FailedPost): string => {
-    if (fp.thumbnail_url) return fp.thumbnail_url;
+    if (fp.thumbnail_url) {
+      if (fp.thumbnail_url.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${fp.thumbnail_url}`;
+      }
+      return fp.thumbnail_url;
+    }
     if (fp.content_type === 'instagram') {
       return `https://www.instagram.com/p/${fp.shortcode}/media/?size=m`;
     }
     return '';
   };
 
-  const getContentTypeIcon = (type?: string): string => {
+  const getContentTypeIcon = (type?: string): keyof typeof Ionicons.glyphMap => {
     switch (type) {
-      case 'youtube': return '🎥';
-      case 'webpage': return '🌐';
-      default: return '📸';
+      case 'youtube': return 'logo-youtube';
+      case 'webpage': return 'globe-outline';
+      default: return 'logo-instagram';
     }
   };
 
@@ -175,9 +181,7 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
           />
         ) : (
           <View style={[styles.postImage, styles.postImagePlaceholder]}>
-            <Text style={styles.postImagePlaceholderIcon}>
-              {getContentTypeIcon(fp.content_type)}
-            </Text>
+            <Ionicons name={getContentTypeIcon(fp.content_type)} size={38} color={colors.textMuted} />
           </View>
         )}
         <LinearGradient
@@ -190,7 +194,7 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
         </LinearGradient>
         {/* Red warning badge */}
         <View style={styles.failedBadge}>
-          <Text style={styles.failedBadgeText}>⚠️</Text>
+          <Ionicons name="warning" size={14} color="#fff" />
         </View>
         {isReanalyzing && (
           <View style={styles.analyzingOverlay}>
@@ -209,10 +213,10 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backIcon}>←</Text>
+          <Ionicons name="arrow-back" size={20} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.headerText}>
-          <Text style={styles.headerTitle}>⚠️ Failed Analysis</Text>
+          <Text style={styles.headerTitle}>Failed Analysis</Text>
           <Text style={styles.headerSubtitle}>
             {failedPosts.length} {failedPosts.length === 1 ? 'post' : 'posts'} failed
           </Text>
@@ -226,7 +230,7 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
         </View>
       ) : failedPosts.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>✅</Text>
+          <Ionicons name="checkmark-circle" size={56} color={colors.primary} style={styles.emptyIcon} />
           <Text style={styles.emptyTitle}>All Clear!</Text>
           <Text style={styles.emptyText}>No failed posts.</Text>
         </View>
@@ -276,9 +280,7 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
                   />
                 ) : (
                   <View style={[styles.sheetImage, styles.postImagePlaceholder]}>
-                    <Text style={styles.postImagePlaceholderIcon}>
-                      {getContentTypeIcon(selectedPost.content_type)}
-                    </Text>
+                    <Ionicons name={getContentTypeIcon(selectedPost.content_type)} size={42} color={colors.textMuted} />
                   </View>
                 );
               })()}
@@ -301,14 +303,20 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
                   style={styles.btnView}
                   onPress={() => selectedPost && handleView(selectedPost)}
                 >
-                  <Text style={styles.btnViewText}>🔗 View</Text>
+                  <View style={styles.btnRow}>
+                    <Ionicons name="open-outline" size={14} color={colors.text} />
+                    <Text style={styles.btnViewText}>View</Text>
+                  </View>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.btnDelete}
                   onPress={() => selectedPost && handleDelete(selectedPost)}
                 >
-                  <Text style={styles.btnDeleteText}>🗑 Delete</Text>
+                  <View style={styles.btnRow}>
+                    <Ionicons name="trash-outline" size={14} color="#d43500" />
+                    <Text style={styles.btnDeleteText}>Delete</Text>
+                  </View>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -322,7 +330,10 @@ const FailedAnalysisScreen = ({ navigation }: Props) => {
                   {selectedPost && reanalyzingPosts.has(selectedPost.shortcode) ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Text style={styles.btnReanalyzeText}>🔄 Re-analyze</Text>
+                    <View style={styles.btnRow}>
+                      <Ionicons name="refresh" size={14} color="#fff" />
+                      <Text style={styles.btnReanalyzeText}>Re-analyze</Text>
+                    </View>
                   )}
                 </TouchableOpacity>
               </View>
@@ -364,10 +375,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  backIcon: {
-    fontSize: 20,
-    color: colors.text,
-  },
   headerText: {
     flex: 1,
   },
@@ -398,7 +405,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyIcon: {
-    fontSize: 56,
     marginBottom: 16,
   },
   emptyTitle: {
@@ -447,9 +453,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  postImagePlaceholderIcon: {
-    fontSize: 40,
-  },
   postGradient: {
     position: 'absolute',
     bottom: 0,
@@ -472,9 +475,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderRadius: 10,
     padding: 2,
-  },
-  failedBadgeText: {
-    fontSize: 14,
   },
   analyzingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -577,6 +577,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  btnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
 });
 

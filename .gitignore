@@ -19,7 +19,15 @@ backend/.instagram_session.json
 backend/.instaloader_session
 backend/token.txt
 backend/config/ngrok_token.txt
+backend/config/test_credentials.txt
+backend/config/localtunnel.log
 backend/.setup_done
+backend/err.json
+backend/error_log_utf8.txt
+backend/failures.txt
+backend/final_test.txt
+backend/test_results.txt
+backend/yt_error.txt
 
 # ── Database ─────────────────────────────────────────────────────────────────
 backend/superbrain.db
@@ -52,3 +60,13 @@ supermobile-app/.env
 .DS_Store
 desktop.ini
 *.log
+.opencode/
+.anti-gravity/
+.antigravity
+.antigravity/
+anti-gravity
+anti-gravity*
+
+# ── CLI Wrapper ──────────────────────────────────────────────────────────────
+superbrain-cli/node_modules/
+superbrain-cli/payload/

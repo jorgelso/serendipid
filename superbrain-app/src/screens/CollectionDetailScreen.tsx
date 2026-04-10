@@ -14,14 +14,18 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { Post } from '../types';
 import { colors } from '../theme/colors';
-import collectionsService from '../services/collections';
+import { collectionsService } from '../services/collections';
 import postsCache from '../services/postsCache';
+import apiService from '../services/api';
 import CustomToast from '../components/CustomToast';
 import { cancelPostWatchLaterNotification } from '../services/notificationService';
+import { getCollectionIconName, getCollectionIconColor } from '../constants/icons';
+import { CATEGORY_ICONS } from '../constants/categories';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CollectionDetail'>;
 
@@ -118,7 +122,12 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
 
   const getPostImageUrl = (post: Post): string => {
     if (post.thumbnail_url) return post.thumbnail_url;
-    if (post.thumbnail) return post.thumbnail;
+    if (post.thumbnail) {
+      if (post.thumbnail.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${post.thumbnail}`;
+      }
+      return post.thumbnail;
+    }
     if (post.content_type === 'youtube') {
       const ytMatch = (post.url || '').match(
         /(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/embed\/|.*\/shorts\/))([\w-]{11})/
@@ -130,22 +139,11 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
   };
 
   const getCategoryColor = (category: string) => {
-    return colors.categories[category as keyof typeof colors.categories] || colors.categories.other;
+    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getCategoryIcon = (category: string) => {
-    const categoryMap: { [key: string]: string } = {
-      'product': '📦',
-      'places': '📍',
-      'food': '🍔',
-      'fashion': '👗',
-      'fitness': '💪',
-      'education': '📚',
-      'entertainment': '🎬',
-      'pets': '🐾',
-      'other': '📌'
-    };
-    return categoryMap[category] || '📌';
+    return CATEGORY_ICONS[category.trim().toLowerCase()] || CATEGORY_ICONS['other'];
   };
 
   const getInstagramImageUrl = (shortcode: string) => {
@@ -191,8 +189,8 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
           style={styles.postGradient}
         >
           {post.category ? (
-            <View style={[styles.categoryBadgeSmall, { backgroundColor: categoryColor }]}>
-              <Text style={styles.categoryBadgeTextSmall}>{getCategoryIcon(post.category)}</Text>
+            <View style={[styles.categoryBadgeSmall, { backgroundColor: getCategoryColor(post.category), justifyContent: 'center' }]}>
+              <Ionicons name={getCategoryIcon(post.category) as any} size={14} color="#fff" />
             </View>
           ) : null}
           <Text style={styles.postTitle} numberOfLines={2}>
@@ -234,7 +232,11 @@ const CollectionDetailScreen = ({ route, navigation }: Props) => {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.headerIconContainer}>
-            <Text style={styles.headerIcon}>{collection.icon}</Text>
+            <Ionicons
+              name={getCollectionIconName(collection.id, collection.icon) as any}
+              size={24}
+              color={colors.primary}
+            />
           </View>
           <View>
             <Text style={styles.headerTitle}>{collection.name}</Text>

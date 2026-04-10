@@ -10,8 +10,9 @@ A self-hosted AI-powered second brain for Android — save Instagram posts, YouT
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![React Native](https://img.shields.io/badge/React_Native-0.81-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK_54-000020?logo=expo&logoColor=white)](https://expo.dev)
+[![npm package](https://img.shields.io/npm/v/superbrain-server?label=npm%20package)](https://www.npmjs.com/package/superbrain-server)
 
-[![Download APK](https://img.shields.io/badge/Download%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/sidinsearch/superbrain/releases)
+[![Download APK](https://img.shields.io/badge/Download%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/sidinsearch/superbrain/releases/latest/download/superbrain.apk)
 [![Report Bug](https://img.shields.io/badge/Report%20Bug-d73a4a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=bug)
 [![Request Feature](https://img.shields.io/badge/Request%20Feature-7057ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=enhancement)
 
@@ -51,8 +52,10 @@ A self-hosted AI-powered second brain for Android — save Instagram posts, YouT
 - [Architecture](#architecture)
 - [AI Model Router](#ai-model-router)
 - [Getting Started](#getting-started)
+- [Packages](#packages)
 - [Instagram Credentials](#instagram-credentials)
 - [Installing the Android App](#installing-the-android-app)
+- [Release Process](#release-process)
 - [Hosting Options](#hosting-options)
 - [Notifications](#notifications)
 - [API Reference](#api-reference)
@@ -172,6 +175,11 @@ superbrain/
     │   ├── types/index.ts
     │   └── theme/colors.ts
     └── android/                  # Native Android project (Gradle)
+
+  └── superbrain-cli/               # npm wrapper for one-line backend install
+    ├── bin/superbrain.js         # Cross-platform launcher (downloads/runs backend)
+    ├── scripts/build.js          # Payload packager for npm release
+    └── payload/                  # Bundled backend template shipped to users
 ```
 
 ---
@@ -211,82 +219,152 @@ Free AI APIs have rate limits, downtime, and variable speed. SuperBrain solves t
 
 ## Getting Started
 
-### Prerequisites
+### Backend Setup Prerequisites
 
-| Requirement | Install | Required? |
+| Requirement | Install | Needed For |
 |---|---|---|
-| Python 3.10+ | [python.org](https://python.org) | ✅ Yes |
-| ffmpeg | `sudo apt install ffmpeg` / `brew install ffmpeg` | ✅ Yes |
-| Node.js 20+ | [nodejs.org](https://nodejs.org) | Only for building the app |
-| ngrok | [ngrok.com](https://ngrok.com) | Only if backend runs on your PC |
+| Python 3.10+ | [python.org](https://python.org) | npm + local Python setup |
+| ffmpeg | `sudo apt install ffmpeg` / `brew install ffmpeg` / `winget install Gyan.FFmpeg` | all backend methods |
+| Node.js 20+ | [nodejs.org](https://nodejs.org) | npm one-line setup |
+| Docker + Compose | [docs.docker.com/get-started](https://docs.docker.com/get-started/) | Docker setup |
+| ngrok (optional) | [ngrok.com](https://ngrok.com) | phone access from outside local network |
 
-### Quick Start
+### Method 1: npm One-Line Setup (Recommended)
+
+This is the easiest way to run backend on any PC without cloning this repository.
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/sidinsearch/superbrain.git
-cd superbrain/backend
-
-# 2. Run the interactive setup wizard
-#    Creates venv · installs deps · configures API keys · starts server
-python start.py
-
-# 3. Expose the server to the internet (if running on your local machine)
-ngrok http 5000
-
-# 4. Install the APK on your Android phone
-#    Open Settings in the app → enter the ngrok URL + token from backend/token.txt
+# Run directly (no global install)
+npx -y superbrain-server@latest
 ```
 
-**See it in action:**
+Optional global install:
 
+```bash
+npm install -g superbrain-server
+superbrain-server
+```
 
-https://github.com/user-attachments/assets/9769681b-5494-4093-b1bf-2c60c20e1673
+What this does on first run:
 
+1. Downloads backend package to `~/.superbrain-server`
+2. Creates virtual environment
+3. Installs dependencies
+4. Runs interactive setup wizard
+5. Starts API server and prints Access Token
 
-`start.py` is the **single entry point** for the backend. On first run it walks you through:
+Useful commands:
 
-1. Virtual environment creation
-2. Dependency installation (`requirements.txt`)
-3. API key configuration (Groq / Gemini / OpenRouter)
-4. Instagram credentials (optional — [see below](#instagram-credentials))
-5. Ollama offline model setup (optional)
-6. Whisper transcription model selection
-7. API token generation
+```bash
+superbrain-server               # Starts the backend engine
+superbrain-server status        # Show connection QR code & running server info
+superbrain-server update        # Update the backend components
+superbrain-server ngrok         # Configure Ngrok tunnel
+superbrain-server reset         # Open interactive reset menu
+superbrain-server reset --all   # Force complete data wipe
+```
 
-On subsequent runs it simply starts the server. Use `python start.py --reset` to re-run the wizard.
+### Method 2: Docker Setup
 
-### Manual Setup
-
-<details>
-<summary>Click to expand</summary>
+Use this when you want containerized, reproducible deployment.
 
 ```bash
 cd superbrain/backend
+cp .env.example .env
+```
+
+Edit `.env` and set at least:
+
+- `GEMINI_API_KEY` (recommended)
+- `GROQ_API_KEY` (optional)
+- `OPENROUTER_API_KEY` (optional)
+
+Then run:
+
+```bash
+docker compose up -d --build
+docker compose logs -f superbrain-api
+```
+
+Health check:
+
+```bash
+curl http://localhost:5000/health
+```
+
+### Method 3: Local Python Setup (Normal)
+
+Use this when developing backend locally without Docker.
+
+Windows (PowerShell):
+
+```powershell
+cd superbrain\backend
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python start.py
+```
 
-# Copy the example keys file and fill in your keys
-cp config/.api_keys.example config/.api_keys
+Linux / macOS:
 
-# Start the server
+```bash
+cd superbrain/backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python start.py
+```
+
+Direct API run (without setup wizard):
+
+```bash
 python api.py
 ```
 
-The server starts on `http://localhost:5000`. A unique API token is auto-generated and saved to `backend/token.txt`.
+### Connect Android App to Backend
 
-</details>
+1. Start backend using any method above.
+2. Copy the Access Token shown by backend.
+3. In Android app Settings, set backend URL and Access Token.
+4. Verify `/health` endpoint returns OK.
 
-### Expose with ngrok
+### Optional: Expose Backend for Phone Access
+
+If phone cannot reach your PC directly, expose port 5000:
 
 ```bash
 ngrok http 5000
 ```
 
-Copy the `https://xxxx.ngrok-free.app` URL and enter it in the app's **Settings** screen along with the token from `backend/token.txt`.
+Use the generated HTTPS URL in app Settings.
 
-> **Tip:** Run `ngrok config add-authtoken YOUR_TOKEN` for a stable URL that persists across restarts.
+> **Tip:** `GOOGLE_API_KEY` is accepted as a compatibility alias, but `GEMINI_API_KEY` is the preferred key name.
+
+---
+
+## Packages
+
+SuperBrain backend launcher is published in two registries:
+
+- npmjs: [superbrain-server](https://www.npmjs.com/package/superbrain-server)
+  - Stable install: `npx -y superbrain-server@latest`
+  - Beta install: `npx -y superbrain-server@beta`
+- GitHub Packages: `@sidinsearch/superbrain-server`
+  - One-time auth + install block (`read:packages` token required):
+  - Note: only needed for GitHub Packages. Not needed for npmjs (`superbrain-server`) installs.
+
+```bash
+npm config set @sidinsearch:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken YOUR_GITHUB_TOKEN
+npx -y @sidinsearch/superbrain-server@latest
+# beta channel
+npx -y @sidinsearch/superbrain-server@beta
+```
+
+GitHub Packages docs: [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)
+
+GitHub Packages is separate from the npmjs package page and may not appear in the repository Packages tab until it has been published and linked there.
 
 ---
 
@@ -365,7 +443,24 @@ EAS returns a download URL + QR code when done. No Android Studio required.
 
 ### Option 3 — GitHub Actions
 
-The repo includes a [build workflow](.github/workflows/build.yml) that builds the APK on every push to `main`. Download the artifact from the **Actions** tab.
+The repo includes:
+
+- [build workflow](.github/workflows/build.yml): On push to `main` or `beta`, it builds APK, uploads artifact, publishes the GitHub npm package, and updates the release with `superbrain.apk`
+- [release APK workflow](.github/workflows/release-apk.yml): Optional tag/release-driven APK pipeline for versioned tags
+
+Automatic release targets:
+
+1. Push to `main` updates release tag `latest` (stable).
+2. Push to `beta` updates release tag `beta-latest` (pre-release).
+
+How to get the newest APK from Actions artifacts:
+
+1. Push your changes to `beta` or `main`.
+2. Open **GitHub → Actions → Build APK (Gradle)**.
+3. Open the latest successful run.
+4. Download the artifact named like `superbrain-release-<run_number>`.
+5. Extract it and rename `superbrain.apk` if needed.
+6. Use it directly for testing/internal sharing.
 
 ### Option 4 — Local Gradle Build
 
@@ -376,6 +471,42 @@ cd android
 ./gradlew assembleRelease
 # Output: android/app/build/outputs/apk/release/app-release.apk
 ```
+
+---
+
+## Release Process
+
+Use this push-based flow to keep GitHub release + APK + GitHub Packages aligned.
+
+1. Push changes to `beta` or `main`.
+2. `.github/workflows/build.yml` runs automatically and does all of the following:
+  - Builds release APK.
+  - Uploads APK as an Actions artifact.
+  - Updates the branch release and attaches `superbrain.apk`.
+  - Publishes `@sidinsearch/superbrain-server` to GitHub Packages.
+3. Verify:
+  - APK download works from the release.
+  - Package appears under GitHub Packages for the repository.
+
+Recommended release notes install line:
+
+```bash
+npx -y superbrain-server@beta
+```
+
+For stable releases, use:
+
+```bash
+npx -y superbrain-server@latest
+```
+
+Verification checklist:
+
+1. `latest` (main) or `beta-latest` (beta) release contains `superbrain.apk`.
+2. Repository **Packages** tab shows `@sidinsearch/superbrain-server`.
+3. Install checks:
+  - npmjs: `npx -y superbrain-server@beta` (or `@latest`)
+  - GitHub Packages: `npx -y @sidinsearch/superbrain-server@beta` (or `@latest`)
 
 ---
 
@@ -420,7 +551,7 @@ Saving to any non-Watch Later collection fires an instant **"Saved to SuperBrain
 
 ## API Reference
 
-All endpoints require the `X-API-Key` header with the token from `backend/token.txt`.
+All endpoints require the `X-API-Key` header with the Access Token.
 
 | Method | Endpoint | Description |
 |---|---|---|

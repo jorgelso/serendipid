@@ -489,6 +489,9 @@ def _has_image_input(m: Dict) -> bool:
     return "image" in str(mods)
 
 
+class RateLimitError(Exception):
+    pass
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  MODEL ROUTER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -534,6 +537,85 @@ class ModelRouter:
 
     def _key(self, name: str) -> Optional[str]:
         return self._api_keys.get(name) or None
+
+    def reload_api_keys(self):
+        """Reload API keys from environment and .api_keys file."""
+        self._api_keys.clear()
+        self._load_api_keys()
+        logger.info("🔑 API keys reloaded")
+
+    def get_available_providers(self) -> Dict[str, bool]:
+        """Return dict of provider -> has_key."""
+        return {
+            "groq": bool(self._key("GROQ_API_KEY")),
+            "gemini": bool(self._key("GEMINI_API_KEY")),
+            "openrouter": bool(self._key("OPENROUTER_API_KEY")),
+            "ollama": True,  # Always available
+        }
+
+    def set_api_key(self, provider: str, api_key: str) -> bool:
+        """Set an API key for a provider and persist to file."""
+        key_name = f"{provider.upper()}_API_KEY"
+        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]
+        
+        if key_name not in valid_providers:
+            return False
+        
+        # Update in-memory
+        self._api_keys[key_name] = api_key
+        
+        # Persist to file
+        self._persist_api_key(key_name, api_key)
+        return True
+
+    def delete_api_key(self, provider: str) -> bool:
+        """Delete an API key for a provider."""
+        key_name = f"{provider.upper()}_API_KEY"
+        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]
+        
+        if key_name not in valid_providers:
+            return False
+        
+        # Remove from memory
+        self._api_keys.pop(key_name, None)
+        
+        # Remove from file
+        self._remove_api_key(key_name)
+        return True
+
+    def _persist_api_key(self, key_name: str, api_key: str):
+        """Persist an API key to the .api_keys file."""
+        lines = []
+        updated = False
+        
+        if API_KEYS_FILE.exists():
+            with open(API_KEYS_FILE, "r") as f:
+                for line in f:
+                    if line.strip().startswith(f"{key_name}="):
+                        lines.append(f"{key_name}={api_key}\n")
+                        updated = True
+                    else:
+                        lines.append(line)
+        
+        if not updated:
+            lines.append(f"{key_name}={api_key}\n")
+        
+        with open(API_KEYS_FILE, "w") as f:
+            f.writelines(lines)
+
+    def _remove_api_key(self, key_name: str):
+        """Remove an API key from the .api_keys file."""
+        if not API_KEYS_FILE.exists():
+            return
+        
+        lines = []
+        with open(API_KEYS_FILE, "r") as f:
+            for line in f:
+                if not line.strip().startswith(f"{key_name}="):
+                    lines.append(line)
+        
+        with open(API_KEYS_FILE, "w") as f:
+            f.writelines(lines)
 
     # ── Dynamic OpenRouter free-model discovery (FreeRide approach) ────────────
 
@@ -584,7 +666,7 @@ class ModelRouter:
             try:
                 self._refresh_openrouter_models()
             except Exception as e:
-                print(f"⚠️  OpenRouter auto-refresh error: {e}")
+                print(f"??  OpenRouter auto-refresh error: {e}")
             time.sleep(OPENROUTER_FREE_CACHE_HOURS * 3600)
 
     def _refresh_openrouter_models(self):
@@ -628,7 +710,10 @@ class ModelRouter:
             resp.raise_for_status()
             all_models = resp.json().get("data", [])
         except Exception as e:
-            print(f"⚠️  OpenRouter model discovery failed: {e}")
+            # if "429" in str(e) or "quota" in str(e).lower():
+            #     raise RateLimitError("Quota limit hit")
+            # raise e
+            print(f"⚠️  OpenRouter free model discovery failed: {e}")
             return
 
         # Filter for free models (pricing.prompt == 0 or :free suffix)
@@ -1021,6 +1106,9 @@ class ModelRouter:
                 return result
 
             except Exception as e:
+                # Do not immediately abort on quota, try next model
+                # if "429" in str(e) or "quota" in str(e).lower():
+                #     raise RateLimitError("Quota limit hit")
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
@@ -1065,6 +1153,9 @@ class ModelRouter:
                 return result
 
             except Exception as e:
+                # Do not immediately abort on quota, try next model
+                # if "429" in str(e) or "quota" in str(e).lower():
+                #     raise RateLimitError("Quota limit hit")
                 status = 429 if "429" in str(e) else 0
                 self._record_failure(key, str(e), status_code=status)
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
@@ -1172,3 +1263,5 @@ if __name__ == "__main__":
         router.refresh_models()
     else:
         router.print_rankings()
+
+

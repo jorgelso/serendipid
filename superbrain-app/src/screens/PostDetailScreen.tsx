@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, StatusBar, Modal, TextInput, ActivityIndicator, Linking, InteractionManager } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
 import { Post } from '../types';
 import { colors } from '../theme/colors';
@@ -8,23 +9,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import apiService from '../services/api';
 import postsCache from '../services/postsCache';
 import CustomToast from '../components/CustomToast';
-import collectionsService from '../services/collections';
+import { collectionsService } from '../services/collections';
 import { Collection } from '../types';
 import { schedulePostWatchLaterNotification, sendImmediateWatchLaterNotification, sendImmediateSavedNotification } from '../services/notificationService';
+import { getCollectionIconName, getCollectionIconColor } from '../constants/icons';
+import { DEFAULT_CATEGORIES, CATEGORY_ICONS } from '../constants/categories';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PostDetail'>;
 
-const CATEGORIES = [
-  { id: 'product', name: 'Product', icon: '📦' },
-  { id: 'places', name: 'Places', icon: '📍' },
-  { id: 'food', name: 'Food', icon: '🍔' },
-  { id: 'fashion', name: 'Fashion', icon: '👗' },
-  { id: 'fitness', name: 'Fitness', icon: '💪' },
-  { id: 'education', name: 'Education', icon: '📚' },
-  { id: 'entertainment', name: 'Entertainment', icon: '🎬' },
-  { id: 'pets', name: 'Pets', icon: '🐾' },
-  { id: 'other', name: 'Other', icon: '📌' },
-];
+// Filter out 'all' from categories to use for the edit dropdown
+const CATEGORIES = DEFAULT_CATEGORIES.filter(c => c.id !== 'all');
 
 const PostDetailScreen = ({ route, navigation }: Props) => {
   const { post } = route.params;
@@ -54,25 +48,29 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
 
   const getPostImageUrl = (post: Post) => {
     if (post.thumbnail_url) return post.thumbnail_url;
-    if (post.thumbnail) return post.thumbnail;
+    if (post.thumbnail) {
+      if (post.thumbnail.startsWith('/static/')) {
+        return `${apiService.currentApiUrl}${post.thumbnail}`;
+      }
+      return post.thumbnail;
+    }
     return `https://www.instagram.com/p/${post.shortcode}/media/?size=l`;
   };
 
   const getContentTypeLabel = (type?: string) => {
     switch (type) {
-      case 'youtube':  return { icon: '▶️', label: 'YouTube' };
-      case 'webpage':  return { icon: '🌐', label: 'Web Page' };
-      default:         return { icon: '📸', label: 'Instagram' };
+      case 'youtube':  return { icon: 'logo-youtube', label: 'YouTube' };
+      case 'webpage':  return { icon: 'globe-outline', label: 'Website' };
+      default:         return { icon: 'logo-instagram', label: 'Instagram' };
     }
   };
 
   const getCategoryColor = (category: string) => {
-    return colors.categories[category as keyof typeof colors.categories] || colors.categories.other;
+    return colors.categories[category.trim().toLowerCase() as keyof typeof colors.categories] || colors.categories.other;
   };
 
   const getCategoryIcon = (category: string) => {
-    const cat = CATEGORIES.find(c => c.id === category);
-    return cat ? cat.icon : '📌';
+    return CATEGORY_ICONS[category.trim().toLowerCase()] || CATEGORY_ICONS['other'];
   };
 
   const loadCollections = async () => {
@@ -90,7 +88,6 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
 
   const handleAddToCollection = async (collectionId: string) => {
     try {
-      // Duplicate check — tell the user if this post is already in the collection
       const existingIds = await collectionsService.getCollectionPosts(collectionId);
       if (existingIds.includes(post.shortcode)) {
         setShowCollectionsModal(false);
@@ -99,7 +96,6 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
       }
 
       await collectionsService.addPostToCollection(collectionId, post.shortcode);
-      // Fire instant "Added to Watch Later" notification + schedule daily reminders
       if (collectionId === 'default_watch_later') {
         sendImmediateWatchLaterNotification(post).catch(() => {});
       } else {
@@ -110,7 +106,6 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
       setToast({ visible: true, message: 'Added to collection', type: 'success' });
     } catch (error) {
       console.error('Error adding to collection:', error);
-      
       setToast({ visible: true, message: 'Failed to add to collection', type: 'error' });
     }
   };
@@ -133,10 +128,9 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
   const handleReanalyze = async () => {
     if (reanalyzing) return;
 
-    // Connectivity check — show toast instead of showing a stuck analyzing overlay
     const reachable = await apiService.isReachable();
     if (!reachable) {
-      setToast({ visible: true, message: '📡 Not connected to backend — connect first and retry', type: 'warning' });
+      setToast({ visible: true, message: 'Not connected to backend — connect first and retry', type: 'warning' });
       return;
     }
 
@@ -144,17 +138,12 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
     const targetUrl = post.url || `https://www.instagram.com/p/${post.shortcode}/`;
     const { shortcode } = post;
 
-    // Mark in cache so HomeScreen shows the analyzing overlay immediately
     await postsCache.markAsAnalyzing(shortcode);
-
-    // Go back right away — user sees the overlay on HomeScreen while analysis runs
     navigation.goBack();
 
-    // Fire-and-forget: component stays alive in nav stack, closure is safe
     apiService.reanalyzePost(targetUrl)
       .then(async () => {
         await postsCache.markAnalysisComplete(shortcode);
-        // Clear stale cache so HomeScreen refetches fresh data on next poll
         await postsCache.removePostFromCache(shortcode);
       })
       .catch(async () => {
@@ -170,8 +159,6 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
   const confirmDelete = async () => {
     try {
       setDeleting(true);
-      // Optimistic: remove locally first so the user is never stuck on a
-      // network error. Queue the delete if we're offline.
       await postsCache.removePostFromCache(post.shortcode);
       setShowDeleteModal(false);
       setToast({ visible: true, message: 'Post deleted successfully', type: 'success' });
@@ -180,7 +167,6 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
         await apiService.deletePost(post.shortcode);
       } catch (apiErr: any) {
         if (!apiErr?.response) {
-          // Network-level failure — sync when back online
           await postsCache.enqueuePendingMutation({ type: 'delete', shortcode: post.shortcode });
         }
       }
@@ -198,14 +184,12 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
   const handleSaveEdit = async () => {
     try {
       setSaving(true);
-      // Apply changes locally first (optimistic — visible even offline)
       post.category = editedCategory;
       post.title = editedTitle;
       post.summary = editedSummary;
       await postsCache.updatePostInCache(post);
       setShowEditModal(false);
       setToast({ visible: true, message: 'Post updated successfully', type: 'success' });
-      // Sync to backend; queue if offline
       try {
         await apiService.updatePost(post.shortcode, {
           category: editedCategory,
@@ -214,7 +198,6 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
         });
       } catch (apiErr: any) {
         if (!apiErr?.response) {
-          // Network-level failure — sync when back online
           await postsCache.enqueuePendingMutation({
             type: 'update',
             shortcode: post.shortcode,
@@ -234,35 +217,32 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => {
-          
           navigation.goBack();
         }}>
-          <Text style={styles.backIcon}>←</Text>
+          <Ionicons name="arrow-back" size={28} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Post Details</Text>
         <View style={styles.actionButtons}>
           <TouchableOpacity style={styles.actionButton} onPress={() => handleShowCollections()}>
-            <Text style={styles.actionIcon}>📁</Text>
+            <Ionicons name="folder" size={22} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={handleReanalyze} disabled={reanalyzing}>
             {reanalyzing
               ? <ActivityIndicator size="small" color={colors.text} />
-              : <Text style={styles.actionIcon}>🔄</Text>}
+              : <Ionicons name="refresh" size={22} color={colors.text} />}
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => handleEdit()}>
-            <Text style={styles.actionIcon}>✏️</Text>
+            <Ionicons name="pencil" size={22} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => handleDelete()}>
-            <Text style={styles.actionIcon}>🗑️</Text>
+            <Ionicons name="trash" size={22} color={colors.text} />
           </TouchableOpacity>
         </View>
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* Image */}
         <TouchableOpacity onPress={handleOpenInstagram} activeOpacity={0.9}>
           <Image
             source={{ uri: getPostImageUrl(post) }}
@@ -271,28 +251,25 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
           />
         </TouchableOpacity>
 
-        {/* Category Badge */}
         {post.category ? (
           <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(post.category) }]}>
-            <Text style={styles.categoryBadgeIcon}>{getCategoryIcon(post.category)}</Text>
+            <Ionicons name={getCategoryIcon(post.category) as any} size={14} color="#fff" />
             <Text style={styles.categoryBadgeText}>{post.category.toUpperCase()}</Text>
           </View>
         ) : null}
 
-        {/* Content Type Badge */}
         {(() => {
           const ct = getContentTypeLabel(post.content_type);
           return (
             <View style={styles.contentTypeBadge}>
-              <Text style={styles.contentTypeBadgeText}>{ct.icon} {ct.label}</Text>
+              <Ionicons name={ct.icon as any} size={14} color={colors.textMuted} />
+              <Text style={styles.contentTypeBadgeText}>{ct.label}</Text>
             </View>
           );
         })()}
 
-        {/* Title */}
         <Text style={styles.title}>{post.title || 'Untitled'}</Text>
 
-        {/* Username & Date */}
         <View style={styles.metaContainer}>
           <Text style={styles.username}>@{post.username || 'unknown'}</Text>
           {post.post_date ? (
@@ -300,13 +277,11 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
           ) : null}
         </View>
 
-        {/* Summary */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Summary</Text>
           <Text style={styles.summaryText}>{post.summary || 'No summary available'}</Text>
         </View>
 
-        {/* Tags */}
         {post.tags && post.tags.length > 0 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Tags</Text>
@@ -320,39 +295,48 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
           </View>
         ) : null}
 
-        {/* Music - not shown for webpages */}
         {post.content_type !== 'webpage' && post.music && post.music !== 'No music identified' && post.music !== '' ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Music</Text>
-            <View style={styles.musicCard}>
-              <Text style={styles.musicIcon}>🎵</Text>
-              <Text style={styles.musicText}>{post.music}</Text>
-            </View>
+            {post.music.includes('|') ? (
+              <TouchableOpacity 
+                style={styles.musicCardLink} 
+                onPress={() => Linking.openURL(post.music.split('|')[1].trim())}
+              >
+                <View style={styles.musicCardContent}>
+                  <Ionicons name="musical-notes" size={24} color={colors.primary} />
+                  <Text style={styles.musicTextLink} numberOfLines={1}>{post.music.split('|')[0].trim()}</Text>
+                </View>
+                <Ionicons name="open-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.musicCard}>
+                <Ionicons name="musical-notes" size={24} color={colors.primary} />
+                <Text style={styles.musicText}>{post.music.trim()}</Text>
+              </View>
+            )}
           </View>
         ) : null}
 
-        {/* Stats */}
         <View style={styles.statsContainer}>
           {post.likes && post.likes > 0 ? (
             <View style={styles.statBox}>
-              <Text style={styles.statIcon}>❤️</Text>
+              <Ionicons name="heart" size={24} color={colors.error} />
               <Text style={styles.statValue}>{post.likes}</Text>
               <Text style={styles.statLabel}>Likes</Text>
             </View>
           ) : null}
         </View>
 
-        {/* Original URL */}
         <TouchableOpacity style={styles.linkButton} onPress={handleOpenInstagram}>
           <Text style={styles.linkButtonText}>
             {post.content_type === 'youtube' ? 'Open in YouTube' :
-             post.content_type === 'webpage' ? 'Open Web Page' :
+             post.content_type === 'webpage' ? 'Open Website' :
              'Open in Instagram'}
           </Text>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Edit Modal */}
       <Modal
         visible={showEditModal}
         animationType="slide"
@@ -369,7 +353,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Edit Post</Text>
                 <TouchableOpacity onPress={() => setShowEditModal(false)}>
-                  <Text style={styles.modalCloseIcon}>✕</Text>
+                  <Ionicons name="close" size={24} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
 
@@ -406,26 +390,40 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                 contentContainerStyle={styles.categoriesContent}
                 keyboardShouldPersistTaps="always"
               >
-                {CATEGORIES.map((cat) => (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[
-                      styles.categoryOption,
-                      editedCategory === cat.id && styles.categoryOptionActive,
-                    ]}
-                    onPress={() => setEditedCategory(cat.id)}
-                  >
-                    <Text style={styles.categoryOptionIcon}>{cat.icon}</Text>
-                    <Text
+                {CATEGORIES.map((cat) => {
+                  const isActive = editedCategory === cat.id;
+                  const catColor = getCategoryColor(cat.id);
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
                       style={[
-                        styles.categoryOptionText,
-                        editedCategory === cat.id && styles.categoryOptionTextActive,
+                        styles.categoryOption,
+                        isActive ? {
+                          backgroundColor: catColor,
+                          borderColor: catColor,
+                        } : {
+                          borderColor: catColor + '40',
+                          backgroundColor: catColor + '10',
+                        },
                       ]}
+                      onPress={() => setEditedCategory(cat.id)}
                     >
-                      {cat.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Ionicons
+                        name={cat.icon as any}
+                        size={16}
+                        color={isActive ? '#fff' : catColor}
+                      />
+                      <Text
+                        style={[
+                          styles.categoryOptionText,
+                          { color: isActive ? '#fff' : catColor }
+                        ]}
+                      >
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </ScrollView>
 
@@ -445,12 +443,11 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                 <Text style={styles.modalButtonSaveText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
               </TouchableOpacity>
             </View>
-          </View>
+            </View>
+          </TouchableOpacity>
         </TouchableOpacity>
-      </TouchableOpacity>
       </Modal>
 
-      {/* Delete Confirmation Modal */}
       <Modal
         visible={showDeleteModal}
         animationType="fade"
@@ -460,7 +457,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
         <View style={styles.modalOverlay}>
           <View style={styles.deleteModalContent}>
             <View style={styles.deleteIconContainer}>
-              <Text style={styles.deleteIcon}>🗑️</Text>
+              <Ionicons name="trash" size={40} color={colors.error} />
             </View>
             <Text style={styles.deleteTitle}>Delete Post?</Text>
             <Text style={styles.deleteMessage}>
@@ -486,7 +483,6 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
         </View>
       </Modal>
 
-      {/* Collections Modal */}
       <Modal
         visible={showCollectionsModal}
         animationType="slide"
@@ -498,7 +494,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add to Collection</Text>
               <TouchableOpacity onPress={() => setShowCollectionsModal(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -509,7 +505,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
               </View>
             ) : collections.length === 0 ? (
               <View style={styles.emptyCollections}>
-                <Text style={styles.emptyIcon}>📂</Text>
+                <Ionicons name="folder-open" size={64} color={colors.textMuted} />
                 <Text style={styles.emptyTitle}>No Collections</Text>
                 <Text style={styles.emptyText}>Create collections in the Library tab first</Text>
                 <TouchableOpacity
@@ -531,7 +527,11 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                     onPress={() => handleAddToCollection(collection.id)}
                   >
                     <View style={styles.collectionItemLeft}>
-                      <Text style={styles.collectionItemIcon}>{collection.icon}</Text>
+                      <Ionicons
+                        name={getCollectionIconName(collection.id, collection.icon) as any}
+                        size={28}
+                        color={getCollectionIconColor(collection.id, collection.icon)}
+                      />
                       <View>
                         <Text style={styles.collectionItemName}>{collection.name}</Text>
                         <Text style={styles.collectionItemCount}>
@@ -539,7 +539,7 @@ const PostDetailScreen = ({ route, navigation }: Props) => {
                         </Text>
                       </View>
                     </View>
-                    <Text style={styles.collectionItemArrow}>→</Text>
+                    <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -577,10 +577,6 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 8,
   },
-  backIcon: {
-    fontSize: 28,
-    color: colors.text,
-  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -595,9 +591,6 @@ const styles = StyleSheet.create({
     padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  actionIcon: {
-    fontSize: 22,
   },
   content: {
     flex: 1,
@@ -622,9 +615,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     gap: 6,
   },
-  categoryBadgeIcon: {
-    fontSize: 14,
-  },
   categoryBadgeText: {
     fontSize: 12,
     fontWeight: '700',
@@ -632,6 +622,8 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   contentTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -639,6 +631,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
     marginHorizontal: 20,
     marginBottom: 12,
+    gap: 6,
   },
   contentTypeBadgeText: {
     fontSize: 12,
@@ -646,12 +639,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: colors.text,
     paddingHorizontal: 20,
-    marginBottom: 16,
-    lineHeight: 32,
+    marginBottom: 14,
+    lineHeight: 30,
+    letterSpacing: -0.3,
   },
   metaContainer: {
     flexDirection: 'row',
@@ -673,10 +667,12 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
-    marginBottom: 12,
+    color: colors.textMuted,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   summaryText: {
     fontSize: 15,
@@ -689,17 +685,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
-    backgroundColor: colors.backgroundCard,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(99, 102, 241, 0.2)',
   },
   tagText: {
     fontSize: 13,
-    color: colors.primary,
-    fontWeight: '500',
+    color: colors.primaryLight,
+    fontWeight: '600',
   },
   musicCard: {
     flexDirection: 'row',
@@ -709,10 +705,29 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
+    gap: 12,
   },
-  musicIcon: {
-    fontSize: 24,
-    marginRight: 12,
+  musicCardLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.backgroundCard,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primaryGlow || 'rgba(99, 102, 241, 0.3)',
+  },
+  musicCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  musicTextLink: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.primaryLight || colors.primary,
+    fontWeight: '500',
   },
   musicText: {
     flex: 1,
@@ -734,16 +749,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border,
-  },
-  statIcon: {
-    fontSize: 24,
-    marginBottom: 8,
+    gap: 8,
   },
   statValue: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
@@ -784,11 +795,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
-  modalCloseIcon: {
-    fontSize: 24,
-    color: colors.textMuted,
-    padding: 4,
-  },
   deleteModalContent: {
     backgroundColor: colors.background,
     borderRadius: 24,
@@ -804,9 +810,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-  },
-  deleteIcon: {
-    fontSize: 40,
   },
   deleteTitle: {
     fontSize: 22,
@@ -859,14 +862,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
     borderWidth: 1,
     borderColor: colors.border,
+    gap: 6,
   },
   categoryOptionActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
-  },
-  categoryOptionIcon: {
-    fontSize: 16,
-    marginRight: 6,
   },
   categoryOptionText: {
     fontSize: 14,
@@ -935,10 +935,6 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: 'center',
   },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -982,9 +978,6 @@ const styles = StyleSheet.create({
     gap: 12,
     flex: 1,
   },
-  collectionItemIcon: {
-    fontSize: 28,
-  },
   collectionItemName: {
     fontSize: 16,
     fontWeight: '600',
@@ -993,10 +986,6 @@ const styles = StyleSheet.create({
   },
   collectionItemCount: {
     fontSize: 13,
-    color: colors.textMuted,
-  },
-  collectionItemArrow: {
-    fontSize: 20,
     color: colors.textMuted,
   },
 });

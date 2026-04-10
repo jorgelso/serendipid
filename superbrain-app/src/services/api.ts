@@ -1,6 +1,25 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Post, ApiResponse, QueueStatus, DatabaseStats, RetryQueueItem, Collection } from '../types';
+
+const ACCESS_TOKEN_LENGTH = 8;
+
+// Request timeouts
+const DEFAULT_TIMEOUT = 10000; // 10s for reads
+const ANALYSIS_TIMEOUT = 60000; // 60s for analysis (subprocess)
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY = 1000; // 1s, doubles each retry
+
+function normalizeAccessToken(token: string | null): string | null {
+  if (!token) {
+    return null;
+  }
+  const sanitized = token.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (sanitized.length !== ACCESS_TOKEN_LENGTH) {
+    return null;
+  }
+  return sanitized;
+}
 
 /** Normalise a raw API post so that thumbnail_url always resolves to an image. */
 function normalizePost(p: any): Post {
@@ -14,19 +33,36 @@ function normalizePost(p: any): Post {
 
 class ApiService {
   private apiToken: string | null = null;
-  private apiUrl: string = 'http://192.168.31.205:5000'; // Laptop hotspot IP
+  // Default only for development/fallback; user must explicitly configure for production use
+  private apiUrl: string = '';
 
   async initialize() {
-    this.apiToken = await AsyncStorage.getItem('apiToken');
+    const storedToken = await AsyncStorage.getItem('apiToken');
+    const normalizedToken = normalizeAccessToken(storedToken);
+    this.apiToken = normalizedToken;
+    if (storedToken && !normalizedToken) {
+      await AsyncStorage.removeItem('apiToken');
+    }
     const savedUrl = await AsyncStorage.getItem('apiUrl');
     if (savedUrl) {
       this.apiUrl = savedUrl;
+    } else {
+      // Use env var if set, otherwise empty for first-time setup
+      this.apiUrl = process.env.EXPO_PUBLIC_API_URL || '';
     }
   }
 
+  public get currentApiUrl(): string {
+    return this.apiUrl || process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+  }
+
   async setApiToken(token: string) {
-    this.apiToken = token;
-    await AsyncStorage.setItem('apiToken', token);
+    const normalizedToken = normalizeAccessToken(token);
+    if (!normalizedToken) {
+      throw new Error('Access Token must be 8 alphanumeric characters');
+    }
+    this.apiToken = normalizedToken;
+    await AsyncStorage.setItem('apiToken', normalizedToken);
   }
 
   async setApiUrl(url: string) {
@@ -36,12 +72,19 @@ class ApiService {
 
   async getApiToken(): Promise<string | null> {
     if (!this.apiToken) {
-      this.apiToken = await AsyncStorage.getItem('apiToken');
+      const storedToken = await AsyncStorage.getItem('apiToken');
+      const normalizedToken = normalizeAccessToken(storedToken);
+      this.apiToken = normalizedToken;
+      if (storedToken && !normalizedToken) {
+        await AsyncStorage.removeItem('apiToken');
+      }
     }
     return this.apiToken;
   }
 
   async getBaseUrl(): Promise<string> {
+    // Use in-memory cached URL if available to avoid redundant AsyncStorage reads
+    if (this.apiUrl) return this.apiUrl;
     const savedUrl = await AsyncStorage.getItem('apiUrl');
     if (savedUrl) {
       this.apiUrl = savedUrl;
@@ -49,10 +92,32 @@ class ApiService {
     return this.apiUrl;
   }
 
+  /**
+   * Retry helper: retries transient network failures with exponential backoff.
+   * Only retries on timeout, network error, or 5xx — never on 4xx or auth errors.
+   */
+  private async withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> {
+    let lastError: any;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        const isRetryable =
+          error.code === 'ECONNABORTED' || // timeout
+          error.code === 'ERR_NETWORK' || // network unreachable
+          (error.response?.status && error.response.status >= 500);
+        if (!isRetryable || attempt >= retries) break;
+        await new Promise(r => setTimeout(r, RETRY_BASE_DELAY * Math.pow(2, attempt)));
+      }
+    }
+    throw lastError;
+  }
+
   private async getHeaders() {
     const token = await this.getApiToken();
     if (!token) {
-      throw new Error('API token not configured');
+      throw new Error('Access Token not configured');
     }
     return {
       'X-API-Key': token,
@@ -67,7 +132,7 @@ class ApiService {
       const response = await axios.post<ApiResponse>(
         `${baseUrl}/analyze`,
         { url, force: true },
-        { headers }
+        { headers, timeout: ANALYSIS_TIMEOUT }
       );
       return response.data;
     } catch (error: any) {
@@ -89,7 +154,7 @@ class ApiService {
       const response = await axios.post<ApiResponse>(
         `${baseUrl}/analyze`,
         { url },
-        { headers }
+        { headers, timeout: ANALYSIS_TIMEOUT }
       );
       return response.data;
     } catch (error: any) {
@@ -147,14 +212,11 @@ class ApiService {
     try {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
-      console.log('API - Analyzing URL:', url);
       const response = await axios.post<ApiResponse>(
         `${baseUrl}/analyze`,
         { url },
-        { headers }
+        { headers, timeout: ANALYSIS_TIMEOUT }
       );
-      
-      console.log('API - Response:', response.data);
       
       if (response.data.success && response.data.data) {
         return normalizePost(response.data.data);
@@ -162,14 +224,21 @@ class ApiService {
       
       throw new Error('Failed to analyze post');
     } catch (error: any) {
-      console.error('Error analyzing URL:', error.response?.data || error.message);
-      // 202 = quota exhausted, queued for automatic retry
-      if (error.response?.status === 202) {
-        const err = new Error('QUEUED_FOR_RETRY') as any;
-        err.isRetryQueued = true;
-        err.detail = error.response.data?.detail || 'Queued for retry tomorrow';
-        throw err;
-      }
+        console.error('Error analyzing URL:', error.response?.data || error.message);
+        // 202 = quota exhausted, queued for automatic retry
+        if (error.response?.status === 202) {
+          const err = new Error('QUEUED_FOR_RETRY') as any;
+          err.isRetryQueued = true;
+          err.detail = error.response.data?.detail || 'Queued for retry tomorrow';
+          throw err;
+        }
+          const isNetworkIssue = !error.response || error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message?.toLowerCase().includes('network') || error.message?.toLowerCase().includes('timeout');
+          const isQueueStatus = error.response?.status === 502 || error.response?.status === 503 || error.response?.status === 504;
+          
+          if (isQueueStatus || isNetworkIssue) {
+          error.isServerQueued = true;
+          throw error;
+        }
       throw error;
     }
   }
@@ -180,7 +249,7 @@ class ApiService {
       const baseUrl = await this.getBaseUrl();
       const response = await axios.get<{ success: boolean; data: Post[] }>(
         `${baseUrl}/recent?limit=100`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
       return (response.data.data || []).map(normalizePost);
     } catch (error: any) {
@@ -193,11 +262,13 @@ class ApiService {
     try {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
-      const response = await axios.get<{ success: boolean; data: Post[] }>(
-        `${baseUrl}/recent?limit=${limit}`,
-        { headers, timeout: 8000 }
-      );
-      return (response.data.data || []).map(normalizePost);
+      return await this.withRetry(async () => {
+        const response = await axios.get<{ success: boolean; data: Post[] }>(
+          `${baseUrl}/recent?limit=${limit}`,
+          { headers, timeout: DEFAULT_TIMEOUT }
+        );
+        return (response.data.data || []).map(normalizePost);
+      });
     } catch (error: any) {
       console.error('Error fetching posts:', error.response?.data?.detail || error.message);
       return [];
@@ -210,7 +281,7 @@ class ApiService {
       const baseUrl = await this.getBaseUrl();
       const response = await axios.get<{ success: boolean; data: Post[] }>(
         `${baseUrl}/category/${category}?limit=${limit}`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
       return response.data.data || [];
     } catch (error) {
@@ -226,7 +297,7 @@ class ApiService {
       const tagsString = tags.join(',');
       const response = await axios.get<{ success: boolean; data: Post[] }>(
         `${baseUrl}/search?tags=${tagsString}&limit=${limit}`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
       return response.data.data || [];
     } catch (error) {
@@ -241,12 +312,30 @@ class ApiService {
       const baseUrl = await this.getBaseUrl();
       const response = await axios.get<QueueStatus>(
         `${baseUrl}/queue-status`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
       return response.data;
     } catch (error) {
       console.error('Error fetching queue status:', error);
       return null;
+    }
+  }
+
+  async getCategories(): Promise<Array<{ id: string; name: string; count: number }>> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.get<{
+        success: boolean;
+        categories: Array<{ id: string; name: string; count: number }>;
+      }>(
+        `${baseUrl}/categories`,
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data.categories || [];
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      return [];
     }
   }
 
@@ -256,7 +345,7 @@ class ApiService {
       const baseUrl = await this.getBaseUrl();
       const response = await axios.get<{ success: boolean; data: Post }>(
         `${baseUrl}/cache/${shortcode}`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
       return response.data.data;
     } catch (error) {
@@ -268,12 +357,10 @@ class ApiService {
     try {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
-      console.log(`Fetching stats from ${baseUrl}/stats`);
       const response = await axios.get<{ success: boolean; data: DatabaseStats }>(
         `${baseUrl}/stats`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
-      console.log('Stats fetched:', response.data.data);
       return response.data.data;
     } catch (error: any) {
       console.error('Error fetching stats:', error.response?.status, error.response?.data || error.message);
@@ -284,7 +371,6 @@ class ApiService {
   async testConnection(): Promise<boolean> {
     try {
       const baseUrl = await this.getBaseUrl();
-      // Use /ping — no auth, no DB, instant response even while backend is analyzing
       const response = await axios.get(
         `${baseUrl}/ping`,
         { timeout: 8000 }
@@ -295,13 +381,14 @@ class ApiService {
     }
   }
 
+
   async getRetryQueue(): Promise<RetryQueueItem[]> {
     try {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
       const response = await axios.get<{ retry_queue: RetryQueueItem[]; count: number }>(
         `${baseUrl}/queue/retry`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
       return response.data.retry_queue || [];
     } catch (error) {
@@ -317,11 +404,46 @@ class ApiService {
       const response = await axios.post<{ flushed: number; items: string[] }>(
         `${baseUrl}/queue/retry/flush`,
         {},
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
       return response.data;
     } catch (error) {
       console.error('Error flushing retry queue:', error);
+      throw error;
+    }
+  }
+
+  async resetApiToken(): Promise<{ success: boolean; new_token: string; message: string }> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.post<{ success: boolean; new_token: string; message: string }>(
+        `${baseUrl}/reset/api-token`,
+        {},
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      if (response.data.new_token) {
+        await this.setApiToken(response.data.new_token);
+      }
+      return response.data;
+    } catch (error) {
+      console.error('Error resetting API token:', error);
+      throw error;
+    }
+  }
+
+  async resetDatabase(): Promise<{ success: boolean; deleted_count: number; message: string }> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.post<{ success: boolean; deleted_count: number; message: string }>(
+        `${baseUrl}/reset/database`,
+        { confirm: 'DELETE_ALL' },
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error resetting database:', error);
       throw error;
     }
   }
@@ -350,7 +472,7 @@ class ApiService {
       const baseUrl = await this.getBaseUrl();
       await axios.delete(
         `${baseUrl}/post/${shortcode}`,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
     } catch (error) {
       console.error('Error deleting post:', error);
@@ -365,7 +487,7 @@ class ApiService {
       await axios.put(
         `${baseUrl}/post/${shortcode}`,
         updates,
-        { headers }
+        { headers, timeout: DEFAULT_TIMEOUT }
       );
     } catch (error) {
       console.error('Error updating post:', error);
@@ -428,6 +550,145 @@ class ApiService {
     const baseUrl = await this.getBaseUrl();
     await axios.delete(`${baseUrl}/collections/${collectionId}`, { headers, timeout: 10000 });
   }
+
+  // ── Settings API ──────────────────────────────────────────────
+
+  async getAiProviders(): Promise<any> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.get(
+        `${baseUrl}/settings/ai-providers`,
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching AI providers:', error);
+      throw error;
+    }
+  }
+
+  async setAiProviderKey(provider: string, apiKey: string): Promise<any> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.post(
+        `${baseUrl}/settings/ai-providers`,
+        { provider, api_key: apiKey },
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error setting AI provider key:', error);
+      throw error;
+    }
+  }
+
+  async deleteAiProviderKey(provider: string): Promise<any> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.delete(
+        `${baseUrl}/settings/ai-providers/${provider}`,
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error deleting AI provider key:', error);
+      throw error;
+    }
+  }
+
+  async getInstagramCredentials(): Promise<any> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.get(
+        `${baseUrl}/settings/instagram`,
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching Instagram credentials:', error);
+      throw error;
+    }
+  }
+
+  async setInstagramCredentials(username: string, password?: string, sessionid?: string): Promise<any> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.post(
+        `${baseUrl}/settings/instagram`,
+        { username, password, sessionid },
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error setting Instagram credentials:', error);
+      throw error;
+    }
+  }
+
+  async deleteInstagramCredentials(): Promise<any> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.delete(
+        `${baseUrl}/settings/instagram`,
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error deleting Instagram credentials:', error);
+      throw error;
+    }
+  }
+
+  async importData(file: any, mode: 'merge' | 'replace' = 'merge'): Promise<any> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await axios.post(
+        `${baseUrl}/import/file?mode=${mode}`,
+        formData,
+        { 
+          headers: {
+            ...headers,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error importing data:', error);
+      throw error;
+    }
+  }
+
+  async getExportHeaders(): Promise<Headers> {
+    const token = await this.getApiToken();
+    return new Headers({
+      'X-API-Key': token || '',
+    });
+  }
+
+  getExportUrl(format: 'json' | 'zip' = 'json'): Promise<string> {
+    return this.getBaseUrl().then(baseUrl => {
+      return `${baseUrl}/export?format=${format}`;
+    });
+  }
+
+  async removeQueueItem(shortcode: string): Promise<void> {
+    const headers = await this.getHeaders();
+    const baseUrl = await this.getBaseUrl();
+    await axios.delete(`${baseUrl}/queue/${shortcode}`, { headers });
+  }
 }
 
 export default new ApiService();
+

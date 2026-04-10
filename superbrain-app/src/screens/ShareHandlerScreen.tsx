@@ -11,16 +11,19 @@ import {
   Dimensions,
   BackHandler,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { colors } from '../theme/colors';
 import apiService from '../services/api';
 import postsCache from '../services/postsCache';
-import collectionsService from '../services/collections';
+import { collectionsService } from '../services/collections';
 import { sendImmediateWatchLaterNotification, sendImmediateSavedNotification } from '../services/notificationService';
 import { Post, Collection } from '../types';
 import CustomToast from '../components/CustomToast';
+
+import { getCollectionIconName, getCollectionIconColor } from '../constants/icons';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ShareHandler'>;
 
@@ -39,51 +42,47 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
 
   useEffect(() => {
     getSharedUrl();
-  }, []);
+  }, [route.params?.url]);
 
   const getSharedUrl = async () => {
     try {
-      console.log('ShareHandler - Getting shared URL...');
-      
+      // Reset state for new shares
+      setProcessing(true);
+      setPost(null);
+      setError(null);
+      setIsSaving(false);
+      setShowCollections(false);
+
       // Try to get URL from route params first
       if (route.params?.url) {
-        console.log('ShareHandler - Got URL from route params:', route.params.url);
         const decodedUrl = decodeURIComponent(route.params.url);
-        console.log('ShareHandler - Decoded URL:', decodedUrl);
         setUrl(decodedUrl);
         return;
       }
 
       // Otherwise get from initial URL (share intent)
       const initialUrl = await Linking.getInitialURL();
-      console.log('ShareHandler - Initial URL:', initialUrl);
       
       if (initialUrl) {
         // Extract the actual URL from query param if it exists
         const parsed = Linking.parse(initialUrl);
-        console.log('ShareHandler - Parsed URL:', JSON.stringify(parsed, null, 2));
         
         if (parsed.queryParams?.url) {
           const sharedUrl = decodeURIComponent(parsed.queryParams.url as string);
-          console.log('ShareHandler - Extracted URL from query:', sharedUrl);
           setUrl(sharedUrl);
         } else if (parsed.queryParams?.text) {
           // Handle text content from share intent
           const textContent = decodeURIComponent(parsed.queryParams.text as string);
-          console.log('ShareHandler - Got text content:', textContent);
           // Extract Instagram URL from text
           const urlMatch = textContent.match(/(https?:\/\/[^\s]+)/);
           if (urlMatch) {
-            console.log('ShareHandler - Extracted URL from text:', urlMatch[0]);
             setUrl(urlMatch[0]);
           } else {
             setUrl(textContent);
           }
         } else if (initialUrl.includes('instagram.com')) {
-          console.log('ShareHandler - Direct Instagram URL:', initialUrl);
           setUrl(initialUrl);
         } else {
-          console.log('ShareHandler - Using initial URL as-is:', initialUrl);
           setUrl(initialUrl);
         }
       } else {
@@ -150,12 +149,20 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
     return `WP_${h.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0')}`;
   };
 
-  const buildThumbnailUrl = (type: string, shortcode: string, ytId: string | null): string => {
+  const buildThumbnailUrl = (type: string, shortcode: string, ytId: string | null, sourceUrl: string): string => {
     if (type === 'youtube' && ytId)
       return `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
     if (type === 'instagram')
       return `https://www.instagram.com/p/${shortcode}/media/?size=m`;
-    return ''; // webpage: no preview thumbnail
+    if (type === 'webpage' && sourceUrl) {
+      try {
+        const origin = new URL(sourceUrl).origin;
+        return `https://www.google.com/s2/favicons?sz=128&domain_url=${origin}`;
+      } catch (e) {
+        return '';
+      }
+    }
+    return '';
   };
 
   // ── Main URL handler ──────────────────────────────────────────────────────
@@ -179,17 +186,14 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
 
   const fetchInstagramCaption = async (shortcode: string): Promise<string> => {
     try {
-      console.log('Fetching caption from backend API...');
-      
       // Call backend endpoint to get caption
       const caption = await apiService.getPostInfo(`https://www.instagram.com/p/${shortcode}/`);
       
       if (caption && caption.title && caption.title !== 'Instagram Post') {
-        console.log('Got caption from backend:', caption.title);
         return caption.title;
       }
     } catch (error) {
-      console.log('Backend caption fetch failed:', error);
+      // Fall back to default title
     }
     
     return 'Instagram Post';
@@ -203,18 +207,15 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
 
   const handleUrl = async () => {
     if (!url) {
-      console.log('ShareHandler - No URL to process');
       return;
     }
 
     try {
-      console.log('ShareHandler - Processing URL:', url);
       setError(null);
 
       const urlType = detectUrlType(url);
       const ytId = urlType === 'youtube' ? extractYouTubeVideoId(url) : null;
       const shortcode = buildShortcode(url, urlType, ytId);
-      console.log('ShareHandler - type=%s shortcode=%s', urlType, shortcode);
 
       if (!shortcode) {
         setError('Could not parse this URL');
@@ -222,10 +223,10 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         return;
       }
 
-      const thumbnailUrl = buildThumbnailUrl(urlType, shortcode, ytId);
+      const thumbnailUrl = buildThumbnailUrl(urlType, shortcode, ytId, url);
       const defaultTitle =
         urlType === 'youtube' ? 'YouTube Video' :
-        urlType === 'webpage' ? 'Web Page' :
+        urlType === 'webpage' ? 'Website' :
         'Instagram Post';
 
       const tempPost: Post = {
@@ -255,6 +256,17 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         }).catch(() => {
           setPost(prev => prev ? { ...prev, title: defaultTitle } : null);
         });
+      } else if (urlType === 'webpage') {
+        fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/im);
+            const fetchedTitle = titleMatch ? titleMatch[1].trim() : defaultTitle;
+            setPost(prev => prev ? { ...prev, title: fetchedTitle } : null);
+          })
+          .catch(() => {
+            setPost(prev => prev ? { ...prev, title: defaultTitle } : null);
+          });
       } else {
         setPost(prev => prev ? { ...prev, title: defaultTitle } : null);
       }
@@ -274,7 +286,6 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
     try {
       setLoadingCollections(true);
       const data = await collectionsService.getCollections();
-      console.log('ShareHandler - Raw collections data:', data);
       
       // Filter: only show collections with both name and id, and that are not "All Posts"
       const userCollections = data.filter(c => 
@@ -285,7 +296,6 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         c.name !== 'Instagram Posts'
       );
       
-      console.log('ShareHandler - Filtered collections:', userCollections);
       setCollections(userCollections);
     } catch (error) {
       console.error('Error loading collections:', error);
@@ -331,12 +341,12 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
           // fire instant "Saved" notification for all other collections
           if (collectionId === 'default_watch_later') {
             sendImmediateWatchLaterNotification(placeholderPost).catch(() => {});
-          } else {
-            sendImmediateSavedNotification(placeholderPost).catch(() => {});
           }
+          // Non-Watch-Later saves: NO instant notification.
+          // Notification fires after analysis completes (see .then() below).
 
           // Trigger backend analysis in background
-          apiService.analyzeInstagramUrl(url).then(async () => {
+          apiService.analyzeInstagramUrl(url).then(async (analyzedPost) => {
             // When analysis completes, merge fresh posts with analyzing placeholders
             const freshPosts = await apiService.getRecentPosts(50);
             if (freshPosts.length > 0) {
@@ -348,22 +358,31 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
               await postsCache.savePosts([...placeholders, ...freshPosts]);
             }
             postsCache.markAnalysisComplete(shortcode);
+
+            // Notification logic removed as per user preference
           }).catch((err: any) => {
             if (err?.isRetryQueued) {
-              showToast('⏰ Queued — will retry automatically tomorrow', 'info');
+              showToast('queue msg', 'info');
+            } else if (err?.isServerQueued) {
+              console.log('Server queued or timeout, keeping in analyzing state');
             } else {
-              console.error('Background analysis error:', err);              // Track in local failed list so user can re-analyze from Library
-              postsCache.markAsFailed(
-                shortcode,
-                url,
-                post?.title || '',
-                post?.thumbnail_url,
-                post?.content_type,
-              );            }
-            postsCache.markAnalysisComplete(shortcode);
+                console.error('Background analysis error:', err);
+                postsCache.markAsFailed(
+                  shortcode,
+                  url,
+                  post?.title || '',
+                  post?.thumbnail_url,
+                  post?.content_type,
+                );
+                
+              }
+              if (!err?.isServerQueued) {
+                postsCache.markAnalysisComplete(shortcode);
+              }
           });
         }
       }
+      if (post) sendImmediateSavedNotification(post).catch(() => {});
       
       showToast('✨ Saved — analyzing in background...', 'info');
       
@@ -404,7 +423,7 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         }
         
         // Trigger backend analysis in background
-        apiService.analyzeInstagramUrl(url).then(async () => {
+        apiService.analyzeInstagramUrl(url).then(async (analyzedPost) => {
           const freshPosts = await apiService.getRecentPosts(50);
           if (freshPosts.length > 0) {
             const sc = post.shortcode!;
@@ -416,24 +435,30 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
             await postsCache.savePosts([...placeholders, ...freshPosts]);
           }
           if (post.shortcode) postsCache.markAnalysisComplete(post.shortcode);
+
+          // Notification logic removed as per user preference
         }).catch((err: any) => {
           if (err?.isRetryQueued) {
-            showToast('⏰ Quota full — queued for retry tomorrow', 'info');
-          } else {
-            console.error('Background analysis error:', err);            if (post?.shortcode) {
-              postsCache.markAsFailed(
-                post.shortcode,
-                url,
-                post?.title || '',
-                post?.thumbnail_url,
-                post?.content_type,
-              );
-            }          }
-          if (post.shortcode) postsCache.markAnalysisComplete(post.shortcode);
+              showToast('queue msg', 'info');
+            } else if (err?.isServerQueued) {
+              console.log('Server queued or timeout, keeping in analyzing state'); } else {
+              console.error('Background analysis error:', err);
+              if (post?.shortcode) {
+                postsCache.markAsFailed(
+                  post.shortcode,
+                  url,
+                  post?.title || '',
+                  post?.thumbnail_url,
+                  post?.content_type,
+                );
+              }
+              
+            }
+            if (post?.shortcode && !err?.isServerQueued) postsCache.markAnalysisComplete(post.shortcode);
         });
       }
-      
       if (post) sendImmediateSavedNotification(post).catch(() => {});
+      
       showToast('✨ Saved — analyzing in background...', 'info');
       
       // Return to previous app
@@ -507,14 +532,28 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         {/* Post Preview */}
         {post && (
           <View style={styles.postPreview}>
-            <Image 
-              source={{ uri: post.thumbnail_url }} 
-              style={styles.thumbnail}
-              resizeMode="cover"
-            />
+            {post.content_type === 'webpage' ? (
+              post.thumbnail_url ? (
+                <Image 
+                  source={{ uri: post.thumbnail_url }} 
+                  style={[styles.thumbnail, { backgroundColor: colors.backgroundSecondary }]}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.thumbnail, { backgroundColor: colors.backgroundSecondary, justifyContent: 'center', alignItems: 'center' }]}>
+                  <Ionicons name="document-text-outline" size={32} color={colors.textSecondary} />
+                </View>
+              )
+            ) : (
+              <Image 
+                source={{ uri: post.thumbnail_url }} 
+                style={styles.thumbnail}
+                resizeMode="cover"
+              />
+            )}
             <View style={styles.postInfo}>
               <Text style={styles.postUrl} numberOfLines={1}>{url}</Text>
-              <Text style={styles.postTitle}>{post.title || 'Instagram Post'}</Text>
+              <Text style={styles.postTitle} numberOfLines={2}>{post.title || 'Website'}</Text>
             </View>
           </View>
         )}
@@ -544,7 +583,11 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
                 onPress={() => handleAddToCollection(collection.id)}
                 disabled={isSaving}
               >
-                <Text style={styles.collectionCardIcon}>{collection.icon}</Text>
+                <Ionicons
+                  name={getCollectionIconName(collection.id, collection.icon) as any}
+                  size={32}
+                  color={getCollectionIconColor(collection.id, collection.icon)}
+                />
                 <Text style={styles.collectionCardName} numberOfLines={2}>{collection.name}</Text>
                 <Text style={styles.collectionCardCount}>
                   {collection.postIds.length} {collection.postIds.length === 1 ? 'post' : 'posts'}
@@ -771,3 +814,4 @@ const styles = StyleSheet.create({
 });
 
 export default ShareHandlerScreen;
+

@@ -5,17 +5,19 @@ FastAPI REST endpoints for analyzing Instagram content with MongoDB caching
 With request queuing, live progress logging, and API key authentication
 """
 
-from fastapi import FastAPI, HTTPException, Query, Header, Depends
+from fastapi import FastAPI, HTTPException, Query, Header, Depends, Request, UploadFile, File, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, HttpUrl
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import subprocess
 import asyncio
 import sys
 import os
+import json
+import zipfile
+import io
 from datetime import datetime
-import asyncio
 import logging
 import secrets
 import string
@@ -35,48 +37,54 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Token management
-TOKEN_FILE = Path(__file__).parent / "token.txt"
-
-def generate_token(length=32):
-    """Generate a random API token"""
-    alphabet = string.ascii_letters + string.digits
+def generate_api_token(length=8):
+    """Generate an 8-character alphanumeric Access Token."""
+    alphabet = string.ascii_uppercase + string.digits
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
-def load_or_create_token():
-    """Load existing token or create new one"""
+
+def is_valid_api_token_format(token: str) -> bool:
+    """Validate token format: exactly 8 alphanumeric chars."""
+    return len(token) == 8 and token.isalnum()
+
+TOKEN_FILE = Path(__file__).parent / "token.txt"
+
+def load_or_create_api_token():
+    """Load existing API token or create one if missing."""
     if TOKEN_FILE.exists():
-        with open(TOKEN_FILE, 'r') as f:
-            token = f.read().strip()
-            if token:
-                logger.info("="*80)
-                logger.info(f"🔐 API Token: {token}")
-                logger.info("="*80)
-                return token
-    
-    # Create new token
-    token = generate_token()
-    with open(TOKEN_FILE, 'w') as f:
-        f.write(token)
-    
-    logger.info("="*80)
+        content = TOKEN_FILE.read_text(encoding="utf-8", errors="ignore").strip()
+        if content and is_valid_api_token_format(content):
+            logger.info("=" * 80)
+            logger.info(f"🔐 API Token: {content}")
+            logger.info("=" * 80)
+            return content
+
+        if content:
+            logger.warning("Existing token format is legacy/invalid. Regenerating 8-character Access Token.")
+
+    token = generate_api_token()
+    TOKEN_FILE.write_text(token)
+
+    logger.info("=" * 80)
     logger.info(f"🔐 API Token (NEW): {token}")
-    logger.info("="*80)
-    
+    logger.info("=" * 80)
     return token
 
-# Load API token
-API_TOKEN = load_or_create_token()
+API_TOKEN = load_or_create_api_token()
 
-async def verify_token(x_api_key: str = Header(..., description="API authentication key")):
-    """Verify API token from request header"""
-    if x_api_key != API_TOKEN:
-        logger.warning(f"🚫 Invalid API key attempt: {x_api_key[:10]}...")
+async def verify_token(request: Request, x_api_key: str = Header(None, description="Access Token for authentication")):
+    """
+    Verify authentication using Access Token.
+    Can be passed in X-API-Key header or token query parameter.
+    """
+    actual_token = x_api_key or request.query_params.get("token")
+    if actual_token != API_TOKEN:
+        logger.warning("Invalid Access Token attempt from IP: %s", request.client.host if hasattr(request, 'client') and request.client else 'unknown')
         raise HTTPException(
             status_code=401,
-            detail="Invalid API key. Check X-API-Key header."
+            detail="Invalid Access Token. Use the token from backend/token.txt."
         )
-    return x_api_key
+    return actual_token
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -85,14 +93,36 @@ app = FastAPI(
     version="1.02"
 )
 
-# Enable CORS for all origins (adjust for production)
+# CORS configuration
+import os
+
+# Get allowed origins from environment variable or allow all for development
+allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '')
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',')]
+else:
+    # Development: allow all origins so phones on same WiFi can connect
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to specific domains in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,
+    allow_credentials=False if allowed_origins == ["*"] else True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # CSP - adjust based on your needs
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    return response
 
 # Request queue management (persistent)
 max_concurrent = 1  # Process one post at a time - queue others sequentially
@@ -102,6 +132,11 @@ _active_processes: dict = {}        # shortcode -> subprocess.Popen
 _active_processes_lock = threading.Lock()
 
 _STATIC_DIR = Path(__file__).parent / "static"
+_THUMBNAILS_DIR = _STATIC_DIR / "thumbnails"
+_THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -187,6 +222,7 @@ def queue_worker():
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
                             text=True,
+                            encoding="utf-8",
                             bufsize=1
                         )
 
@@ -195,7 +231,14 @@ def queue_worker():
                             _active_processes[shortcode] = process
 
                         # Wait for completion
-                        process.wait()
+                        try:
+                            process.wait(timeout=600)
+                        except subprocess.TimeoutExpired:
+                            logger.error(f"❌ [{shortcode}] Process timed out after 10 minutes. Killing...")
+                            process.kill()
+                            process.wait()
+                            db.remove_from_queue(shortcode)
+                            continue
 
                         with _active_processes_lock:
                             _active_processes.pop(shortcode, None)
@@ -259,13 +302,22 @@ class AnalysisResponse(BaseModel):
 @app.get("/")
 async def root():
     """API information and health check (no authentication required)"""
+    
+    backend_id = "unknown"
+    backend_id_path = get_config_path("backend_id.txt")
+    if backend_id_path.exists():
+        backend_id = backend_id_path.read_text().strip()
+    
     return {
+        "backendId": backend_id,
+
         "name": "SuperBrain Instagram Analyzer API",
         "version": "1.02",
         "status": "operational",
-        "authentication": "Required - Use X-API-Key header",
+        "authentication": "Required - Use Access Token with X-API-Key header",
+        "message": "Run start.py on the server and use the token from token.txt.",
         "endpoints": {
-            "POST /analyze": "Analyze content from Instagram, YouTube, or any web page (requires auth)",
+            "POST /analyze": "Analyze content (requires auth)",
             "GET /caption": "Get post caption quickly (requires auth)",
             "GET /cache/{shortcode}": "Check cache (requires auth)",
             "GET /recent": "Get recent analyses (requires auth)",
@@ -523,19 +575,39 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
                 _active_processes.pop(shortcode, None)
             return proc.returncode, ''.join(lines), proc.stderr.read()
 
-        returncode, stdout, stderr = await asyncio.to_thread(_run_subprocess)
+        try:
+            returncode, stdout, stderr = await asyncio.wait_for(
+                asyncio.to_thread(_run_subprocess),
+                timeout=600
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"❌ [{shortcode}] Analysis reached 10-minute timeout. Forcing termination.")
+            with _active_processes_lock:
+                proc = _active_processes.pop(shortcode, None)
+            if proc:
+                try:
+                    proc.kill()
+                    proc.wait()
+                except Exception:
+                    pass
+            db.remove_from_queue(shortcode)
+            raise HTTPException(
+                status_code=504,
+                detail="Analysis timed out. The process took longer than the 10-minute allowed maximum."
+            )
         
         if stderr.strip():
             # Log stderr from main.py to help diagnose issues
             logger.warning(f"⚠️  [{shortcode}] main.py stderr:\n{stderr[:1000]}")
         
         if returncode == 2:
-            # main.py detected quota exhaustion and queued item for retry
-            logger.info(f"⏰ [{shortcode}] Quota exhausted — queued for automatic retry")
-            db.remove_from_queue(shortcode)
+            # main.py detected quota exhaustion (Instagram block or AI) and queued item for retry.
+            # NOTE: Do NOT remove from queue here — main.py already called
+            # queue_for_retry() which set status='retry'. Removing would lose it.
+            logger.info(f"⏰ [{shortcode}] Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours.")
             raise HTTPException(
                 status_code=202,
-                detail="API quota exhausted. Your request has been queued for automatic retry in 24 hours."
+                detail="Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours."
             )
         
         if returncode != 0:
@@ -598,8 +670,11 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
             processing_time=processing_time
         )
         
-    except HTTPException:
-        db.remove_from_queue(shortcode)
+    except HTTPException as he:
+        # Don't remove from queue for 202 (retry-queued) — the item was
+        # intentionally kept in the retry queue by main.py.
+        if he.status_code != 202:
+            db.remove_from_queue(shortcode)
         raise
     except subprocess.SubprocessError as e:
         logger.error(f"❌ [{shortcode}] Subprocess error: {str(e)}")
@@ -697,6 +772,36 @@ async def get_database_stats(token: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/categories")
+async def get_all_categories(token: str = Depends(verify_token)):
+    """
+    Get all categories with post counts
+    - Requires API authentication
+    """
+    try:
+        db = get_db()
+        stats = db.get_stats()
+        category_counts = stats.get('categories', {})
+        
+        # Convert to list format with icons
+        categories = []
+        for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+            categories.append({
+                'id': cat.lower(),
+                'name': cat,
+                'count': count
+            })
+        
+        return {
+            "success": True,
+            "categories": categories,
+            "total": sum(c['count'] for c in categories)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/category/{category}")
 async def get_by_category(
     category: str,
@@ -761,7 +866,102 @@ async def ping():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
-# ──────────────────────────────────────────────────────────────────
+@app.get("/status")
+async def status():
+    """
+    Server status check - no auth required.
+    """
+    return {
+        "status": "online",
+        "version": "1.02",
+        "message": "Server is running. Configure app with server URL and Access Token from token.txt."
+    }
+
+
+@app.get("/connect-info")
+async def connect_info(request: Request):
+    """
+    Returns connection details for QR code scanning.
+    No auth required — used by the mobile app to auto-fill settings.
+    The URL is built from the request so it matches whatever address the client used.
+    """
+    # Build the base URL from the incoming request
+    scheme = request.headers.get('x-forwarded-proto', request.url.scheme)
+    host = request.headers.get('x-forwarded-host', request.headers.get('host', 'localhost:5000'))
+    base_url = f"{scheme}://{host}"
+
+    return {
+        "url": base_url,
+        "token": API_TOKEN,
+        "version": "1.02",
+        "name": "SuperBrain"
+    }
+
+
+@app.get("/analysis-status/{shortcode}")
+async def analysis_status(shortcode: str, token: str = Depends(verify_token)):
+    """
+    Check if a post has been analyzed yet.
+    Returns status: 'complete', 'processing', 'queued', or 'not_found'.
+    Used by the app to poll for completion after sharing a URL.
+    """
+    try:
+        db = get_db()
+
+        # Check if fully analyzed
+        cached = db.check_cache(shortcode)
+        if cached:
+            return {
+                "status": "complete",
+                "shortcode": shortcode,
+                "title": cached.get('title', ''),
+                "category": cached.get('category', ''),
+                "data": {
+                    'title': cached.get('title', ''),
+                    'summary': cached.get('summary', ''),
+                    'tags': cached.get('tags', []),
+                    'category': cached.get('category', ''),
+                    'content_type': cached.get('content_type', ''),
+                    'thumbnail': cached.get('thumbnail', ''),
+                }
+            }
+
+        # Check if currently processing
+        processing = db.get_processing()
+        if shortcode in processing:
+            return {"status": "processing", "shortcode": shortcode}
+
+        # Check if in queue
+        queue = db.get_queue()
+        for i, item in enumerate(queue):
+            if item['shortcode'] == shortcode:
+                return {"status": "queued", "shortcode": shortcode, "position": i + 1}
+
+        return {"status": "not_found", "shortcode": shortcode}
+
+    except Exception as e:
+        logger.error(f"Error checking analysis status for {shortcode}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ConnectRequest(BaseModel):
+    """Request model for deprecated /connect endpoint."""
+    api_key: Optional[str] = None
+
+
+@app.post("/connect")
+async def connect(request: ConnectRequest):
+    """
+    Deprecated endpoint kept for backward compatibility.
+    Use direct Server URL + API key configuration in app settings.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Deprecated. Configure Server URL and Access Token directly in app Settings."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────
 # Collections endpoints
 # ──────────────────────────────────────────────────────────────────
 
@@ -776,6 +976,19 @@ class CollectionUpsertRequest(BaseModel):
 
 class CollectionPostsRequest(BaseModel):
     post_ids: List[str]
+
+
+# Allowed fields for import validation
+ALLOWED_POST_FIELDS = {
+    'shortcode', 'url', 'username', 'content_type', 'post_date',
+    'likes', 'thumbnail', 'title', 'summary', 'tags', 'music', 'category',
+    'visual_analysis', 'audio_transcription', 'text_analysis'
+}
+
+class ImportData(BaseModel):
+    version: Optional[str] = None
+    posts: List[dict] = []
+    collections: List[dict] = []
 
 
 @app.get("/collections")
@@ -866,6 +1079,7 @@ async def health_check(token: str = Depends(verify_token)):
 async def queue_status(token: str = Depends(verify_token)):
     """Get current queue and processing status"""
     try:
+        db = get_db()
         processing = db.get_processing()
         queue = db.get_queue()
         
@@ -978,6 +1192,7 @@ async def get_retry_queue(token: str = Depends(verify_token)):
 async def flush_retry_queue(token: str = Depends(verify_token)):
     """Immediately promote all retry-ready items to the active queue"""
     try:
+        db = get_db()
         ready = db.get_retry_ready()
         for item in ready:
             db.add_to_queue(item['shortcode'], item['url'])
@@ -989,6 +1204,663 @@ async def flush_retry_queue(token: str = Depends(verify_token)):
     except Exception as e:
         logger.error(f"Error flushing retry queue: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/queue/{shortcode}")
+async def delete_queue_item(shortcode: str, token: str = Depends(verify_token)):
+    """Remove an item from the processing or retry queue"""
+    try:
+        db = get_db()
+        db.remove_from_queue(shortcode)
+        return {"success": True, "message": f"Removed {shortcode} from queue"}
+    except Exception as e:
+        logger.error(f"Error removing {shortcode} from queue: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────
+# Reset endpoints (admin only)
+# ─────────────────────────────────────────────────────────────────
+
+@app.post("/reset/api-token")
+async def reset_api_token(token: str = Depends(verify_token)):
+    """
+    Reset the API token. A new token will be generated.
+    - Requires API authentication
+    - Returns the new token
+    """
+    global API_TOKEN
+    try:
+        # Generate new 8-character alphanumeric token
+        new_token = generate_api_token()
+        
+        # Save to file
+        TOKEN_FILE.write_text(new_token)
+        
+        # Update in-memory token so it takes effect immediately
+        API_TOKEN = new_token
+        
+        logger.warning("API token was reset by a client")
+        
+        return {
+            "success": True,
+            "new_token": new_token,
+            "message": "API token has been reset. Update this token in your mobile app settings."
+        }
+    except Exception as e:
+        logger.error(f"Error resetting API token: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/reset/database")
+async def reset_database(
+    token: str = Depends(verify_token),
+    confirm: str = Body(..., description="Must be 'DELETE_ALL' to confirm")
+):
+    """
+    Reset (clear) the database. This will delete all posts and collections.
+    - Requires API authentication
+    - Requires confirm='DELETE_ALL' in body
+    """
+    if confirm != "DELETE_ALL":
+        raise HTTPException(status_code=400, detail="Confirmation required: pass confirm='DELETE_ALL'")
+    
+    try:
+        db = get_db()
+
+        # Delete all posts/collections/queue entries in SQLite
+        conn = db._conn
+        cur_posts = conn.execute("DELETE FROM analyses")
+        conn.execute("DELETE FROM collections")
+        conn.execute("DELETE FROM processing_queue")
+
+        # Recreate default Watch Later collection
+        now = datetime.utcnow().isoformat()
+        conn.execute(
+            "INSERT INTO collections (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ('default_watch_later', 'Watch Later', 'time', '[]', now, now)
+        )
+        conn.commit()
+
+        deleted_count = cur_posts.rowcount
+        
+        logger.warning(f"🗑️ Database was reset by a client. Deleted {deleted_count} posts.")
+        
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"Database cleared. {deleted_count} posts deleted."
+        }
+    except Exception as e:
+        logger.error(f"Error resetting database: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────
+# Import/Export endpoints
+# ─────────────────────────────────────────────────────────────────
+
+@app.get("/export")
+async def export_data(
+    background_tasks: __import__('fastapi').BackgroundTasks,
+    token: str = Depends(verify_token),
+    limit: int = Query(default=10000, ge=1, le=50000, description="Max posts to export"),
+    offset: int = Query(default=0, ge=0, description="Offset for pagination"),
+    format: str = Query(default="json", description="Export format: json or zip")
+):
+    """
+    Export data as JSON or ZIP (posts, collections, settings).
+    - Requires API authentication
+    - Supports pagination with limit and offset
+    """
+    import tempfile
+    import os
+    import httpx
+    
+    try:
+        db = get_db()
+        
+        # Get posts with pagination using SQLite
+        posts = db.get_all_posts(limit=limit, offset=offset)
+        # Convert sqlite3.Row objects to fully mutable dictionaries
+        posts_list = [dict(p) for p in posts]
+        
+        collections = db.get_all_collections()
+        stats = db.get_stats()
+        
+        export_payload = {
+            "version": "1.0",
+            "exported_at": datetime.now().isoformat(),
+            "posts": posts_list,
+            "collections": collections,
+            "stats": stats
+        }
+        
+        if format.lower() == "zip":
+            # Create a zip file on disk to avoid memory explosion
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+            zip_path = tmp.name
+            tmp.close()
+            
+            async def download_image(client, sem, post_dict):
+                url = post_dict.get('thumbnail_url') or post_dict.get('thumbnail')
+                if not url:
+                    return None
+                    
+                shortcode = post_dict.get('shortcode')
+                if not shortcode: return None
+
+                if url.startswith("/static/"):
+                    local_path = url.replace("/static/", "", 1)
+                    full_path = _STATIC_DIR / local_path
+                    try:
+                        if full_path.exists():
+                            with open(full_path, "rb") as f:
+                                return (local_path, f.read())
+                    except Exception as e:
+                        logger.error(f"Failed bundling local image {url}: {e}")
+                    return None
+
+                # Handle base64 encoded data URIs commonly saved by main.py
+                if url.startswith("data:image/"):
+                    try:
+                        import base64
+                        header, encoded = url.split(',', 1)
+                        ext = "jpg"
+                        if "png" in header.lower(): ext = "png"
+                        elif "webp" in header.lower(): ext = "webp"
+                        
+                        img_data = base64.b64decode(encoded)
+                        path_in_zip = f"thumbnails/{shortcode}.{ext}"
+                        post_dict['thumbnail'] = f"/static/{path_in_zip}"
+                        return (path_in_zip, img_data)
+                    except Exception as e:
+                        logger.error(f"Failed decoding base64 image for {shortcode}: {e}")
+                        return None
+                        
+                ext = "jpg"
+                if ".png" in url.lower(): ext = "png"
+                elif ".webp" in url.lower(): ext = "webp"
+                
+                path_in_zip = f"thumbnails/{shortcode}.{ext}"
+                try:
+                    async with sem:
+                        resp = await client.get(url, follow_redirects=True, timeout=12.0)
+                        if resp.status_code == 200:
+                            post_dict['thumbnail'] = f"/static/{path_in_zip}"
+                            return (path_in_zip, resp.content)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch thumbnail for {shortcode}: {e}")
+                return None
+
+            # Fetch all thumbnails concurrently in batches
+            sem = asyncio.Semaphore(15)
+            tasks = []
+            async with httpx.AsyncClient(verify=False) as client:
+                for post in export_payload["posts"]:
+                    tasks.append(download_image(client, sem, post))
+                
+                downloaded_images = await asyncio.gather(*tasks)
+
+            # Write everything to the zip sequentially to save RAM
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                # The export_payload now has updated 'thumbnail' fields pointing locally
+                zip_file.writestr("superbrain_export.json", json.dumps(export_payload, default=str))
+                for res in downloaded_images:
+                    if res:
+                        path_in_zip, content = res
+                        zip_file.writestr(path_in_zip, content)
+                        
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"superbrain_export_{timestamp}.zip"
+            
+            background_tasks.add_task(os.remove, zip_path)
+            return FileResponse(zip_path, media_type="application/zip", filename=filename)
+        
+        # Default JSON response
+        return export_payload
+    except Exception as e:
+        logger.error(f"Error exporting data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/import")
+async def import_data(
+    data: dict,
+    token: str = Depends(verify_token),
+    mode: str = Query(default="merge", description="merge or replace")
+):
+    """
+    Import data from JSON.
+    - Requires API authentication
+    - mode=merge: Add to existing data (skip duplicates by shortcode)
+    - mode=replace: Replace all data (will clear database first)
+    """
+    return await _process_import_data(data, mode)
+
+@app.post("/import/file")
+async def import_data_file(
+    file: UploadFile = File(...),
+    token: str = Depends(verify_token),
+    mode: str = Query(default="merge", description="merge or replace")
+):
+    """
+    Import data from a ZIP or JSON file.
+    - Requires API authentication
+    - mode=merge or replace
+    - Extracts thumbnails from ZIP archive if present
+    """
+    try:
+        content = await file.read()
+        
+        # Check if it's a ZIP file
+        if file.filename.endswith('.zip') or file.content_type == 'application/zip' or content.startswith(b'PK'):
+            try:
+                with zipfile.ZipFile(io.BytesIO(content)) as z:
+                    # Look for superbrain_export.json or any json file
+                    json_files = [name for name in z.namelist() if name.endswith('.json')]
+                    
+                    if not json_files:
+                        raise HTTPException(status_code=400, detail="No JSON file found in the ZIP archive")
+                    
+                    # Prefer superbrain_export.json if it exists
+                    target_file = "superbrain_export.json" if "superbrain_export.json" in json_files else json_files[0]
+                    
+                    with z.open(target_file) as f:
+                        data = json.load(f)
+                    
+                    # Extract any custom image thumbnails from /thumbnails directory to the static folder mapped statically
+                    thumbnails_dir = _STATIC_DIR / "thumbnails"
+                    thumbnails_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    for name in z.namelist():
+                        if name.startswith("thumbnails/") and not name.endswith("/"):
+                            img_filename = name.split("/")[-1]
+                            with z.open(name) as zf, open(thumbnails_dir / img_filename, "wb") as out_f:
+                                out_f.write(zf.read())
+                                
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Invalid ZIP file")
+        else:
+            # Assume it's a direct JSON file
+            try:
+                data = json.loads(content.decode('utf-8'))
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid JSON file")
+                
+        return await _process_import_data(data, mode)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing import file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+async def _process_import_data(data: dict, mode: str):
+    try:
+        # Validate input data structure
+        validated = ImportData.model_validate(data)
+
+        if mode not in {"merge", "replace"}:
+            raise HTTPException(status_code=400, detail="Invalid import mode. Use 'merge' or 'replace'.")
+
+        db = get_db()
+
+        imported_posts = 0
+        skipped_posts = 0
+
+        # Handle mode=replace
+        if mode == "replace":
+            logger.warning("Import mode=replace: clearing database first")
+            conn = db._conn
+            conn.execute("DELETE FROM analyses")
+            conn.execute("DELETE FROM collections")
+            conn.execute("DELETE FROM processing_queue")
+            # Ensure default Watch Later exists even if import has no collections
+            now = datetime.utcnow().isoformat()
+            conn.execute(
+                "INSERT INTO collections (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                ('default_watch_later', 'Watch Later', 'time', '[]', now, now)
+            )
+            conn.commit()
+
+        # Import posts - validate and filter allowed fields
+        posts = validated.posts or []
+        for post in posts:
+            shortcode = post.get("shortcode")
+            if not shortcode:
+                continue
+
+            # Filter to only allowed fields (prevent arbitrary field injection)
+            filtered_post = {k: v for k, v in post.items() if k in ALLOWED_POST_FIELDS}
+
+            # Check if exists (for merge mode)
+            existing = db.check_cache(shortcode)
+            if existing and mode == "merge":
+                skipped_posts += 1
+                continue
+
+            db.save_analysis(
+                shortcode=shortcode,
+                url=filtered_post.get("url", ""),
+                username=filtered_post.get("username", ""),
+                title=filtered_post.get("title", ""),
+                summary=filtered_post.get("summary", ""),
+                tags=filtered_post.get("tags", []),
+                music=filtered_post.get("music", ""),
+                category=filtered_post.get("category", "other"),
+                visual_analysis=filtered_post.get("visual_analysis", ""),
+                audio_transcription=filtered_post.get("audio_transcription", ""),
+                text_analysis=filtered_post.get("text_analysis", ""),
+                likes=filtered_post.get("likes", 0),
+                post_date=filtered_post.get("post_date"),
+                content_type=filtered_post.get("content_type", "instagram"),
+                thumbnail=filtered_post.get("thumbnail", ""),
+            )
+            imported_posts += 1
+
+        # Import collections - validate and filter allowed fields
+        collections = validated.collections or []
+        imported_collections = 0
+        for coll in collections:
+            coll_id = coll.get("id")
+            if not coll_id:
+                continue
+
+            post_ids = coll.get("post_ids")
+            if post_ids is None:
+                post_ids = coll.get("postIds", [])
+
+            db.upsert_collection(
+                collection_id=coll_id,
+                name=coll.get("name", "Untitled"),
+                icon=coll.get("icon", "folder"),
+                post_ids=post_ids if isinstance(post_ids, list) else [],
+                created_at=coll.get("created_at") or coll.get("createdAt"),
+                updated_at=coll.get("updated_at") or coll.get("updatedAt"),
+            )
+            imported_collections += 1
+
+        logger.info(f"📥 Import complete: {imported_posts} posts, {skipped_posts} skipped, {imported_collections} collections")
+
+        return {
+            "success": True,
+            "imported_posts": imported_posts,
+            "skipped_posts": skipped_posts,
+            "imported_collections": imported_collections,
+            "mode": mode
+        }
+    except Exception as e:
+        logger.error(f"Error importing data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Settings endpoints for AI Providers and Instagram configuration
+# These manage the .api_keys file and dynamically update the ModelRouter
+
+class ProviderKeyUpdate(BaseModel):
+    provider: str
+    api_key: str
+
+class InstagramCredentials(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    sessionid: Optional[str] = None
+
+def get_config_path(filename: str) -> Path:
+    """Get path to config directory files."""
+    return Path(__file__).parent / "config" / filename
+
+@app.get("/settings/ai-providers")
+async def get_ai_providers(token: str = Depends(verify_token)):
+    """
+    Get available AI providers and their key status.
+    - Requires API authentication
+    """
+    from core.model_router import get_router
+    router = get_router()
+    providers = router.get_available_providers()
+    
+    return {
+        "success": True,
+        "providers": {
+            "groq": {
+                "name": "Groq",
+                "has_key": providers.get("groq", False),
+                "key_hint": "gsk_..." if providers.get("groq") else None
+            },
+            "gemini": {
+                "name": "Google Gemini",
+                "has_key": providers.get("gemini", False),
+                "key_hint": "AIza..." if providers.get("gemini") else None
+            },
+            "openrouter": {
+                "name": "OpenRouter",
+                "has_key": providers.get("openrouter", False),
+                "key_hint": "sk-or-..." if providers.get("openrouter") else None
+            },
+            "ollama": {
+                "name": "Ollama (Local)",
+                "has_key": providers.get("ollama", False),
+                "key_hint": None
+            }
+        }
+    }
+
+@app.post("/settings/ai-providers")
+async def set_ai_provider_key(
+    data: ProviderKeyUpdate,
+    token: str = Depends(verify_token)
+):
+    """
+    Set an API key for an AI provider.
+    - Requires API authentication
+    - provider: groq, gemini, or openrouter
+    """
+    from core.model_router import get_router
+    import httpx
+    
+    valid_providers = ["groq", "gemini", "openrouter"]
+    provider_slug = data.provider.lower()
+    if provider_slug not in valid_providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider. Must be one of: {', '.join(valid_providers)}"
+        )
+    
+    if not data.api_key or len(data.api_key.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Invalid API key format")
+        
+    # Validate API key explicitly
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if provider_slug == "groq":
+                resp = await client.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {data.api_key.strip()}"})
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid Groq API Key")
+            elif provider_slug == "gemini":
+                resp = await client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={data.api_key.strip()}")
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid Gemini API Key")
+            elif provider_slug == "openrouter":
+                resp = await client.get("https://openrouter.ai/api/v1/auth/key", headers={"Authorization": f"Bearer {data.api_key.strip()}"})
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid OpenRouter API Key")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Network error validating API key: {e}")
+    
+    router = get_router()
+    success = router.set_api_key(data.provider.lower(), data.api_key.strip())
+    
+    if success:
+        logger.info(f"🔑 API key updated for {data.provider}")
+        return {"success": True, "provider": data.provider, "message": "API key updated"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save API key")
+
+@app.delete("/settings/ai-providers/{provider}")
+async def delete_ai_provider_key(
+    provider: str,
+    token: str = Depends(verify_token)
+):
+    """
+    Delete an API key for an AI provider.
+    - Requires API authentication
+    """
+    from core.model_router import get_router
+    
+    valid_providers = ["groq", "gemini", "openrouter"]
+    if provider.lower() not in valid_providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider. Must be one of: {', '.join(valid_providers)}"
+        )
+    
+    router = get_router()
+    success = router.delete_api_key(provider.lower())
+    
+    if success:
+        logger.info(f"🔑 API key deleted for {provider}")
+        return {"success": True, "provider": provider, "message": "API key deleted"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete API key")
+
+@app.get("/settings/instagram")
+async def get_instagram_credentials(token: str = Depends(verify_token)):
+    """
+    Get Instagram credentials (masked).
+    - Requires API authentication
+    """
+    api_keys_file = get_config_path(".api_keys")
+    
+    username = None
+    has_password = False
+    
+    if api_keys_file.exists():
+        with open(api_keys_file, "r") as f:
+            for line in f:
+                if line.startswith("INSTAGRAM_USERNAME="):
+                    username = line.split("=", 1)[1].strip()
+                elif line.startswith("INSTAGRAM_PASSWORD="):
+                    has_password = bool(line.split("=", 1)[1].strip())
+    
+    return {
+        "success": True,
+        "configured": username is not None and username != "",
+        "username": username if username else None,
+        "has_password": has_password
+    }
+
+@app.post("/settings/instagram")
+async def set_instagram_credentials(
+    data: InstagramCredentials,
+    token: str = Depends(verify_token)
+):
+    """
+    Set Instagram credentials.
+    - Requires API authentication
+    """
+    sessionid = getattr(data, "sessionid", None)
+    
+    if not sessionid and (not data.username or not data.password):
+        raise HTTPException(status_code=400, detail="Either login (username + password) OR Session ID is required")
+        
+    username_to_use = data.username or "session_user"
+    
+    api_keys_file = get_config_path(".api_keys")
+    
+    # Authenticate with Instagram first
+    try:
+        import instaloader
+        L = instaloader.Instaloader()
+        session_file = Path(__file__).parent / ".instaloader_session"
+        if sessionid:
+            L.context._session.cookies.set("sessionid", sessionid, domain=".instagram.com")
+            L.context.username = username_to_use
+            # To verify sessionid, attempt to get a profile to see if block is lifted
+            try:
+                L.get_profile("instagram")
+            except Exception:
+                # Some sessionids might have minor issues fetching profiles but work for posts, 
+                # but getting "instagram" is generally safe. Ignore non-fatal if possible
+                pass
+        else:
+            L.login(data.username, data.password)
+            username_to_use = data.username
+            
+        L.save_session_to_file(str(session_file))
+        logger.info(f"🍪 Instagram session successfully verified and saved for {username_to_use}")
+    except instaloader.exceptions.BadCredentialsException:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    except instaloader.exceptions.TwoFactorAuthRequiredException:
+        raise HTTPException(status_code=401, detail="Two-factor auth blocked login. Please use Session ID cookie instead.")
+    except instaloader.exceptions.ConnectionException as e:
+        error_msg = str(e).lower()
+        if "checkpoint" in error_msg or "challenge" in error_msg:
+            raise HTTPException(status_code=401, detail="Instagram Checkpoint block. Please use Session ID cookie instead.")
+        raise HTTPException(status_code=400, detail=f"Instagram connection error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to authenticate with Instagram: {e}")
+
+    # Read existing content
+    lines = []
+    username_found = False
+    password_found = False
+    
+    if api_keys_file.exists():
+        with open(api_keys_file, "r") as f:
+            for line in f:
+                if line.startswith("INSTAGRAM_USERNAME="):
+                    lines.append(f"INSTAGRAM_USERNAME={username_to_use}\n")
+                    username_found = True
+                elif line.startswith("INSTAGRAM_PASSWORD="):
+                    if data.password:
+                        lines.append(f"INSTAGRAM_PASSWORD={data.password}\n")
+                    else:
+                        lines.append("INSTAGRAM_PASSWORD=\n")
+                    password_found = True
+                else:
+                    lines.append(line)
+    
+    if not username_found:
+        lines.append(f"INSTAGRAM_USERNAME={username_to_use}\n")
+    if not password_found:
+        if data.password:
+            lines.append(f"INSTAGRAM_PASSWORD={data.password}\n")
+        else:
+            lines.append("INSTAGRAM_PASSWORD=\n")
+    
+    with open(api_keys_file, "w") as f:
+        f.writelines(lines)
+        
+    logger.info(f"📸 Instagram credentials updated for {username_to_use}")
+    
+    return {
+        "success": True,
+        "username": username_to_use,
+        "message": "Instagram credentials updated"
+    }
+
+@app.delete("/settings/instagram")
+async def delete_instagram_credentials(token: str = Depends(verify_token)):
+    """
+    Delete Instagram credentials.
+    - Requires API authentication
+    """
+    api_keys_file = get_config_path(".api_keys")
+    
+    if api_keys_file.exists():
+        lines = []
+        with open(api_keys_file, "r") as f:
+            for line in f:
+                if not line.startswith("INSTAGRAM_USERNAME=") and not line.startswith("INSTAGRAM_PASSWORD="):
+                    lines.append(line)
+        
+        with open(api_keys_file, "w") as f:
+            f.writelines(lines)
+    
+    logger.info("📸 Instagram credentials deleted")
+    
+    return {"success": True, "message": "Instagram credentials deleted"}
 
 
 if __name__ == "__main__":

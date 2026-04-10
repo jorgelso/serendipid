@@ -33,7 +33,7 @@ def _banner(msg: str) -> None:
 def _load_credentials() -> tuple[str, str]:
     creds: dict[str, str] = {}
     if API_KEYS_FILE.exists():
-        for line in API_KEYS_FILE.read_text(encoding="utf-8").splitlines():
+        for line in API_KEYS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
             line = line.strip()
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")
@@ -46,7 +46,7 @@ def _load_credentials() -> tuple[str, str]:
 def _save_credentials(username: str, password: str) -> None:
     lines: list[str] = []
     if API_KEYS_FILE.exists():
-        for line in API_KEYS_FILE.read_text(encoding="utf-8").splitlines():
+        for line in API_KEYS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
             stripped = line.strip()
             if "=" in stripped and not stripped.startswith("#"):
                 k = stripped.split("=", 1)[0].strip()
@@ -119,7 +119,29 @@ def setup_instaloader_session(username: str, password: str) -> bool:
         return False
     except Exception as e:
         print(f"  ✗ Login error: {e}")
-        return False
+        
+        # ── FALLBACK: Manual Session Cookie Import ──
+        print("\n  ⚠️  Instagram has blocked this direct login attempt from this machine.")
+        print("      This happens often on cloud servers or new IPs (Checkpoint Required).")
+        print("\n  👉 To instantly bypass this, you can paste an active 'sessionid' cookie")
+        print("      from an Instagram account that is already logged in on your web browser.")
+        print("\n      How to get it:")
+        print("      1. Log into instagram.com on your computer's web browser.")
+        print("      2. Open Developer Tools (F12) → Application/Storage → Cookies → instagram.com")
+        print("      3. Copy the value of the 'sessionid' row.")
+        
+        fallback = input("\n  Do you want to manually enter a sessionid now? [y/N]: ").strip().lower()
+        if fallback == 'y':
+            sessionid = input("  Enter 'sessionid' cookie value: ").strip()
+            if sessionid:
+                # Inject the session into instaloader
+                L.context._session.cookies.set("sessionid", sessionid, domain=".instagram.com")
+                L.context.username = username
+                print("  ✓ Session cookie accepted and injected.")
+            else:
+                return False
+        else:
+            return False
 
     if not L.context.is_logged_in:
         print("  ✗ Login did not succeed.")

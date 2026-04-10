@@ -83,9 +83,12 @@ def generate_final_summary(results, instagram_url):
         music_info = "MUSIC:\n"
         for item in results['music_identification']:
             output = item['output']
-            if '🎵 Song:' in output:
-                song = output.split('🎵 Song:')[1].split('\n')[0].strip()
-                artist = output.split('👤 Artist:')[1].split('\n')[0].strip() if '👤 Artist:' in output else 'Unknown'
+            if 'Song:' in output:
+                song_line = [line for line in output.split('\n') if 'Song:' in line][0]
+                artist_line = [line for line in output.split('\n') if 'Artist:' in line]
+                
+                song = song_line.split('Song:')[1].strip()
+                artist = artist_line[0].split('Artist:')[1].strip() if artist_line else 'Unknown'
                 music_info += f"- {song} by {artist}\n"
             elif 'No match found' in output:
                 music_info += "- No music identified (likely voiceover/no background music)\n"
@@ -135,7 +138,7 @@ Generate a report in this EXACT format:
 [Music/song name if found, or "No background music" or "Voiceover only"]
 
 📂 CATEGORY:
-[Choose ONE from: product, places, recipe, software, book, tv shows, workout, film, event]
+[Choose ONE from: product, places, food, software, book, tv shows, fitness, film, event]
 
 Be specific, concise, and actionable. Focus on useful information."""
 
@@ -231,6 +234,12 @@ def parse_summary(summary_text):
         if raw_tags:
             tags = [t.strip() for t in re.split(r'[\s,]+', raw_tags) if t.strip()]
 
+        music = _parse_field(summary_text, "🎵", "MUSIC")
+        if not music:
+            _mm = re.search(r'(?:^|\n)\s*\*{0,2}MUSIC\*{0,2}:?\s*([^\n]+)', summary_text, re.IGNORECASE)
+            if _mm:
+                music = _mm.group(1).strip()
+
         # Category: grab first word/phrase that matches a known category
         raw_cat = _parse_field(summary_text, "📂", "CATEGORY").lower()
         # Strip markdown bold leftovers and pick first line
@@ -242,8 +251,8 @@ def parse_summary(summary_text):
         print(f"⚠️ Error parsing summary: {e}")
 
     # Fallback: Auto-detect category if empty or unrecognised
-    valid_categories = {'product', 'places', 'recipe', 'software', 'book',
-                        'tv shows', 'workout', 'film', 'event', 'other'}
+    valid_categories = {'product', 'places', 'software', 'book',
+                        'tv shows', 'fitness', 'film', 'event', 'food', 'other'}
     if not category or category not in valid_categories:
         category = auto_detect_category(summary_text, title, summary, tags)
 
@@ -262,10 +271,10 @@ def auto_detect_category(summary_text, title, summary, tags):
     category_keywords = {
         'product': ['camera', 'device', 'gadget', 'tech', 'phone', 'laptop', 'review', 'unbox', 'product', 'dji', 'osmo', 'action cam'],
         'places': ['travel', 'trip', 'visit', 'destination', 'village', 'city', 'mountain', 'beach', 'hotel', 'itinerary', 'sikkim', 'location'],
-        'recipe': ['recipe', 'cooking', 'food', 'dish', 'ingredients', 'cook', 'bake', 'meal', 'cuisine'],
+        'food': ['food', 'meal', 'cuisine', 'restaurant', 'cafe', 'dining', 'eat', 'recipe', 'cooking', 'dish', 'ingredients', 'cook', 'bake'],
         'software': ['app', 'software', 'code', 'programming', 'developer', 'api', 'python', 'javascript'],
         'book': ['book', 'novel', 'author', 'read', 'literature', 'story', 'chapter'],
-        'workout': ['workout', 'fitness', 'exercise', 'gym', 'training', 'muscle', 'cardio', 'yoga'],
+        'fitness': ['workout', 'fitness', 'exercise', 'gym', 'training', 'muscle', 'cardio', 'yoga'],
         'film': ['movie', 'film', 'cinema', 'actor', 'actress', 'director', 'trailer', 'premiere'],
         'tv shows': ['series', 'episode', 'season', 'show', 'tv show', 'streaming', 'netflix'],
         'event': ['event', 'concert', 'festival', 'conference', 'meetup', 'workshop', 'seminar']
@@ -377,7 +386,7 @@ def _clean_text(output: str) -> str:
 def cleanup_temp_folder(folder_path):
     """Delete temp folder after successful database save"""
     try:
-        if os.path.exists(folder_path):
+        if False:
             shutil.rmtree(folder_path)
             print(f"🗑️  Cleaned up temp folder: {Path(folder_path).name}")
             return True
@@ -583,7 +592,7 @@ def main():
 
     if not instagram_url:
         print("❌ No link provided!")
-        return
+        sys.exit(1)
 
     # Step 2: Validate link & detect type
     print_section("🔍 Step 1: Validating Link")
@@ -593,7 +602,7 @@ def main():
     if not validation['valid']:
         print(f"❌ Invalid link!")
         print(f"   Error: {validation['error']}")
-        return
+        sys.exit(1)
 
     content_type = validation['content_type']
     shortcode    = validation['shortcode']
@@ -663,13 +672,18 @@ def main():
         
         if download_result is None:
             print("❌ Download failed!")
-            return
+            sys.exit(1)
         
         download_folder = download_result
         print(f"\n✓ Content downloaded to: {download_folder}")
 
     except RetryableDownloadError as e:
-        print(f"⏰ Instagram download blocked — {e}")
+        msg = str(e)
+        print(f"⏰ Instagram download blocked — {msg}")
+        if "login required" in msg.lower():
+            print("❌ Instagram now requires login for this post.")
+            print("   Add INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD in setup (Step 3) and retry.")
+            sys.exit(1)
         db.queue_for_retry(shortcode, instagram_url, 'instagram', 'instagram_rate_limit', retry_hours=24)
         print("⏰ Queued for retry in 24 hours.")
         sys.exit(2)
@@ -678,7 +692,7 @@ def main():
         print(f"❌ Download error: {e}")
         import traceback
         traceback.print_exc()
-        return
+        sys.exit(1)
     
     # Step 4: Find downloaded files
     print_section("📂 Step 3: Locating Files")
@@ -687,7 +701,7 @@ def main():
     
     if not folder_path.exists():
         print(f"❌ Folder not found: {download_folder}")
-        return
+        sys.exit(1)
     
     # Find files
     mp4_files = list(folder_path.glob("*.mp4"))
@@ -811,6 +825,30 @@ def main():
     
     # Extract structured data from summary for database
     title, summary_text, tags, music, category = parse_summary(final_summary)
+    
+    # OVERRIDE LLM MUSIC WITH DIRECT SHAZAM OUTPUT TO PRESERVE LINKS
+    if results.get('music_identification'):
+        for item in results['music_identification']:
+            out = item['output']
+            if 'Song:' in out:
+                song = [l.split('Song:')[1].strip() for l in out.split('\n') if 'Song:' in l][0]
+                artist_line = [l.split('Artist:')[1].strip() for l in out.split('\n') if 'Artist:' in l]
+                artist = artist_line[0] if artist_line else 'Unknown'
+                link = ""
+                spot_line = [l.split('Spotify:')[1].strip() for l in out.split('\n') if 'Spotify:' in l]
+                apple_line = [l.split('Apple Music:')[1].strip() for l in out.split('\n') if 'Apple Music:' in l]
+                if spot_line:
+                    link = spot_line[0]
+                elif apple_line:
+                    link = apple_line[0]
+                music = f"{song} by {artist}"
+                if link:
+                    music += f" | {link}"
+                break
+            elif 'No match found' in out:
+                music = "No music identified"
+                break
+
     
     # Get additional metadata from info.txt if available
     username = ""

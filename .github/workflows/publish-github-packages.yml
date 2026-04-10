@@ -1,0 +1,94 @@
+name: Publish npm Package to GitHub Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v1.0.3-beta.1)'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+
+      - name: Prepare package payload
+        run: node scripts/build.js
+        working-directory: superbrain-cli
+
+      - name: Resolve release tag
+        id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+          else
+            TAG_NAME="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ "$TAG_NAME" != v* ]]; then
+            echo "Tag must start with v (received: $TAG_NAME)"
+            exit 1
+          fi
+
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Set release version and dist-tag
+        id: meta
+        shell: bash
+        run: |
+          OWNER_LC="${GITHUB_REPOSITORY_OWNER,,}"
+          VERSION="${{ steps.vars.outputs.tag_name }}"
+          VERSION="${VERSION#v}"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+
+          cd superbrain-cli
+          npm pkg set "name=@${OWNER_LC}/superbrain-server"
+          npm pkg set "repository=${REPO_URL}"
+          npm pkg set "publishConfig.registry=https://npm.pkg.github.com"
+          npm version "$VERSION" --no-git-tag-version
+
+          if [[ "$VERSION" == *"-beta"* || "$VERSION" == *"-beta."* ]]; then
+            DIST_TAG="beta"
+          else
+            DIST_TAG="latest"
+          fi
+
+          echo "scope=@${OWNER_LC}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Configure npm scope registry mapping
+        shell: bash
+        run: |
+          echo "${{ steps.meta.outputs.scope }}:registry=https://npm.pkg.github.com" > ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to GitHub Packages
+        run: npm publish --tag "${{ steps.meta.outputs.dist_tag }}"
+        working-directory: superbrain-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,19 +19,37 @@ import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { colors } from '../theme/colors';
-import { rescheduleWatchLaterNotification } from '../services/notificationService';
+import { Ionicons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../App';
-import collectionsService from '../services/collections';
-import postsCache from '../services/postsCache';
+import { colors } from '../theme/colors';
 import { Collection, FailedPost } from '../types';
+import { ICON_OPTIONS } from '../constants/icons';
+import { collectionsService } from '../services/collections';
+import postsCache from '../services/postsCache';
+import { rescheduleWatchLaterNotification } from '../services/notificationService';
 import CustomToast from '../components/CustomToast';
+import BottomNav from '../components/BottomNav';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const { width: screenWidth } = Dimensions.get('window');
 
-const EMOJI_ICONS = ['📁', '✈️', '🍔', '👕', '💪', '📚', '🎬', '📸', '⭐', '❤️', '🔥', '🎯'];
+const LOCAL_ICON_COLORS: Record<string, string> = {
+  'folder': colors.primary || '#6366f1',
+  'airplane': '#0ea5e9',
+  'restaurant': '#ef4444',
+  'shirt': '#ec4899',
+  'fitness': '#10b981',
+  'book': '#b45309',
+  'film': '#8b5cf6',
+  'camera': '#06b6d4',
+  'star': '#eab308',
+  'heart': '#f43f5e',
+  'flame': '#f97316',
+  'pin': '#3b82f6',
+  'time': '#64748b',
+  'clock': '#64748b',
+};
 
 const LibraryScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -42,13 +60,13 @@ const LibraryScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
-  const [selectedIcon, setSelectedIcon] = useState('📁');
+  const [selectedIcon, setSelectedIcon] = useState('folder');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [collectionToDelete, setCollectionToDelete] = useState<Collection | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [collectionToEdit, setCollectionToEdit] = useState<Collection | null>(null);
   const [editCollectionName, setEditCollectionName] = useState('');
-  const [editSelectedIcon, setEditSelectedIcon] = useState('📁');
+  const [editSelectedIcon, setEditSelectedIcon] = useState('folder');
   const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'success' | 'error' | 'warning' | 'info' });
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedCollections, setSelectedCollections] = useState<Set<string>>(new Set());
@@ -59,7 +77,6 @@ const LibraryScreen = () => {
     loadCollections();
     checkLibraryTips();
     
-    // Add focus listener to reload when returning from collection detail
     const unsubscribe = navigation.addListener('focus', () => {
       loadCollections();
     });
@@ -70,7 +87,6 @@ const LibraryScreen = () => {
   const checkLibraryTips = async () => {
     const seen = await AsyncStorage.getItem('@superbrain_library_tips_seen');
     if (seen) return;
-    // Existing install upgrading — user already has data, skip tips
     const existingPosts = await AsyncStorage.getItem('@superbrain_posts_cache');
     const existingCollections = await AsyncStorage.getItem('@superbrain_collections');
     if (existingPosts || existingCollections) {
@@ -90,7 +106,6 @@ const LibraryScreen = () => {
       const focusInput = () => {
         setTimeout(() => {
           createInputRef.current?.focus();
-          // Try again after a bit more delay
           setTimeout(() => {
             createInputRef.current?.focus();
           }, 200);
@@ -119,12 +134,10 @@ const LibraryScreen = () => {
       setLoading(true);
       const data = await collectionsService.getCollections();
       setCollections(data);
-      // Reschedule Watch Later notification if it has posts
       const watchLater = data.find(c => c.id === 'default_watch_later');
       if (watchLater && watchLater.postIds.length > 0) {
         rescheduleWatchLaterNotification().catch(() => {});
       }
-      // Load failed posts
       const failed = await postsCache.getFailedPosts();
       setFailedPosts(failed);
     } catch (error) {
@@ -133,7 +146,6 @@ const LibraryScreen = () => {
       setLoading(false);
     }
   };
-
 
   const handleCreateCollection = async () => {
     if (!newCollectionName.trim()) {
@@ -153,7 +165,7 @@ const LibraryScreen = () => {
     try {
       await collectionsService.createCollection(newCollectionName.trim(), selectedIcon);
       setNewCollectionName('');
-      setSelectedIcon('📁');
+      setSelectedIcon('folder');
       setShowCreateModal(false);
       loadCollections();
       setToast({ visible: true, message: 'Collection created successfully', type: 'success' });
@@ -209,9 +221,11 @@ const LibraryScreen = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     
     if (selectionMode && selectedCollections.size > 0) {
-      // Delete multiple selected collections (skip default Watch Later)
-      for (const collectionId of Array.from(selectedCollections)) {
-        if (collectionId === 'default_watch_later') continue;
+      const deletableCollectionIds = Array.from(selectedCollections).filter(
+        (collectionId) => collectionId !== 'default_watch_later'
+      );
+
+      for (const collectionId of deletableCollectionIds) {
         await collectionsService.deleteCollection(collectionId);
       }
       setShowDeleteModal(false);
@@ -220,11 +234,10 @@ const LibraryScreen = () => {
       loadCollections();
       setToast({ 
         visible: true, 
-        message: `${selectedCollections.size} collection(s) deleted`, 
+        message: `${deletableCollectionIds.length} collection(s) deleted`, 
         type: 'success' 
       });
     } else if (collectionToDelete) {
-      // Delete single collection
       await collectionsService.deleteCollection(collectionToDelete.id);
       setShowDeleteModal(false);
       setCollectionToDelete(null);
@@ -236,6 +249,16 @@ const LibraryScreen = () => {
   const filteredCollections = collections.filter(col =>
     searchQuery === '' || col.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const deletableSelectedCount = Array.from(selectedCollections).filter(
+    (collectionId) => collectionId !== 'default_watch_later'
+  ).length;
+
+  const getCollectionIconName = (collection: Collection) => {
+    if (collection.id === 'default_watch_later') return 'time';
+    if (collection.icon === 'clock') return 'time';
+    return collection.icon in LOCAL_ICON_COLORS ? collection.icon : 'folder';
+  };
 
   return (
     <View style={styles.container}>
@@ -258,9 +281,9 @@ const LibraryScreen = () => {
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity 
-              style={[styles.deleteButton, selectedCollections.size === 0 && styles.deleteButtonDisabled]}
-              onPress={() => selectedCollections.size > 0 && setShowDeleteModal(true)}
-              disabled={selectedCollections.size === 0}
+              style={[styles.deleteButton, deletableSelectedCount === 0 && styles.deleteButtonDisabled]}
+              onPress={() => deletableSelectedCount > 0 && setShowDeleteModal(true)}
+              disabled={deletableSelectedCount === 0}
             >
               <Text style={styles.deleteButtonText}>Delete</Text>
             </TouchableOpacity>
@@ -270,7 +293,7 @@ const LibraryScreen = () => {
 
       <View style={styles.searchContainer}>
         <View style={styles.searchIconContainer}>
-          <Text style={styles.searchIconText}>🔍</Text>
+          <Ionicons name="search" size={20} color={colors.textMuted} />
         </View>
         <TextInput
           style={styles.searchInput}
@@ -281,7 +304,7 @@ const LibraryScreen = () => {
         />
         {searchQuery !== '' && (
           <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
-            <Text style={styles.clearIcon}>✕</Text>
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
@@ -298,7 +321,9 @@ const LibraryScreen = () => {
         >
           {filteredCollections.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>📁</Text>
+              <View style={[styles.collectionIconContainer, { backgroundColor: 'rgba(107, 114, 128, 0.1)' }]}>
+                <Ionicons name="folder-open-outline" size={48} color={colors.textMuted} />
+              </View>
               <Text style={styles.emptyTitle}>No Collections Yet</Text>
               <Text style={styles.emptyText}>
                 Create collections to organize your saved posts
@@ -306,7 +331,6 @@ const LibraryScreen = () => {
             </View>
           ) : (
             <View style={styles.collectionsGrid}>
-              {/* Failed Analysis collection — auto-appears when posts fail, auto-disappears when empty */}
               {failedPosts.length > 0 && (
                 <View style={styles.collectionWrapper}>
                   <TouchableOpacity
@@ -315,7 +339,7 @@ const LibraryScreen = () => {
                     activeOpacity={0.8}
                   >
                     <View style={styles.collectionIconContainer}>
-                      <Text style={styles.collectionIcon}>⚠️</Text>
+                      <Ionicons name="warning" size={32} color={colors.error} />
                     </View>
                     <Text style={[styles.collectionName, { color: colors.error }]} numberOfLines={1}>
                       Failed Analysis
@@ -328,6 +352,7 @@ const LibraryScreen = () => {
               )}
               {filteredCollections.map((collection) => {
                 const isSelected = selectedCollections.has(collection.id);
+                const isWatchLaterCollection = collection.id === 'default_watch_later';
                 return (
                 <View key={collection.id} style={styles.collectionWrapper}>
                   <TouchableOpacity
@@ -337,7 +362,12 @@ const LibraryScreen = () => {
                     ]}
                     onPress={() => {
                       if (selectionMode) {
+                        if (isWatchLaterCollection) {
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                          return;
+                        }
                         const newSelected = new Set(selectedCollections);
+                        newSelected.delete('default_watch_later');
                         if (isSelected) {
                           newSelected.delete(collection.id);
                         } else {
@@ -350,7 +380,7 @@ const LibraryScreen = () => {
                       }
                     }}
                     onLongPress={() => {
-                      if (!selectionMode && collection.id !== 'default_watch_later') {
+                      if (!selectionMode && !isWatchLaterCollection) {
                         setSelectionMode(true);
                         setSelectedCollections(new Set([collection.id]));
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -358,18 +388,22 @@ const LibraryScreen = () => {
                     }}
                     activeOpacity={0.8}
                   >
-                    {selectionMode && (
+                    {selectionMode && !isWatchLaterCollection && (
                       <View style={styles.checkboxContainer}>
                         <View style={[
                           styles.checkbox,
                           isSelected && styles.checkboxSelected
                         ]}>
-                          {isSelected && <Text style={styles.checkmark}>✓</Text>}
+                          {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
                         </View>
                       </View>
                     )}
                     <View style={styles.collectionIconContainer}>
-                      <Text style={styles.collectionIcon}>{collection.icon}</Text>
+                      <Ionicons 
+                        name={getCollectionIconName(collection) as any} 
+                        size={32} 
+                        color={LOCAL_ICON_COLORS[getCollectionIconName(collection)] || colors.primary} 
+                      />
                     </View>
                     <Text style={styles.collectionName} numberOfLines={1}>
                       {collection.name}
@@ -383,7 +417,7 @@ const LibraryScreen = () => {
                     style={styles.editButton}
                     onPress={() => handleEditCollection(collection)}
                   >
-                    <Text style={styles.editIcon}>✏️</Text>
+                    <Ionicons name="pencil" size={16} color={colors.textMuted} />
                   </TouchableOpacity>
                   )}
                 </View>
@@ -397,33 +431,11 @@ const LibraryScreen = () => {
         style={styles.fab}
         onPress={() => setShowCreateModal(true)}
       >
-        <Text style={styles.fabIcon}>+</Text>
+        <Ionicons name="add" size={32} color="#fff" />
       </TouchableOpacity>
 
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Home')}>
-          <View style={styles.navIconContainer}>
-            <Text style={styles.navIconText}>🏠</Text>
-          </View>
-          <Text style={styles.navLabel}>Home</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.navItemActive} onPress={() => navigation.navigate('Library')}>
-          <View style={styles.navIconContainer}>
-            <Text style={styles.navIconTextActive}>📚</Text>
-          </View>
-          <Text style={styles.navLabelActive}>Library</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Settings')}>
-          <View style={styles.navIconContainer}>
-            <Text style={styles.navIconText}>⚙️</Text>
-          </View>
-          <Text style={styles.navLabel}>Settings</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNav activeTab="Library" />
 
-      {/* Create Collection Modal */}
       <Modal
         visible={showCreateModal}
         transparent
@@ -442,7 +454,7 @@ const LibraryScreen = () => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New Collection</Text>
               <TouchableOpacity onPress={() => setShowCreateModal(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -450,7 +462,7 @@ const LibraryScreen = () => {
             <TextInput
               ref={createInputRef}
               style={styles.modalInput}
-              placeholder="e.g., Travel, Recipes, Inspiration"
+              placeholder="e.g., Travel, Food, Inspiration"
               placeholderTextColor={colors.textMuted}
               value={newCollectionName}
               onChangeText={setNewCollectionName}
@@ -464,7 +476,7 @@ const LibraryScreen = () => {
               contentContainerStyle={styles.iconsContent}
               keyboardShouldPersistTaps="always"
             >
-              {EMOJI_ICONS.map((icon) => (
+              {ICON_OPTIONS.map((icon) => (
                 <TouchableOpacity
                   key={icon}
                   style={[
@@ -473,7 +485,11 @@ const LibraryScreen = () => {
                   ]}
                   onPress={() => setSelectedIcon(icon)}
                 >
-                  <Text style={styles.iconOptionText}>{icon}</Text>
+                  <Ionicons
+                    name={icon as any}
+                    size={24}
+                    color={selectedIcon === icon ? (LOCAL_ICON_COLORS[icon] || colors.primary) : (LOCAL_ICON_COLORS[icon] || colors.textMuted)}
+                  />
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -484,7 +500,7 @@ const LibraryScreen = () => {
                 onPress={() => {
                   setShowCreateModal(false);
                   setNewCollectionName('');
-                  setSelectedIcon('📁');
+                  setSelectedIcon('folder');
                 }}
               >
                 <Text style={styles.modalButtonCancelText}>Cancel</Text>
@@ -501,7 +517,6 @@ const LibraryScreen = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Edit Collection Modal */}
       <Modal
         visible={showEditModal}
         animationType="slide"
@@ -520,7 +535,7 @@ const LibraryScreen = () => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Collection</Text>
               <TouchableOpacity onPress={() => setShowEditModal(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -542,7 +557,7 @@ const LibraryScreen = () => {
               contentContainerStyle={styles.iconsContent}
               keyboardShouldPersistTaps="always"
             >
-              {EMOJI_ICONS.map((icon) => (
+              {ICON_OPTIONS.map((icon) => (
                 <TouchableOpacity
                   key={icon}
                   style={[
@@ -551,7 +566,11 @@ const LibraryScreen = () => {
                   ]}
                   onPress={() => setEditSelectedIcon(icon)}
                 >
-                  <Text style={styles.iconOptionText}>{icon}</Text>
+                  <Ionicons
+                    name={icon as any}
+                    size={24}
+                    color={editSelectedIcon === icon ? '#fff' : colors.textMuted}
+                  />
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -575,7 +594,6 @@ const LibraryScreen = () => {
         </TouchableOpacity>
       </Modal>
 
-      {/* Delete Confirmation Modal */}
       <Modal
         visible={showDeleteModal}
         transparent
@@ -585,7 +603,7 @@ const LibraryScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.deleteModalContent}>
             <View style={styles.deleteIconContainer}>
-              <Text style={styles.deleteIcon}>🗑️</Text>
+              <Ionicons name="trash" size={40} color={colors.error} />
             </View>
             <Text style={styles.deleteTitle}>Delete Collection?</Text>
             <Text style={styles.deleteMessage}>
@@ -612,7 +630,6 @@ const LibraryScreen = () => {
         </View>
       </Modal>
 
-      {/* Library Tips Modal */}
       <Modal visible={showLibraryTips} transparent animationType="fade" onRequestClose={dismissLibraryTips}>
         <View style={styles.tipsOverlay}>
           <View style={styles.tipsCard}>
@@ -622,7 +639,7 @@ const LibraryScreen = () => {
             <View style={styles.tipsBody}>
               <View style={styles.tipRow}>
                 <View style={styles.tipIconWrap}>
-                  <Text style={styles.tipIcon}>⏰</Text>
+                  <Ionicons name="time" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.tipTextWrap}>
                   <Text style={styles.tipTitle}>Watch Later</Text>
@@ -631,7 +648,7 @@ const LibraryScreen = () => {
               </View>
               <View style={styles.tipRow}>
                 <View style={styles.tipIconWrap}>
-                  <Text style={styles.tipIcon}>🔔</Text>
+                  <Ionicons name="notifications" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.tipTextWrap}>
                   <Text style={styles.tipTitle}>Notifications</Text>
@@ -640,11 +657,11 @@ const LibraryScreen = () => {
               </View>
               <View style={styles.tipRow}>
                 <View style={styles.tipIconWrap}>
-                  <Text style={styles.tipIcon}>📁</Text>
+                  <Ionicons name="folder" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.tipTextWrap}>
                   <Text style={styles.tipTitle}>Collections</Text>
-                  <Text style={styles.tipDesc}>Organise your saves into custom collections — travel, recipes, workouts, anything you like.</Text>
+                  <Text style={styles.tipDesc}>Organise your saves into custom collections — travel, meals, fitness, anything you like.</Text>
                 </View>
               </View>
             </View>
@@ -732,9 +749,6 @@ const styles = StyleSheet.create({
   searchIconContainer: {
     marginRight: 8,
   },
-  searchIconText: {
-    fontSize: 18,
-  },
   searchInput: {
     flex: 1,
     color: colors.text,
@@ -742,10 +756,6 @@ const styles = StyleSheet.create({
   },
   clearButton: {
     padding: 4,
-  },
-  clearIcon: {
-    fontSize: 18,
-    color: colors.textMuted,
   },
   loadingContainer: {
     flex: 1,
@@ -770,10 +780,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 40,
     paddingTop: 100,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
   },
   emptyTitle: {
     fontSize: 20,
@@ -830,11 +836,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  checkmark: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
   editButton: {
     position: 'absolute',
     top: 8,
@@ -849,9 +850,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     zIndex: 1,
   },
-  editIcon: {
-    fontSize: 16,
-  },
   collectionIconContainer: {
     width: 64,
     height: 64,
@@ -860,9 +858,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
-  },
-  collectionIcon: {
-    fontSize: 32,
   },
   collectionName: {
     fontSize: 16,
@@ -891,56 +886,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
-  fabIcon: {
-    fontSize: 32,
-    color: '#fff',
-    fontWeight: '300',
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    backgroundColor: colors.backgroundCard,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingBottom: 24,
-    paddingTop: 16,
-    height: 80,
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navItemActive: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navIconContainer: {
-    marginBottom: 6,
-  },
-  navIconText: {
-    fontSize: 26,
-    color: colors.textMuted,
-  },
-  navIconTextActive: {
-    fontSize: 26,
-    color: colors.primary,
-  },
-  navLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  navLabelActive: {
-    fontSize: 11,
-    color: colors.primary,
-    fontWeight: '600',
-    marginTop: 2,
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -964,11 +909,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
-  modalCloseIcon: {
-    fontSize: 24,
-    color: colors.textMuted,
-    padding: 4,
-  },
   deleteModalContent: {
     backgroundColor: colors.background,
     borderRadius: 24,
@@ -986,9 +926,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-  },
-  deleteIcon: {
-    fontSize: 40,
   },
   deleteTitle: {
     fontSize: 22,
@@ -1041,9 +978,6 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: colors.primary + '20',
   },
-  iconOptionText: {
-    fontSize: 24,
-  },
   modalButtons: {
     flexDirection: 'row',
     gap: 12,
@@ -1072,7 +1006,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-  },  modalButtonDelete: {
+  },
+  modalButtonDelete: {
     flex: 1,
     paddingVertical: 14,
     borderRadius: 12,
@@ -1084,7 +1019,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  // ── Library Tips ─────────────────────────────────────────────
   tipsOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
@@ -1130,9 +1064,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  tipIcon: {
-    fontSize: 22,
-  },
   tipTextWrap: {
     flex: 1,
   },
@@ -1161,83 +1092,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
-  // Failed Analysis collection card
   failedCollectionCard: {
     borderColor: colors.error + '55',
     borderWidth: 1.5,
-  },
-  failedModalSubtitle: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  failedPostRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: 10,
-  },
-  failedThumbnail: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
-    flexShrink: 0,
-  },
-  failedThumbnailPlaceholder: {
-    backgroundColor: colors.backgroundCard,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  failedPostTitle: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.text,
-    lineHeight: 18,
-  },
-  failedPostActions: {
-    flexDirection: 'column',
-    gap: 6,
-    flexShrink: 0,
-  },
-  failedDeleteBtn: {
-    padding: 6,
-    borderRadius: 6,
-    backgroundColor: colors.error + '18',
-    alignItems: 'center',
-  },
-  failedDeleteText: {
-    fontSize: 16,
-  },
-  failedViewBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: colors.backgroundCard,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    minWidth: 70,
-  },
-  failedViewText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  failedReanalyzeBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    minWidth: 90,
-  },
-  failedReanalyzeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
   },
 });
 
