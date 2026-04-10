@@ -493,15 +493,9 @@ Recommended release notes install line:
 npx -y superbrain-server@latest
 ```
 
-For stable releases, use:
-
-```bash
-npx -y superbrain-server@latest
-```
-
 Verification checklist:
 
-1. `latest` (main)  release contains `superbrain.apk`.
+1. `latest` (main) release contains `superbrain.apk`.
 2. Repository **Packages** tab shows `@sidinsearch/superbrain-server`.
 3. Install checks:
   - npmjs: `npx -y superbrain-server@latest`
