@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SuperBrain Extension Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="header">
+    <img src="../icons/icon128.png" width="48" height="48" alt="SuperBrain" style="border-radius: 10px;">
+    <div class="header-text">
+      <h1>SuperBrain Extension</h1>
+      <p>Connect to your SuperBrain server</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+        <line x1="8" y1="21" x2="16" y2="21"/>
+        <line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+      Server Configuration
+    </h2>
+    
+    <div class="form-group">
+      <label for="serverUrl">Server URL</label>
+      <input type="text" id="serverUrl" placeholder="http://localhost:5000" autocomplete="off">
+      <p class="help-text">
+        The URL where your SuperBrain backend is running.
+        <br>Example: <code>http://192.168.1.100:5000</code> or <code>https://your-server.com</code>
+      </p>
+    </div>
+    
+    <div class="form-group">
+      <label for="apiToken">Access Token</label>
+      <input type="password" id="apiToken" placeholder="Enter your 8-character access token" autocomplete="off">
+      <p class="help-text">
+        Find this token in your SuperBrain backend terminal when you start the server,
+        or check the server settings.
+      </p>
+    </div>
+    
+    <div id="connectionStatus"></div>
+    
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="testBtn">
+        <span class="spinner hidden" id="testSpinner"></span>
+        <span id="testBtnText">Test Connection</span>
+      </button>
+      <button class="btn btn-primary" id="saveBtn">
+        <span class="spinner hidden" id="saveSpinner"></span>
+        <span id="saveBtnText">Save Settings</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+      </svg>
+      Features
+    </h2>
+    
+    <div class="features">
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <h4>Bulk Import Saved Posts</h4>
+          <p>Import all your Instagram saved posts with a single click. The extension scans and processes each post.</p>
+        </div>
+      </div>
+      
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <h4>Sync Collections</h4>
+          <p>Your Instagram collections are recreated in SuperBrain with the same names and icons. Posts are automatically placed in the correct collections.</p>
+        </div>
+      </div>
+      
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <h4>Background Processing</h4>
+          <p>Posts are sent to your backend for AI analysis. Videos get transcribed, images get tagged, and everything becomes searchable.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="16" x2="12" y2="12"/>
+        <line x1="12" y1="8" x2="12.01" y2="8"/>
+      </svg>
+      How to Use
+    </h2>
+    
+    <div class="features">
+      <div class="feature-item">
+        <div class="feature-icon">1</div>
+        <div class="feature-text">
+          <h4>Configure Settings</h4>
+          <p>Enter your SuperBrain server URL and access token above, then click "Save Settings".</p>
+        </div>
+      </div>
+      
+      <div class="feature-item">
+        <div class="feature-icon">2</div>
+        <div class="feature-text">
+          <h4>Open Instagram Saved</h4>
+          <p>Navigate to your Instagram profile and go to the "Saved" section, or visit any collection.</p>
+        </div>
+      </div>
+      
+      <div class="feature-item">
+        <div class="feature-icon">3</div>
+        <div class="feature-text">
+          <h4>Click Import</h4>
+          <p>Click the SuperBrain extension icon in your browser toolbar, then click "Scan Instagram Saved".</p>
+        </div>
+      </div>
+      
+      <div class="feature-item">
+        <div class="feature-icon">4</div>
+        <div class="feature-text">
+          <h4>Watch the Magic</h4>
+          <p>The extension will scroll through your posts, extract URLs, and send them to SuperBrain for analysis.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>
+      SuperBrain Extension v1.0.0 | 
+      <a href="https://github.com/sidinsearch/superbrain" target="_blank">GitHub</a>
+    </p>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

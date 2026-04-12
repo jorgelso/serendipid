@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SuperBrain</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="../icons/icon48.png" width="40" height="40" alt="SuperBrain" style="border-radius: 10px;">
+      <div class="header-text">
+        <h1>SuperBrain</h1>
+        <p>Instagram Import</p>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div class="status-indicator">
+        <div class="status-dot" id="statusDot"></div>
+        <span class="status-text" id="statusText">Checking...</span>
+      </div>
+      <div class="server-info" id="serverInfo">-</div>
+    </div>
+
+    <div class="db-stats">
+      <div class="db-stat-item">
+        <span class="db-stat-icon">📥</span>
+        <span class="db-stat-label">Local DB</span>
+        <span class="db-stat-value" id="dbTotal">0</span>
+      </div>
+      <div class="db-stat-item">
+        <span class="db-stat-icon">📂</span>
+        <span class="db-stat-label">Collections</span>
+        <span class="db-stat-value" id="dbCollections">0</span>
+      </div>
+      <div class="db-stat-item">
+        <span class="db-stat-icon">✓</span>
+        <span class="db-stat-label">Saved</span>
+        <span class="db-stat-value success" id="dbSaved">0</span>
+      </div>
+      <div class="db-stat-item">
+        <span class="db-stat-icon">⏳</span>
+        <span class="db-stat-label">Pending</span>
+        <span class="db-stat-value warning" id="dbPending">0</span>
+      </div>
+      <div class="db-stat-item">
+        <span class="db-stat-icon">✗</span>
+        <span class="db-stat-label">Failed</span>
+        <span class="db-stat-value error" id="dbFailed">0</span>
+      </div>
+    </div>
+
+    <div class="progress-section hidden" id="progressSection">
+      <div class="progress-header">
+        <span class="progress-title" id="progressTitle">Scanning...</span>
+        <span class="progress-count" id="progressCount">0 / 0</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="progress-detail" id="progressDetail">Initializing...</div>
+    </div>
+
+    <div class="actions" id="actionsSection">
+      <button class="btn btn-primary" id="scrapeBtn" disabled>
+        <span class="spinner hidden" id="scrapeSpinner"></span>
+        <span id="scrapeBtnText">Scan Instagram Saved</span>
+      </button>
+      <button class="btn btn-secondary hidden" id="stopBtn">
+        Stop
+      </button>
+    </div>
+
+    <div class="failed-section" id="failedSection">
+      <div class="failed-header">
+        <span class="failed-title">Failed Posts</span>
+        <span class="failed-count" id="failedCount">0</span>
+      </div>
+      <div class="failed-actions">
+        <button class="btn btn-sm btn-warning" id="retryFailedBtn" disabled>
+          Retry Failed
+        </button>
+        <button class="btn btn-sm btn-ghost" id="clearFailedBtn" disabled>
+          Clear All
+        </button>
+      </div>
+      <div class="failed-list" id="failedList">
+        <div class="failed-empty">No failed posts</div>
+      </div>
+    </div>
+
+    <div class="log-section">
+      <div class="log-title">Activity Log</div>
+      <div class="log-entries" id="logEntries">
+        <div class="log-entry">
+          <span class="log-time">--:--</span>
+          <span class="log-message info">Ready</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <a href="#" id="settingsLink" class="settings-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+        Settings
+      </a>
+      <span class="footer-divider">|</span>
+      <a href="#" id="clearDbLink" class="settings-link danger">
+        Clear Local DB
+      </a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
