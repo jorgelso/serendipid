@@ -931,7 +931,7 @@ async def status():
     """
     return {
         "status": "online",
-        "version": "1.02",
+        "version": "2.0.0",
         "message": "Server is running. Configure app with server URL and Access Token from token.txt."
     }
 
@@ -951,7 +951,7 @@ async def connect_info(request: Request):
     return {
         "url": base_url,
         "token": API_TOKEN,
-        "version": "1.02",
+        "version": "2.0.0",
         "name": "SuperBrain"
     }
 
