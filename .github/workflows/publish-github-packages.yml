@@ -67,7 +67,7 @@ jobs:
           npm pkg set "name=@${OWNER_LC}/superbrain-server"
           npm pkg set "repository=${REPO_URL}"
           npm pkg set "publishConfig.registry=https://npm.pkg.github.com"
-          npm version "$VERSION" --no-git-tag-version
+          npm pkg set "version=${VERSION}"
 
           if [[ "$VERSION" == *"-beta"* || "$VERSION" == *"-beta."* ]]; then
             DIST_TAG="beta"
