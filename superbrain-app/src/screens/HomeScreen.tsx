@@ -25,6 +25,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import apiService from '../services/api';
 import postsCache from '../services/postsCache';
+import localDb from '../services/localDb';
+import syncService from '../services/syncService';
 import { collectionsService } from '../services/collections';
 import {
   scheduleAllWatchLaterNotifications,
@@ -263,15 +265,13 @@ const HomeScreen = () => {
   const loadPosts = async (forceRefresh: boolean = false) => {
     try {
       // Reconcile: if a post was in the failed list AND still stuck in analyzing, clean it up.
-      // This prevents \"✨ Analyzing...\" overlay appearing permanently for posts that failed
-      // analysis while the app was in the background.
       const failedList = await postsCache.getFailedPosts();
       if (failedList.length > 0) {
         for (const fp of failedList) {
           if (postsCache.isAnalyzing(fp.shortcode)) {
-              postsCache.markAnalysisComplete(fp.shortcode);
-            }
-            await postsCache.removePostFromCache(fp.shortcode);
+            postsCache.markAnalysisComplete(fp.shortcode);
+          }
+          await postsCache.removePostFromCache(fp.shortcode);
         }
       }
 
@@ -282,124 +282,121 @@ const HomeScreen = () => {
         setLoading(false);
         return;
       }
-      // Always load and display cached posts immediately (non-blocking)
-      const cachedPosts = await postsCache.getCachedPosts();
-      if (cachedPosts && cachedPosts.length > 0) {
-        setPosts(cachedPosts);
-        setLoading(false); // Clear loading immediately when we have cache
 
-        // If cache is valid and not forcing refresh, we're done —
-        // BUT only skip the server fetch if there are NO analyzing posts.
-        // When posts are in-flight we must reach the watcher startup logic below.
-        if (!forceRefresh) {
-          const isValid = await postsCache.isCacheValid();
-          if (isValid && postsCache.getAnalyzingPosts().length === 0) {
-            return;
-          }
+      // ── Step 1: Instantly load from local SQLite DB (0ms, no network) ──
+      const localPosts = await localDb.getAllPosts();
+      if (localPosts.length > 0) {
+        // Merge with any analyzing placeholders currently in flight
+        const analyzingShortcodes = postsCache.getAnalyzingPosts();
+        const analyzingPlaceholders = posts.filter(
+          p => analyzingShortcodes.includes(p.shortcode)
+            && !localPosts.find(lp => lp.shortcode === p.shortcode)
+        );
+        const merged = [...analyzingPlaceholders, ...localPosts];
+        setPosts(merged);
+        setLoading(false);
+
+        // If not forcing refresh and no analyzing posts, we're done
+        if (!forceRefresh && analyzingShortcodes.length === 0) {
+          return;
         }
-
-        // If we got here, we'll fetch in background but UI is already showing cached posts
       } else {
-        // No cache, show loading spinner
+        // No local data at all — show loading spinner
         setLoading(true);
       }
 
-      // Fetch from server in background (UI already showing if we have cache)
-      const fetchedPosts = await apiService.getRecentPosts(50);
+      // ── Step 2: Background sync with backend ──
+      // This runs non-blocking: UI is already showing local data (if any)
+      const isOnline = await apiService.testConnection().catch(() => false);
 
-      // Clear analyzing state for posts that are now done on the server
-      const prevAnalyzing = postsCache.getAnalyzingPosts();
-      for (const shortcode of prevAnalyzing) {
-        const placeholderUrl = (cachedPosts || []).find(cp => cp.shortcode === shortcode)?.url;
-        const serverPost = fetchedPosts.find(p => p.shortcode === shortcode || (placeholderUrl && p.url === placeholderUrl));
-        if (serverPost && !serverPost.processing) {
-          await postsCache.markAnalysisComplete(shortcode);
-          // If the backend generated a different shortcode, purge the frontend's temporary placeholder
-          if (serverPost.shortcode !== shortcode) {
-            await postsCache.removePostFromCache(shortcode);
+      if (isOnline) {
+        // Flush any offline mutations first
+        await postsCache.flushPendingPostMutations();
+        await postsCache.flushPendingAnalyses();
+
+        // Delta or full sync depending on DB state
+        const dataChanged = await syncService.syncIfNeeded();
+
+        // If sync brought new data, re-read from local DB and update UI
+        if (dataChanged || forceRefresh) {
+          const freshPosts = await localDb.getAllPosts();
+          if (freshPosts.length > 0) {
+            // Clear analyzing state for posts that now exist in the synced data
+            const prevAnalyzing = postsCache.getAnalyzingPosts();
+            for (const shortcode of prevAnalyzing) {
+              const placeholderUrl = posts.find(cp => cp.shortcode === shortcode)?.url;
+              const serverPost = freshPosts.find(
+                p => p.shortcode === shortcode || (placeholderUrl && p.url === placeholderUrl)
+              );
+              if (serverPost && !serverPost.processing) {
+                await postsCache.markAnalysisComplete(shortcode);
+                if (serverPost.shortcode !== shortcode) {
+                  await postsCache.removePostFromCache(shortcode);
+                }
+              }
+            }
+
+            // Merge with remaining analyzing placeholders
+            const stillAnalyzing = postsCache.getAnalyzingPosts();
+            const analyzingPlaceholders = posts.filter(
+              p => stillAnalyzing.includes(p.shortcode)
+                && !freshPosts.find(fp => fp.shortcode === p.shortcode)
+            );
+            setPosts([...analyzingPlaceholders, ...freshPosts]);
           }
         }
+      } else if (localPosts.length === 0) {
+        showToast('No posts yet — share something to get started!', 'info');
       }
+      // If offline and we have local data, we already showed it in Step 1
 
+      // ── Step 3: Analyzing-posts watcher ──
       const stillAnalyzing = postsCache.getAnalyzingPosts();
       const hasAnalyzing = stillAnalyzing.length > 0;
 
-      if (fetchedPosts.length > 0) {
-        // Server returned real data — merge with analyzing placeholders
-        const analyzingPlaceholders = (cachedPosts || []).filter(
-          p => stillAnalyzing.includes(p.shortcode) && !fetchedPosts.find(fp => fp.shortcode === p.shortcode || (p.url && fp.url === p.url))
-        );
+      if (hasAnalyzing && !pollIntervalRef.current) {
+        prevProcessingRef.current = 1;
+        apiService.getQueueStatus().then(s => {
+          const total = s ? s.processing_count + s.queue_count : 0;
+          if (total === 0) {
+            clearInterval(pollIntervalRef.current!);
+            pollIntervalRef.current = null;
+            loadPostsRef.current?.(true);
+          } else {
+            prevProcessingRef.current = total;
+          }
+        }).catch(() => { });
 
-        const mergedPosts = [
-          ...analyzingPlaceholders,
-          ...fetchedPosts,
-        ];
-        setPosts(mergedPosts);
-        await postsCache.savePosts(mergedPosts);
-      } else if (hasAnalyzing && cachedPosts && cachedPosts.length > 0) {
-        // Server returned empty (busy/error) but we have cached posts — keep them intact
-        // DON'T overwrite cache; just make sure UI is showing cached data
-        setPosts(cachedPosts);
-      } else if (!cachedPosts || cachedPosts.length === 0) {
-        showToast('No posts yet — share something to get started!', 'info');
-      }
+        pollIntervalRef.current = setInterval(async () => {
+          try {
+            const status = await apiService.getQueueStatus();
+            if (!status) return;
+            const total = status.processing_count + status.queue_count;
+            const wasActive = prevProcessingRef.current > 0;
+            const nowIdle = total === 0;
+            prevProcessingRef.current = total;
 
-      if (fetchedPosts.length > 0 || hasAnalyzing) {
-
-        if (hasAnalyzing && !pollIntervalRef.current) {
-          // Start a lightweight /queue-status poller instead of calling /recent every tick.
-          // Only fires a full loadPosts when backend signals it just finished processing.
-          // Pre-seed synchronously so the FIRST interval tick sees wasActive=true.
-          // Without this, prevProcessingRef starts at 0 and the first tick misses
-          // the wasActive && nowIdle transition if the backend finishes quickly.
-          prevProcessingRef.current = 1;
-          apiService.getQueueStatus().then(s => {
-            const total = s ? s.processing_count + s.queue_count : 0;
-            if (total === 0) {
-              // Backend already finished by the time we seeded — kick a refresh immediately
-              // and stop the watcher so we don't loop endlessly.
+            if (wasActive && nowIdle) {
+              loadPostsRef.current?.(true);
+            } else if (nowIdle && postsCache.getAnalyzingPosts().length === 0) {
               clearInterval(pollIntervalRef.current!);
               pollIntervalRef.current = null;
-              loadPostsRef.current?.(true);
-            } else {
-              prevProcessingRef.current = total;
             }
-          }).catch(() => { });
-
-          pollIntervalRef.current = setInterval(async () => {
-            try {
-              const status = await apiService.getQueueStatus();
-              if (!status) return;
-              const total = status.processing_count + status.queue_count;
-              const wasActive = prevProcessingRef.current > 0;
-              const nowIdle = total === 0;
-              prevProcessingRef.current = total;
-
-              if (wasActive && nowIdle) {
-                // Backend just finished — fetch the completed post now
-                loadPostsRef.current?.(true);
-              } else if (nowIdle && postsCache.getAnalyzingPosts().length === 0) {
-                // Nothing left to track — stop watching
-                clearInterval(pollIntervalRef.current!);
-                pollIntervalRef.current = null;
-              }
-            } catch { /* network hiccup — keep polling */ }
-          }, 2000);
-
-        } else if (!hasAnalyzing && pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
+          } catch { /* network hiccup — keep polling */ }
+        }, 2000);
+      } else if (!hasAnalyzing && pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
     } catch (error: any) {
       console.error('Error loading posts:', error);
 
-      // Only show error if we don't have cached posts
-      const cachedPosts = await postsCache.getCachedPosts();
-      if (!cachedPosts || cachedPosts.length === 0) {
-        showToast('Failed to load posts: ' + (error.message || 'Unknown error'), 'error');
+      // Try to show local data even on error
+      const localPosts = await localDb.getAllPosts();
+      if (localPosts.length > 0) {
+        setPosts(localPosts);
       } else {
-        setPosts(cachedPosts);
+        showToast('Failed to load posts: ' + (error.message || 'Unknown error'), 'error');
       }
     } finally {
       setLoading(false);

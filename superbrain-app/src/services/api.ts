@@ -248,7 +248,7 @@ class ApiService {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
       const response = await axios.get<{ success: boolean; data: Post[] }>(
-        `${baseUrl}/recent?limit=100`,
+        `${baseUrl}/recent?limit=200`,
         { headers, timeout: DEFAULT_TIMEOUT }
       );
       return (response.data.data || []).map(normalizePost);
@@ -258,7 +258,7 @@ class ApiService {
     }
   }
 
-  async getRecentPosts(limit: number = 20): Promise<Post[]> {
+  async getRecentPosts(limit: number = 50): Promise<Post[]> {
     try {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
@@ -271,6 +271,71 @@ class ApiService {
       });
     } catch (error: any) {
       console.error('Error fetching posts:', error.response?.data?.detail || error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Paginated fetch — returns { data, total, offset } for batch-syncing all posts.
+   */
+  async getRecentPostsPaginated(
+    limit: number = 200,
+    offset: number = 0
+  ): Promise<{ data: Post[]; total: number; offset: number }> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.get<{
+        success: boolean; data: Post[]; total: number; offset: number
+      }>(
+        `${baseUrl}/recent?limit=${limit}&offset=${offset}`,
+        { headers, timeout: 30000 }
+      );
+      return {
+        data: (response.data.data || []).map(normalizePost),
+        total: response.data.total ?? 0,
+        offset: response.data.offset ?? offset,
+      };
+    } catch (error: any) {
+      console.error('Error fetching paginated posts:', error.response?.data?.detail || error.message);
+      return { data: [], total: 0, offset };
+    }
+  }
+
+  /**
+   * Delta sync — returns posts modified after the given ISO timestamp.
+   */
+  async syncPosts(since: string): Promise<Post[]> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.get<{ success: boolean; data: Post[] }>(
+        `${baseUrl}/sync?since=${encodeURIComponent(since)}&limit=1000`,
+        { headers, timeout: 30000 }
+      );
+      return (response.data.data || []).map(normalizePost);
+    } catch (error: any) {
+      console.error('Error syncing posts:', error.response?.data?.detail || error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Deleted sync — returns shortcodes of posts deleted after the given timestamp.
+   */
+  async getSyncDeleted(since: string): Promise<Array<{ shortcode: string; deleted_at: string }>> {
+    try {
+      const headers = await this.getHeaders();
+      const baseUrl = await this.getBaseUrl();
+      const response = await axios.get<{
+        success: boolean; data: Array<{ shortcode: string; deleted_at: string }>
+      }>(
+        `${baseUrl}/sync/deleted?since=${encodeURIComponent(since)}`,
+        { headers, timeout: DEFAULT_TIMEOUT }
+      );
+      return response.data.data || [];
+    } catch (error: any) {
+      console.error('Error fetching sync deleted:', error.response?.data?.detail || error.message);
       return [];
     }
   }

@@ -726,24 +726,82 @@ async def check_cache(shortcode: str, token: str = Depends(verify_token)):
 
 
 @app.get("/recent")
-async def get_recent_analyses(limit: int = Query(default=10, ge=1, le=100), token: str = Depends(verify_token)):
+async def get_recent_analyses(
+    limit: int = Query(default=50, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    token: str = Depends(verify_token),
+):
     """
-    Get recent analyses from database
-    
-    - Returns most recently analyzed content
-    - Default limit: 10, max: 100
+    Get recent analyses from database (lightweight — no analysis blobs)
+
+    - Returns most recently analyzed content with UI-essential fields only
+    - Supports pagination via offset
+    - Default limit: 50, max: 1000
     - Requires API authentication
     """
     try:
         db = get_db()
-        results = db.get_recent(limit=limit)
-        
+        results = db.get_recent_light(limit=limit, offset=offset)
+        total = db.get_total_count()
+
         return {
             "success": True,
             "count": len(results),
+            "total": total,
+            "offset": offset,
             "data": results
         }
-        
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sync")
+async def sync_posts(
+    since: str = Query(..., description="ISO timestamp — return posts updated after this time"),
+    limit: int = Query(default=500, ge=1, le=1000),
+    token: str = Depends(verify_token),
+):
+    """
+    Delta sync endpoint — returns posts modified after the given timestamp.
+    Used by the mobile app to incrementally update its local SQLite database.
+    Only returns lightweight fields (no analysis blobs).
+    """
+    try:
+        db = get_db()
+        results = db.get_posts_since(since, limit=limit)
+
+        return {
+            "success": True,
+            "count": len(results),
+            "since": since,
+            "data": results
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sync/deleted")
+async def sync_deleted(
+    since: str = Query(..., description="ISO timestamp — return posts deleted after this time"),
+    token: str = Depends(verify_token),
+):
+    """
+    Returns shortcodes of posts that were soft-deleted after the given timestamp.
+    The mobile app uses this to remove posts from its local database.
+    """
+    try:
+        db = get_db()
+        results = db.get_deleted_since(since)
+
+        return {
+            "success": True,
+            "count": len(results),
+            "since": since,
+            "data": results
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

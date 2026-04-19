@@ -1,5 +1,5 @@
 {
-  "cached_at": "2026-04-10T06:49:01.068927",
+  "cached_at": "2026-04-16T05:18:30.220245",
   "models": [
     {
       "id": "google/lyria-3-pro-preview",
@@ -428,6 +428,58 @@
       }
     },
     {
+      "id": "openrouter/elephant-alpha",
+      "canonical_slug": "openrouter/elephant-alpha",
+      "hugging_face_id": null,
+      "name": "Elephant",
+      "created": 1776052598,
+      "description": "Elephant Alpha is a 100B-parameter text model focused on intelligence efficiency, delivering strong performance while minimizing token usage. It supports a 256K context window with up to 32K output tokens,...",
+      "context_length": 262144,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "top_provider": {
+        "context_length": 262144,
+        "max_completion_tokens": 32768,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "response_format",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "default_parameters": {
+        "temperature": null,
+        "top_p": null,
+        "top_k": null,
+        "frequency_penalty": null,
+        "presence_penalty": null,
+        "repetition_penalty": null
+      },
+      "knowledge_cutoff": null,
+      "expiration_date": null,
+      "links": {
+        "details": "/api/v1/models/openrouter/elephant-alpha/endpoints"
+      }
+    },
+    {
       "id": "nvidia/nemotron-nano-9b-v2:free",
       "canonical_slug": "nvidia/nemotron-nano-9b-v2",
       "hugging_face_id": "nvidia/NVIDIA-Nemotron-Nano-9B-v2",
@@ -504,7 +556,7 @@
       },
       "top_provider": {
         "context_length": 196608,
-        "max_completion_tokens": 196608,
+        "max_completion_tokens": 8192,
         "is_moderated": true
       },
       "per_request_limits": null,
@@ -911,7 +963,7 @@
       },
       "top_provider": {
         "context_length": 131072,
-        "max_completion_tokens": 131072,
+        "max_completion_tokens": 8192,
         "is_moderated": true
       },
       "per_request_limits": null,
@@ -982,53 +1034,6 @@
       }
     },
     {
-      "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-      "canonical_slug": "venice/uncensored",
-      "hugging_face_id": "cognitivecomputations/Dolphin-Mistral-24B-Venice-Edition",
-      "name": "Venice: Uncensored (free)",
-      "created": 1752094966,
-      "description": "Venice Uncensored Dolphin Mistral 24B Venice Edition is a fine-tuned variant of Mistral-Small-24B-Instruct-2501, developed by dphn.ai in collaboration with Venice.ai. This model is designed as an \u201cuncensored\u201d instruct-tuned LLM, preserving...",
-      "context_length": 32768,
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": [
-          "text"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "Other",
-        "instruct_type": null
-      },
-      "pricing": {
-        "prompt": "0",
-        "completion": "0"
-      },
-      "top_provider": {
-        "context_length": 32768,
-        "max_completion_tokens": null,
-        "is_moderated": false
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "frequency_penalty",
-        "max_tokens",
-        "presence_penalty",
-        "response_format",
-        "stop",
-        "structured_outputs",
-        "temperature",
-        "top_k",
-        "top_p"
-      ],
-      "default_parameters": {},
-      "knowledge_cutoff": "2024-04-30",
-      "expiration_date": null,
-      "links": {
-        "details": "/api/v1/models/venice/uncensored/endpoints"
-      }
-    },
-    {
       "id": "google/gemma-3-27b-it:free",
       "canonical_slug": "google/gemma-3-27b-it",
       "hugging_face_id": "google/gemma-3-27b-it",
@@ -1075,6 +1080,53 @@
       "expiration_date": null,
       "links": {
         "details": "/api/v1/models/google/gemma-3-27b-it/endpoints"
+      }
+    },
+    {
+      "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+      "canonical_slug": "venice/uncensored",
+      "hugging_face_id": "cognitivecomputations/Dolphin-Mistral-24B-Venice-Edition",
+      "name": "Venice: Uncensored (free)",
+      "created": 1752094966,
+      "description": "Venice Uncensored Dolphin Mistral 24B Venice Edition is a fine-tuned variant of Mistral-Small-24B-Instruct-2501, developed by dphn.ai in collaboration with Venice.ai. This model is designed as an \u201cuncensored\u201d instruct-tuned LLM, preserving...",
+      "context_length": 32768,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "top_provider": {
+        "context_length": 32768,
+        "max_completion_tokens": null,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "frequency_penalty",
+        "max_tokens",
+        "presence_penalty",
+        "response_format",
+        "stop",
+        "structured_outputs",
+        "temperature",
+        "top_k",
+        "top_p"
+      ],
+      "default_parameters": {},
+      "knowledge_cutoff": "2024-04-30",
+      "expiration_date": null,
+      "links": {
+        "details": "/api/v1/models/venice/uncensored/endpoints"
       }
     },
     {
@@ -1212,6 +1264,49 @@
       "expiration_date": null,
       "links": {
         "details": "/api/v1/models/google/gemma-3-4b-it/endpoints"
+      }
+    },
+    {
+      "id": "meta-llama/llama-guard-4-12b:free",
+      "canonical_slug": "meta-llama/llama-guard-4-12b",
+      "hugging_face_id": "meta-llama/Llama-Guard-4-12B",
+      "name": "Meta: Llama Guard 4 12B (free)",
+      "created": 1745975193,
+      "description": "Llama Guard 4 is a Llama 4 Scout-derived multimodal pretrained model, fine-tuned for content safety classification. Similar to previous versions, it can be used to classify content in both LLM...",
+      "context_length": 163840,
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "image",
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "top_provider": {
+        "context_length": 163840,
+        "max_completion_tokens": 65000,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "seed",
+        "temperature",
+        "top_p"
+      ],
+      "default_parameters": {},
+      "knowledge_cutoff": "2024-08-31",
+      "expiration_date": null,
+      "links": {
+        "details": "/api/v1/models/meta-llama/llama-guard-4-12b/endpoints"
       }
     },
     {

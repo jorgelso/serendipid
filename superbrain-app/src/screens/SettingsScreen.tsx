@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,8 @@ import { colors } from '../theme/colors';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import apiService from '../services/api';
+import localDb from '../services/localDb';
+import postsCache from '../services/postsCache';
 import CustomToast from '../components/CustomToast';
 import { RootStackParamList } from '../../App';
 import { QueueStatus } from '../types';
@@ -327,7 +329,7 @@ const SettingsScreen = () => {
     });
   };
 
-  const handleResetDatabase = () => {
+   const handleResetDatabase = () => {
     setDialog({
       visible: true,
       title: 'Reset Database',
@@ -339,6 +341,9 @@ const SettingsScreen = () => {
         try {
           setResettingDb(true);
           const result = await apiService.resetDatabase();
+          // Also clear local SQLite DB and postsCache
+          await localDb.clearAll();
+          await postsCache.clearCache();
           setToast({ visible: true, message: `Database cleared. ${result.deleted_count} posts deleted.`, type: 'success' });
         } catch (error) {
           setToast({ visible: true, message: 'Failed to reset database', type: 'error' });

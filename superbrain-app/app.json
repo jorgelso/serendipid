@@ -111,7 +111,8 @@
         {
           "cameraPermission": "SuperBrain needs camera access to scan QR codes for server connection setup."
         }
-      ]
+      ],
+      "expo-sqlite"
     ]
   }
 }

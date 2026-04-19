@@ -1,9 +1,20 @@
+/**
+ * Posts cache service — now backed by localDb (SQLite) instead of AsyncStorage.
+ *
+ * Post data (the main feed) is stored in the local SQLite database for:
+ *   • No storage limits
+ *   • Instant offline reads
+ *   • No re-parsing from JSON on every launch
+ *
+ * Lightweight metadata (analyzing posts, failed posts, pending mutations)
+ * remains in AsyncStorage since they are small and transient.
+ */
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Post, FailedPost } from '../types';
 import apiService from './api';
+import localDb from './localDb';
 
-const POSTS_CACHE_KEY = '@superbrain_posts_cache';
-const CACHE_TIMESTAMP_KEY = '@superbrain_posts_timestamp';
 const ANALYZING_POSTS_KEY = '@superbrain_analyzing_posts';
 const FAILED_POSTS_KEY = '@superbrain_failed_posts';
 const PENDING_MUTATIONS_KEY = '@superbrain_pending_post_mutations';
@@ -21,17 +32,11 @@ type PendingAnalysis = {
   content_type?: string;
   queuedAt:      string;
 };
-// Keep cache for 30 minutes — background refresh happens anyway when
-// analyzing posts exist, so long TTL just prevents unnecessary server
-// round-trips when showing already-up-to-date data.
-const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
 class PostsCacheService {
   private analyzingPosts: Set<string> = new Set();
 
-  // ── In-memory hot cache ──────────────────────────────────────────────────
-  private posts: Post[] | null = null;
-  private cacheTimestamp: number = 0;
+  // ── In-memory caches for lightweight metadata ─────────────────────
   private failedPostsCache: FailedPost[] | null = null;
   // Offline mutation queue — flushed next time online
   private pendingMutationsList: PendingPostMutation[] = [];
@@ -44,16 +49,12 @@ class PostsCacheService {
 
   private async preWarm(): Promise<void> {
     try {
-      const [postsRaw, tsRaw, analyzingRaw, failedRaw, pendingRaw, pendingAnalysesRaw] = await Promise.all([
-        AsyncStorage.getItem(POSTS_CACHE_KEY),
-        AsyncStorage.getItem(CACHE_TIMESTAMP_KEY),
+      const [analyzingRaw, failedRaw, pendingRaw, pendingAnalysesRaw] = await Promise.all([
         AsyncStorage.getItem(ANALYZING_POSTS_KEY),
         AsyncStorage.getItem(FAILED_POSTS_KEY),
         AsyncStorage.getItem(PENDING_MUTATIONS_KEY),
         AsyncStorage.getItem(PENDING_ANALYSES_KEY),
       ]);
-      if (postsRaw) this.posts = JSON.parse(postsRaw);
-      if (tsRaw) this.cacheTimestamp = parseInt(tsRaw, 10);
       if (analyzingRaw) this.analyzingPosts = new Set(JSON.parse(analyzingRaw));
       if (failedRaw) this.failedPostsCache = JSON.parse(failedRaw);
       if (pendingRaw) this.pendingMutationsList = JSON.parse(pendingRaw);
@@ -62,6 +63,8 @@ class PostsCacheService {
       console.error('PostsCache preWarm error:', e);
     }
   }
+
+  // ─── Pending post mutations (offline delete/update) ───────────────
 
   /** Queue a post delete/update to be flushed when online. */
   async enqueuePendingMutation(m: PendingPostMutation): Promise<void> {
@@ -105,7 +108,7 @@ class PostsCacheService {
     return this.pendingMutationsList.length > 0;
   }
 
-  // ─── Pending analysis queue (offline share → retry when reconnected) ────────
+  // ─── Pending analysis queue (offline share → retry when reconnected) ────
 
   /** Queue a URL for analysis that couldn't reach the backend (offline). */
   async enqueuePendingAnalysis(a: PendingAnalysis): Promise<void> {
@@ -156,6 +159,8 @@ class PostsCacheService {
     return this.pendingAnalysesList.length > 0;
   }
 
+  // ─── Analyzing posts tracking ─────────────────────────────────────
+
   /**
    * Mark a post as currently being analyzed
    */
@@ -199,45 +204,39 @@ class PostsCacheService {
   getAnalyzingPosts(): string[] {
     return Array.from(this.analyzingPosts);
   }
+
+  // ─── Post storage — delegated to localDb ──────────────────────────
+
   /**
-   * Save posts to local cache — updates memory first for instant reads,
-   * then persists to AsyncStorage.
+   * Save posts to local SQLite database.
    */
   async savePosts(posts: Post[]): Promise<void> {
-    this.posts = posts;
-    this.cacheTimestamp = Date.now();
     try {
-      await AsyncStorage.multiSet([
-        [POSTS_CACHE_KEY, JSON.stringify(posts)],
-        [CACHE_TIMESTAMP_KEY, this.cacheTimestamp.toString()],
-      ]);
+      await localDb.upsertPosts(posts);
     } catch (error) {
-      console.error('Error saving posts to cache:', error);
+      console.error('Error saving posts to local DB:', error);
     }
   }
 
   /**
-   * Get cached posts — served from memory (instant, no I/O).
+   * Get all posts from local SQLite database (instant, no network).
    */
   async getCachedPosts(): Promise<Post[] | null> {
-    if (this.posts !== null) return this.posts;
-    // Fallback: preWarm may not have finished yet on very first call
     try {
-      const cached = await AsyncStorage.getItem(POSTS_CACHE_KEY);
-      if (cached) {
-        this.posts = JSON.parse(cached);
-        return this.posts;
-      }
-    } catch {}
-    return null;
+      const posts = await localDb.getAllPosts();
+      return posts.length > 0 ? posts : null;
+    } catch (error) {
+      console.error('Error reading posts from local DB:', error);
+      return null;
+    }
   }
 
   /**
-   * Check if cache is still valid — synchronous in-memory check, no I/O.
+   * Check if local DB has data — always "valid" since it's persistent.
    */
   isCacheValid(): boolean {
-    if (!this.cacheTimestamp) return false;
-    return (Date.now() - this.cacheTimestamp) < CACHE_DURATION;
+    // Local DB is always valid — its data persists. Sync happens in background.
+    return true;
   }
 
   /**
@@ -248,57 +247,46 @@ class PostsCacheService {
   }
 
   /**
-   * Get posts from cache if valid, otherwise return null.
+   * Get posts from local DB (always returns data if DB has posts).
    */
   async getValidCachedPosts(): Promise<Post[] | null> {
-    if (!this.isCacheValid()) return null;
     return this.getCachedPosts();
   }
 
   /**
-   * Clear the cache (both memory and AsyncStorage).
+   * Clear the local database.
    */
   async clearCache(): Promise<void> {
-    this.posts = null;
-    this.cacheTimestamp = 0;
     try {
-      await AsyncStorage.multiRemove([POSTS_CACHE_KEY, CACHE_TIMESTAMP_KEY]);
+      await localDb.clearAll();
     } catch (error) {
-      console.error('Error clearing posts cache:', error);
+      console.error('Error clearing local DB:', error);
     }
   }
 
   /**
-   * Update a single post in cache.
+   * Update a single post in local DB.
    */
   async updatePostInCache(updatedPost: Post): Promise<void> {
     try {
-      const posts = await this.getCachedPosts();
-      if (!posts) return;
-      const index = posts.findIndex(p => p.shortcode === updatedPost.shortcode);
-      if (index !== -1) {
-        posts[index] = updatedPost;
-        await this.savePosts(posts);
-      }
+      await localDb.upsertPosts([updatedPost]);
     } catch (error) {
-      console.error('Error updating post in cache:', error);
+      console.error('Error updating post in local DB:', error);
     }
   }
 
   /**
-   * Remove a post from cache.
+   * Remove a post from local DB.
    */
   async removePostFromCache(shortcode: string): Promise<void> {
     try {
-      const posts = await this.getCachedPosts();
-      if (!posts) return;
-      await this.savePosts(posts.filter(p => p.shortcode !== shortcode));
+      await localDb.deletePost(shortcode);
     } catch (error) {
-      console.error('Error removing post from cache:', error);
+      console.error('Error removing post from local DB:', error);
     }
   }
 
-  // ─── Failed posts ────────────────────────────────────────────────────────────
+  // ─── Failed posts ────────────────────────────────────────────────
 
   /** Returns failed posts from memory (instant) or AsyncStorage on first call. */
   async getFailedPosts(): Promise<FailedPost[]> {

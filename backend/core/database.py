@@ -160,9 +160,26 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Deleted-log table — tracks when posts are soft-deleted so the
+        # mobile app can sync deletions via /sync/deleted.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS deleted_log (
+                shortcode   TEXT PRIMARY KEY,
+                deleted_at  TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_deleted_log_at ON deleted_log (deleted_at);
+        """)
+        self._conn.commit()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    # Columns safe to send to the mobile app (excludes heavy analysis blobs)
+    LIGHT_COLUMNS = (
+        "shortcode, url, username, content_type, analyzed_at, updated_at, "
+        "post_date, likes, thumbnail, title, summary, tags, music, category, is_hidden"
+    )
 
     def _row_to_dict(self, row):
         if row is None:
@@ -259,6 +276,68 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error retrieving recent: {e}")
             return []
+
+    def get_recent_light(self, limit=50, offset=0):
+        """Return recent posts with only UI-essential fields (no analysis blobs)."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                f"SELECT {self.LIGHT_COLUMNS} FROM analyses "
+                "WHERE (is_hidden IS NULL OR is_hidden = 0) "
+                "ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
+                (limit, offset)
+            )
+            return [self._row_to_dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error retrieving recent (light): {e}")
+            return []
+
+    def get_posts_since(self, updated_after: str, limit=1000):
+        """Return posts updated after the given ISO timestamp (delta sync).
+        Includes soft-deleted posts so the app knows to hide them."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                f"SELECT {self.LIGHT_COLUMNS} FROM analyses "
+                "WHERE updated_at > ? "
+                "ORDER BY updated_at ASC LIMIT ?",
+                (updated_after, limit)
+            )
+            return [self._row_to_dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting posts since {updated_after}: {e}")
+            return []
+
+    def get_deleted_since(self, since: str):
+        """Return shortcodes of posts deleted after the given ISO timestamp."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT shortcode, deleted_at FROM deleted_log WHERE deleted_at > ? ORDER BY deleted_at ASC",
+                (since,)
+            )
+            return [{"shortcode": r["shortcode"], "deleted_at": r["deleted_at"]} for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting deleted since {since}: {e}")
+            return []
+
+    def get_total_count(self):
+        """Return total number of visible (non-hidden) posts."""
+        if not self.is_connected():
+            return 0
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0)")
+            return cur.fetchone()[0]
+        except Exception as e:
+            print(f"[WARNING]  Error getting total count: {e}")
+            return 0
 
     def get_by_category(self, category, limit=20):
         """Return all analyses for a given category (excludes soft-deleted)."""
@@ -634,10 +713,17 @@ class Database:
         if not self.is_connected():
             return False
         try:
+            now = datetime.utcnow().isoformat()
             cur = self._conn.execute(
                 "UPDATE analyses SET is_hidden = 1, updated_at = ? WHERE shortcode = ?",
-                (datetime.utcnow().isoformat(), shortcode)
+                (now, shortcode)
             )
+            if cur.rowcount > 0:
+                # Record in deleted_log so mobile app can sync deletions
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO deleted_log (shortcode, deleted_at) VALUES (?, ?)",
+                    (shortcode, now)
+                )
             self._conn.commit()
             return cur.rowcount > 0
         except Exception as e:
