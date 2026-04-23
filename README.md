@@ -12,6 +12,16 @@ A self-hosted AI-powered second brain for Android — save Instagram posts, YouT
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK_54-000020?logo=expo&logoColor=white)](https://expo.dev)
 [![npm package](https://img.shields.io/npm/v/superbrain-server?label=npm%20package)](https://www.npmjs.com/package/superbrain-server)
 
+<p align="center">
+  <a href="https://www.producthunt.com/products/superbrain-ai-powered-second-brain?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-superbrain" target="_blank" rel="noopener noreferrer">
+    <img 
+      alt="SuperBrain on Product Hunt"
+      src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1127472&theme=light"
+      height="40"
+    />
+  </a>
+</p>
+
 [![Download APK](https://img.shields.io/badge/Download%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/sidinsearch/superbrain/releases/latest/download/superbrain.apk)
 [![Report Bug](https://img.shields.io/badge/Report%20Bug-d73a4a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=bug)
 [![Request Feature](https://img.shields.io/badge/Request%20Feature-7057ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=enhancement)
