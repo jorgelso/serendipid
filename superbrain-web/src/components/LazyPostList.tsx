@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { ClientPost } from "@/types/domain";
 import { TagChips } from "./Chips";
 import PostCard from "./PostCard";
+import MasonryGrid from "./MasonryGrid";
 
 interface LazyPostListProps {
   label: string;
@@ -49,29 +50,37 @@ export default function LazyPostList({ label, subLabels, shortcodes, variant = "
         type="button"
         onClick={handleToggle}
         aria-expanded={open}
-        className="w-full flex items-center gap-2 py-1.5 text-left"
+        className="w-full flex items-center gap-2 py-2 text-left"
       >
         <span
           aria-hidden
-          className={`text-ink-muted text-xs transition-transform ${open ? "rotate-90" : ""} ${
-            variant === "category" ? "text-ink-muted" : ""
-          }`}
+          className={`text-ink-muted text-xs transition-transform ${open ? "rotate-90" : ""}`}
         >
           &#9656;
         </span>
-        <span className={variant === "category" ? "font-label text-[11px] uppercase tracking-wide text-ink-muted" : "font-body font-medium text-sm"}>
+        <span
+          className={
+            variant === "category"
+              ? "text-[11px] font-bold uppercase tracking-wide text-ink-muted"
+              : "font-display font-medium text-sm"
+          }
+        >
           {label}
         </span>
         {subLabels && <TagChips tags={subLabels} />}
-        <span className="ml-auto font-label text-[11px] text-ink-muted">{shortcodes.length}</span>
+        <span className="ml-auto text-[11px] font-bold text-ink-muted">{shortcodes.length}</span>
       </button>
       {open && (
-        <div className="mt-2 mb-1 space-y-3 pl-5">
+        <div className="mt-2 mb-2 pl-5">
           {loading && <p className="text-xs text-ink-muted">Loading…</p>}
           {error && <p className="text-xs text-danger">{error}</p>}
-          {posts?.map((post) => (
-            <PostCard key={post.shortcode} post={post} />
-          ))}
+          {posts && (
+            <MasonryGrid>
+              {posts.map((post) => (
+                <PostCard key={post.shortcode} post={post} />
+              ))}
+            </MasonryGrid>
+          )}
         </div>
       )}
     </div>

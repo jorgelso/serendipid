@@ -1,93 +1,147 @@
 @import "tailwindcss";
 
 /*
-  Design direction: a naturalist's field guide / specimen index — this app's
-  whole job is noticing that separate saved reels (guitar, violin, piano...)
-  belong to the same family of interest, the way a field guide groups species
-  into a genus. Warm paper tones, a moss/rust/navy accent trio, a serif for
-  headings that has the character of old field-guide typography.
+  Design direction: "Bright Pulse" — warm, playful, visual-first, closer to
+  Pinterest/BeReal than a data tool. This app's job is to make scrolling your
+  own saved reels feel like scrolling a feed you'd actually enjoy.
 */
 
 :root {
-  --color-paper: #f5f1e6;
-  --color-paper-raised: #fbf8f0;
-  --color-ink: #211f1a;
-  --color-ink-muted: #6b6558;
-  --color-line: #ded4bc;
-  --color-moss: #3e5641;
-  --color-moss-soft: #e4eae0;
-  --color-rust: #a85a2a;
-  --color-rust-soft: #f0e1d2;
-  --color-navy: #2e3a52;
-  --color-danger: #8b3a3a;
+  --color-bg: #fff6ea;
+  --color-surface: #ffffff;
+  --color-surface-2: #fff0da;
+  --color-ink: #1a1a1a;
+  --color-ink-muted: #6b6b6b;
+  --color-line: #f0e2cd;
 
-  /* Category accent set — fixed order, earthy family, cycled by category name. */
-  --cat-clay: #b5573a;
-  --cat-sage: #6b8e6a;
-  --cat-ochre: #b6892f;
-  --cat-plum: #7a5c7e;
-  --cat-teal: #3f7a72;
-  --cat-brick: #9c4a3f;
-  --cat-olive: #7a7a3f;
-  --cat-dust: #8a7a63;
+  --color-coral: #ff5a5f;
+  --color-coral-soft: #ffe1de;
+  --color-coral-ink: #d0342c;
+
+  --color-yellow: #ffc93c;
+  --color-yellow-soft: #fff2c2;
+  --color-yellow-ink: #9a6b00;
+
+  --color-teal: #00c2a8;
+  --color-teal-soft: #d3f5ef;
+  --color-teal-ink: #007463;
+
+  --color-lavender: #a78bfa;
+  --color-lavender-soft: #ece5fe;
+  --color-lavender-ink: #6d3fd6;
+
+  --color-mint: #34d399;
+  --color-mint-soft: #d9f7ea;
+  --color-mint-ink: #037a54;
+
+  --color-rose: #fb7185;
+  --color-rose-soft: #ffe1e6;
+  --color-rose-ink: #c22a48;
+
+  --color-sky: #38bdf8;
+  --color-sky-soft: #dcf1fe;
+  --color-sky-ink: #0369a1;
+
+  --color-danger: #d0342c;
+  --color-danger-soft: #ffe1de;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --color-paper: #1a1812;
-    --color-paper-raised: #24211a;
-    --color-ink: #ede7d9;
-    --color-ink-muted: #a79e8a;
-    --color-line: #3a3629;
-    --color-moss: #86ab8c;
-    --color-moss-soft: #263028;
-    --color-rust: #d99b6c;
-    --color-rust-soft: #362a1f;
-    --color-navy: #93a6cc;
-    --color-danger: #d98787;
+    --color-bg: #1c1712;
+    --color-surface: #241d16;
+    --color-surface-2: #2c2319;
+    --color-ink: #fbf3e7;
+    --color-ink-muted: #b8a891;
+    --color-line: #3a2f22;
+
+    --color-coral-soft: #4a231f;
+    --color-coral-ink: #ff8f83;
+    --color-yellow-soft: #453300;
+    --color-yellow-ink: #ffd76a;
+    --color-teal-soft: #163632;
+    --color-teal-ink: #5fe6cd;
+    --color-lavender-soft: #2c2447;
+    --color-lavender-ink: #c4b0ff;
+    --color-mint-soft: #163827;
+    --color-mint-ink: #7ee8bb;
+    --color-rose-soft: #3d1f26;
+    --color-rose-ink: #ff9fae;
+    --color-sky-soft: #142d3a;
+    --color-sky-ink: #7fd6fc;
+    --color-danger-soft: #4a231f;
   }
 }
 
 :root[data-theme="dark"] {
-  --color-paper: #1a1812;
-  --color-paper-raised: #24211a;
-  --color-ink: #ede7d9;
-  --color-ink-muted: #a79e8a;
-  --color-line: #3a3629;
-  --color-moss: #86ab8c;
-  --color-moss-soft: #263028;
-  --color-rust: #d99b6c;
-  --color-rust-soft: #362a1f;
-  --color-navy: #93a6cc;
-  --color-danger: #d98787;
+  --color-bg: #1c1712;
+  --color-surface: #241d16;
+  --color-surface-2: #2c2319;
+  --color-ink: #fbf3e7;
+  --color-ink-muted: #b8a891;
+  --color-line: #3a2f22;
+
+  --color-coral-soft: #4a231f;
+  --color-coral-ink: #ff8f83;
+  --color-yellow-soft: #453300;
+  --color-yellow-ink: #ffd76a;
+  --color-teal-soft: #163632;
+  --color-teal-ink: #5fe6cd;
+  --color-lavender-soft: #2c2447;
+  --color-lavender-ink: #c4b0ff;
+  --color-mint-soft: #163827;
+  --color-mint-ink: #7ee8bb;
+  --color-rose-soft: #3d1f26;
+  --color-rose-ink: #ff9fae;
+  --color-sky-soft: #142d3a;
+  --color-sky-ink: #7fd6fc;
+  --color-danger-soft: #4a231f;
 }
 
 @theme inline {
-  --color-paper: var(--color-paper);
-  --color-paper-raised: var(--color-paper-raised);
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
   --color-ink: var(--color-ink);
   --color-ink-muted: var(--color-ink-muted);
   --color-line: var(--color-line);
-  --color-moss: var(--color-moss);
-  --color-moss-soft: var(--color-moss-soft);
-  --color-rust: var(--color-rust);
-  --color-rust-soft: var(--color-rust-soft);
-  --color-navy: var(--color-navy);
-  --color-danger: var(--color-danger);
 
-  --font-display: var(--font-fraunces), Georgia, serif;
-  --font-body: var(--font-work-sans), system-ui, sans-serif;
-  --font-label: var(--font-ibm-plex-mono), ui-monospace, monospace;
+  --color-coral: var(--color-coral);
+  --color-coral-soft: var(--color-coral-soft);
+  --color-coral-ink: var(--color-coral-ink);
+  --color-yellow: var(--color-yellow);
+  --color-yellow-soft: var(--color-yellow-soft);
+  --color-yellow-ink: var(--color-yellow-ink);
+  --color-teal: var(--color-teal);
+  --color-teal-soft: var(--color-teal-soft);
+  --color-teal-ink: var(--color-teal-ink);
+  --color-lavender: var(--color-lavender);
+  --color-lavender-soft: var(--color-lavender-soft);
+  --color-lavender-ink: var(--color-lavender-ink);
+  --color-mint: var(--color-mint);
+  --color-mint-soft: var(--color-mint-soft);
+  --color-mint-ink: var(--color-mint-ink);
+  --color-rose: var(--color-rose);
+  --color-rose-soft: var(--color-rose-soft);
+  --color-rose-ink: var(--color-rose-ink);
+  --color-sky: var(--color-sky);
+  --color-sky-soft: var(--color-sky-soft);
+  --color-sky-ink: var(--color-sky-ink);
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
+
+  --font-display: var(--font-fredoka), system-ui, sans-serif;
+  --font-body: var(--font-nunito), system-ui, sans-serif;
 }
 
 body {
-  background: var(--color-paper);
+  background: var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-body);
 }
 
 ::selection {
-  background: var(--color-moss-soft);
+  background: var(--color-yellow-soft);
   color: var(--color-ink);
 }
 

@@ -11,17 +11,17 @@ export default function MoreSection({
   if (total === 0) return null;
 
   return (
-    <details className="rounded-md border border-line">
-      <summary className="cursor-pointer select-none list-none flex items-center gap-3 px-4 py-3">
+    <details className="rounded-2xl border border-line bg-surface">
+      <summary className="cursor-pointer select-none list-none flex items-center gap-3 px-5 py-4">
         <span aria-hidden className="text-ink-muted">
           &#9656;
         </span>
-        <span className="font-display text-lg">Everything else</span>
-        <span className="ml-auto font-label text-[11px] uppercase tracking-wide text-ink-muted">
+        <span className="font-display font-semibold text-lg">Everything else</span>
+        <span className="ml-auto text-[11px] font-bold uppercase tracking-wide text-ink-muted">
           {total} not yet part of a theme
         </span>
       </summary>
-      <div className="border-t border-line px-4 py-3 space-y-1">
+      <div className="border-t border-line px-5 py-4 space-y-1">
         {categories.map((category) => (
           <LazyPostList
             key={category}

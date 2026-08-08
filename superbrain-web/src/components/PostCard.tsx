@@ -8,45 +8,44 @@ interface PostCardProps {
 
 export default function PostCard({ post }: PostCardProps) {
   return (
-    <article className="rounded-md border border-line bg-paper-raised p-4 flex gap-4">
+    <article className="break-inside-avoid mb-5 rounded-3xl bg-surface border border-line overflow-hidden shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] transition-transform duration-200 hover:-translate-y-1 hover:rotate-[-0.3deg]">
       {post.thumbnail && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={post.thumbnail}
-          alt=""
-          className="h-24 w-24 shrink-0 rounded-sm object-cover border border-line"
-        />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg leading-snug">
-            {post.title || "Untitled reel"}
-          </h3>
+        <div className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={post.thumbnail} alt="" className="w-full block" loading="lazy" />
+          <div className="absolute top-3 left-3">
+            <CategoryBadge category={post.category} />
+          </div>
           {typeof post.similarity === "number" && (
-            <span className="shrink-0 font-label text-[11px] px-2 py-0.5 rounded-sm bg-moss-soft text-moss">
+            <div className="absolute top-3 right-3 bg-ink/70 text-bg text-[11px] font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">
               {(post.similarity * 100).toFixed(0)}% match
-            </span>
+            </div>
           )}
         </div>
+      )}
 
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-          <a
-            href={post.url}
-            target="_blank"
-            rel="noreferrer"
-            className="hover:text-moss underline decoration-line underline-offset-2"
-          >
-            @{post.username}
-          </a>
-          <CategoryBadge category={post.category} />
-        </div>
+      <div className="p-4">
+        <h3 className="font-display font-semibold text-[15px] leading-snug">
+          {post.title || "Untitled reel"}
+        </h3>
+
+        <a
+          href={post.url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-block text-xs text-ink-muted hover:text-coral-ink transition-colors"
+        >
+          @{post.username}
+        </a>
 
         {post.summary && (
-          <p className="mt-2 text-sm leading-relaxed text-ink line-clamp-3">{post.summary}</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-muted line-clamp-3">
+            {post.summary}
+          </p>
         )}
 
-        <div className="mt-2">
-          <TagChips tags={post.tags} limit={8} />
+        <div className="mt-3">
+          <TagChips tags={post.tags} limit={6} />
         </div>
 
         <AnalysisDetails post={post} />

@@ -1,29 +1,28 @@
-const CATEGORY_COLORS = [
-  "var(--cat-clay)",
-  "var(--cat-sage)",
-  "var(--cat-ochre)",
-  "var(--cat-plum)",
-  "var(--cat-teal)",
-  "var(--cat-brick)",
-  "var(--cat-olive)",
-  "var(--cat-dust)",
+const PALETTE = [
+  { bg: "var(--color-coral-soft)", fg: "var(--color-coral-ink)" },
+  { bg: "var(--color-teal-soft)", fg: "var(--color-teal-ink)" },
+  { bg: "var(--color-yellow-soft)", fg: "var(--color-yellow-ink)" },
+  { bg: "var(--color-lavender-soft)", fg: "var(--color-lavender-ink)" },
+  { bg: "var(--color-mint-soft)", fg: "var(--color-mint-ink)" },
+  { bg: "var(--color-rose-soft)", fg: "var(--color-rose-ink)" },
+  { bg: "var(--color-sky-soft)", fg: "var(--color-sky-ink)" },
 ];
 
-function colorForCategory(category: string): string {
+export function colorFor(label: string): { bg: string; fg: string } {
   let hash = 0;
-  for (let i = 0; i < category.length; i++) {
-    hash = (hash * 31 + category.charCodeAt(i)) % CATEGORY_COLORS.length;
+  for (let i = 0; i < label.length; i++) {
+    hash = (hash * 31 + label.charCodeAt(i)) % PALETTE.length;
   }
-  return CATEGORY_COLORS[Math.abs(hash) % CATEGORY_COLORS.length];
+  return PALETTE[Math.abs(hash) % PALETTE.length];
 }
 
 export function CategoryBadge({ category }: { category: string | null }) {
   if (!category) return null;
-  const color = colorForCategory(category);
+  const { bg, fg } = colorFor(category);
   return (
     <span
-      className="font-label text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-sm border"
-      style={{ color, borderColor: color, backgroundColor: "color-mix(in srgb, " + color + " 12%, transparent)" }}
+      className="font-display text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full"
+      style={{ backgroundColor: bg, color: fg }}
     >
       {category}
     </span>
@@ -36,16 +35,20 @@ export function TagChips({ tags, limit }: { tags: string[]; limit?: number }) {
   const remaining = limit && tags.length > limit ? tags.length - limit : 0;
   return (
     <span className="inline-flex flex-wrap gap-1.5">
-      {shown.map((tag) => (
-        <span
-          key={tag}
-          className="font-label text-[11px] px-2 py-0.5 rounded-sm bg-paper-raised border border-line text-ink-muted"
-        >
-          {tag}
-        </span>
-      ))}
+      {shown.map((tag) => {
+        const { bg, fg } = colorFor(tag);
+        return (
+          <span
+            key={tag}
+            className="text-[11px] font-bold px-2.5 py-1 rounded-full"
+            style={{ backgroundColor: bg, color: fg }}
+          >
+            {tag}
+          </span>
+        );
+      })}
       {remaining > 0 && (
-        <span className="font-label text-[11px] px-2 py-0.5 text-ink-muted">+{remaining}</span>
+        <span className="text-[11px] font-bold px-2 py-1 text-ink-muted">+{remaining}</span>
       )}
     </span>
   );

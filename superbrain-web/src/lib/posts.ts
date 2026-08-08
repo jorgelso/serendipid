@@ -1,4 +1,4 @@
-import type { ClientPost, Post, SearchSemanticHit } from "@/types/domain";
+import type { ClientPost, Collection, Post, SearchSemanticHit } from "@/types/domain";
 
 /** Thumbnails may be a full external URL, a data: URI, or a relative
  * /static/... path needing the backend's base URL prefixed (backend/api.py's
@@ -34,12 +34,61 @@ export function toDisplayPost(post: Post, apiBaseUrl: string): ClientPost {
   return { ...client, thumbnail: resolveThumbnailUrl(client.thumbnail, apiBaseUrl) };
 }
 
+/** Most-recently-analyzed first — the ordering behind the Home/Browse feeds. */
+export function sortPostsByRecency(posts: Post[]): Post[] {
+  return [...posts].sort((a, b) => {
+    const aTime = a.analyzed_at ? Date.parse(a.analyzed_at) : 0;
+    const bTime = b.analyzed_at ? Date.parse(b.analyzed_at) : 0;
+    return bTime - aTime;
+  });
+}
+
+/** Shared by /api/feed and the Browse page's initial server render, so both
+ * apply category/collection filtering identically. */
+export function filterPosts(
+  posts: Post[],
+  collections: Collection[],
+  options: { category?: string; collectionId?: string }
+): Post[] {
+  let filtered = sortPostsByRecency(posts);
+  if (options.category) {
+    filtered = filtered.filter((p) => p.category === options.category);
+  }
+  if (options.collectionId) {
+    const collection = collections.find((c) => c.id === options.collectionId);
+    const idSet = new Set(collection?.post_ids ?? []);
+    filtered = filtered.filter((p) => idSet.has(p.shortcode));
+  }
+  return filtered;
+}
+
 export function categoryOptions(posts: Post[]): string[] {
   const set = new Set<string>();
   for (const post of posts) {
     if (post.category) set.add(post.category);
   }
   return Array.from(set).sort();
+}
+
+export function computeCategoryCounts(posts: Post[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const post of posts) {
+    const key = post.category || "uncategorized";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+}
+
+export function computeTagCounts(posts: Post[], limit = 20): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const post of posts) {
+    for (const tag of post.tags ?? []) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
 }
 
 /** Groups shortcodes by category without materializing full post objects —

@@ -5,11 +5,12 @@ import { mergeSearchHitsWithPosts } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
 import SearchBar from "@/components/SearchBar";
 import PostCard from "@/components/PostCard";
+import MasonryGrid from "@/components/MasonryGrid";
 
 async function loadResults(q: string): Promise<(ClientPost & { similarity: number })[]> {
   const config = getConfig();
   const [searchResponse, exportPayload] = await Promise.all([
-    fetchSemanticSearch(q, 20, 0),
+    fetchSemanticSearch(q, 24, 0),
     getExport(),
   ]);
   return mergeSearchHitsWithPosts(searchResponse.data, exportPayload.posts, config.apiUrl);
@@ -32,41 +33,48 @@ export default async function SearchPage(props: PageProps<"/search">) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="mx-auto max-w-6xl px-5 py-8">
+      <div className="mb-6">
+        <h1 className="font-display font-semibold text-3xl">Search</h1>
+        <p className="mt-1 text-ink-muted text-sm">
+          Find what you&rsquo;ve saved by meaning, not just keywords.
+        </p>
+      </div>
+
       <SearchBar defaultValue={q} />
 
       <div className="mt-8">
         {!q && (
-          <p className="text-sm text-ink-muted">
+          <p className="text-sm text-ink-muted py-10 text-center">
             Type an interest above — an instrument, a recipe, a mindset — and see what you&rsquo;ve
             already saved about it.
           </p>
         )}
 
         {q && (
-          <p className="font-label text-[11px] uppercase tracking-wide text-ink-muted mb-4">
-            Looking up &ldquo;{q}&rdquo;
+          <p className="text-xs font-bold uppercase tracking-wide text-ink-muted mb-4">
+            Results for &ldquo;{q}&rdquo;
           </p>
         )}
 
         {errorMessage && (
-          <div className="rounded-md border border-danger/40 bg-rust-soft px-4 py-3 text-sm text-danger">
+          <div className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-coral-ink">
             {errorMessage}
           </div>
         )}
 
         {results && results.length === 0 && (
-          <p className="text-sm text-ink-muted">
+          <p className="text-sm text-ink-muted py-10 text-center">
             Nothing matched &ldquo;{q}&rdquo; closely enough. Try a broader phrase.
           </p>
         )}
 
         {results && results.length > 0 && (
-          <div className="space-y-3">
+          <MasonryGrid>
             {results.map((post) => (
               <PostCard key={post.shortcode} post={post} />
             ))}
-          </div>
+          </MasonryGrid>
         )}
       </div>
     </div>

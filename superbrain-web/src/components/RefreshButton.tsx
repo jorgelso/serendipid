@@ -26,15 +26,17 @@ export default function RefreshButton() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="relative">
       <button
         onClick={handleClick}
         disabled={state === "loading"}
-        className="font-label text-[11px] uppercase tracking-wide text-ink-muted hover:text-moss transition-colors disabled:opacity-50"
+        className="rounded-full border border-line px-4 py-2 text-xs font-bold text-ink-muted hover:text-coral-ink hover:border-coral transition-colors disabled:opacity-50"
       >
-        {state === "loading" ? "Rescanning…" : "Rescan library"}
+        {state === "loading" ? "Rescanning…" : "↻ Rescan"}
       </button>
-      {errorMessage && <p className="text-xs text-danger max-w-xs text-right">{errorMessage}</p>}
+      {errorMessage && (
+        <p className="absolute right-0 mt-2 w-56 text-xs text-danger text-right">{errorMessage}</p>
+      )}
     </div>
   );
 }

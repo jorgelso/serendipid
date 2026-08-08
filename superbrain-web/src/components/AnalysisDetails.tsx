@@ -19,13 +19,13 @@ export default function AnalysisDetails({ post }: { post: ClientPost }) {
 
   return (
     <details className="mt-3 group">
-      <summary className="cursor-pointer select-none font-label text-[11px] uppercase tracking-wide text-moss hover:text-ink transition-colors">
+      <summary className="cursor-pointer select-none text-[11px] font-bold uppercase tracking-wide text-coral-ink hover:opacity-70 transition-opacity">
         Full analysis
       </summary>
       <dl className="mt-3 space-y-3 border-l-2 border-line pl-4">
         {fields.map((field) => (
           <div key={field.label}>
-            <dt className="font-label text-[11px] uppercase tracking-wide text-ink-muted">
+            <dt className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">
               {field.label}
             </dt>
             <dd className="mt-1 text-sm leading-relaxed">{field.value}</dd>
