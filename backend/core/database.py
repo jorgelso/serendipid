@@ -98,6 +98,17 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: add embedding column — JSON-encoded float vector
+        # (OpenAI text-embedding-3-small) generated from title+summary+tags,
+        # used for semantic search / similarity. Brute-force cosine
+        # similarity in Python is fast enough at this dataset's scale, so no
+        # vector-search extension (e.g. sqlite-vec) is needed.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN embedding TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Migration: add retry columns to processing_queue
         for _col, _dflt in [
             ("retry_after",  "TEXT"),
@@ -236,12 +247,15 @@ class Database:
     def save_analysis(self, shortcode, url, username, title, summary, tags, music, category,
                       visual_analysis="", audio_transcription="", text_analysis="",
                       likes=0, post_date=None, content_type="instagram", thumbnail="",
-                      source_hashtags=None):
+                      source_hashtags=None, embedding=None):
         """Insert or update an analysis record. Returns True on success.
 
         source_hashtags: original hashtags from the source platform (e.g. an
         Instagram export), stored separately from the AI-generated 'tags'
         column. Accepts a list or a pre-joined string.
+
+        embedding: list of floats (OpenAI text-embedding-3-small output) or
+        None if embedding generation wasn't available/failed for this post.
         """
         if not self.is_connected():
             print("[WARNING] Database not connected. Analysis not saved.")
@@ -254,13 +268,14 @@ class Database:
                 source_hashtags if isinstance(source_hashtags, list)
                 else (source_hashtags.split() if source_hashtags else [])
             )
+            embedding_json = json.dumps(embedding) if embedding else ""
 
             self._conn.execute("""
                 INSERT INTO analyses
                     (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
                      thumbnail, title, summary, tags, music, category,
-                     visual_analysis, audio_transcription, text_analysis, source_hashtags)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
                     url                 = excluded.url,
                     username            = excluded.username,
@@ -277,10 +292,11 @@ class Database:
                     visual_analysis     = excluded.visual_analysis,
                     audio_transcription = excluded.audio_transcription,
                     text_analysis       = excluded.text_analysis,
-                    source_hashtags     = excluded.source_hashtags
+                    source_hashtags     = excluded.source_hashtags,
+                    embedding           = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END
             """, (shortcode, url, username, content_type, now, now, post_date, likes,
                   thumbnail, title, summary, tags_json, music, category,
-                  visual_analysis, audio_transcription, text_analysis, source_hashtags_json))
+                  visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json))
             self._conn.commit()
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True
@@ -289,6 +305,66 @@ class Database:
             import traceback
             traceback.print_exc()
             return False
+
+    def update_embedding(self, shortcode, embedding) -> bool:
+        """Set (or overwrite) just the embedding for an existing post — used
+        by the backfill script so it doesn't need to re-run full analysis."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute(
+                "UPDATE analyses SET embedding = ? WHERE shortcode = ?",
+                (json.dumps(embedding), shortcode),
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error updating embedding: {e}")
+            return False
+
+    def get_posts_missing_embedding(self):
+        """Return [{shortcode, title, summary, tags: [...]}, ...] for every
+        post that doesn't have an embedding yet — used by the backfill script."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.execute(
+                "SELECT shortcode, title, summary, tags FROM analyses "
+                "WHERE embedding IS NULL OR embedding = ''"
+            )
+            out = []
+            for shortcode, title, summary, tags_json in cur.fetchall():
+                try:
+                    tags = json.loads(tags_json) if tags_json else []
+                except Exception:
+                    tags = []
+                out.append({"shortcode": shortcode, "title": title, "summary": summary, "tags": tags})
+            return out
+        except Exception as e:
+            print(f"[WARNING]  Error fetching posts missing embedding: {e}")
+            return []
+
+    def get_all_embeddings(self):
+        """Return [{shortcode, embedding: [float,...]}] for every post that
+        has one — used by the semantic search endpoint."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.execute(
+                "SELECT shortcode, embedding FROM analyses "
+                "WHERE embedding IS NOT NULL AND embedding != '' "
+                "AND (is_hidden IS NULL OR is_hidden = 0)"
+            )
+            out = []
+            for shortcode, emb_json in cur.fetchall():
+                try:
+                    out.append({"shortcode": shortcode, "embedding": json.loads(emb_json)})
+                except Exception:
+                    continue
+            return out
+        except Exception as e:
+            print(f"[WARNING]  Error fetching embeddings: {e}")
+            return []
     
     def get_recent(self, limit=10):
         """Return the most recently analysed posts (excludes soft-deleted)."""

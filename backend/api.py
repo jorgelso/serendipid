@@ -28,6 +28,8 @@ from pathlib import Path
 # Import database module
 from core.database import get_db
 from core.link_checker import validate_link
+from core.model_router import get_router
+import numpy as np
 
 # Configure logging
 logging.basicConfig(
@@ -923,6 +925,80 @@ async def search_by_tags(
             "data": results
         }
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/search/semantic")
+async def search_semantic(
+    q: str = Query(..., description="Free-text topic/query to search for"),
+    limit: int = Query(default=20, ge=1, le=100),
+    min_similarity: float = Query(default=0.0, ge=0.0, le=1.0, description="Drop results below this cosine similarity"),
+    token: str = Depends(verify_token)
+):
+    """
+    Semantic search over analyzed posts by meaning, not just keyword overlap.
+    Embeds the query with the same model used at analysis time
+    (OpenAI text-embedding-3-small) and ranks stored posts by cosine
+    similarity, computed in-process with numpy (no vector-search extension —
+    unnecessary at this dataset's scale).
+
+    Posts analyzed before embedding generation existed (or analyzed without
+    an OPENAI_API_KEY configured) won't have an embedding and are excluded
+    from results — run scripts/backfill_embeddings.py to fill those in.
+
+    Requires API authentication.
+    """
+    try:
+        router = get_router()
+        db = get_db()
+
+        query_embedding = await asyncio.to_thread(router.generate_embedding, q)
+        if not query_embedding:
+            raise HTTPException(
+                status_code=503,
+                detail="Could not generate a query embedding — check OPENAI_API_KEY in backend/config/.api_keys."
+            )
+
+        stored = db.get_all_embeddings()
+        if not stored:
+            return {"success": True, "query": q, "count": 0, "data": []}
+
+        query_vec = np.array(query_embedding, dtype=np.float32)
+        query_norm = np.linalg.norm(query_vec)
+
+        scored = []
+        for row in stored:
+            vec = np.array(row["embedding"], dtype=np.float32)
+            denom = query_norm * np.linalg.norm(vec)
+            similarity = float(np.dot(query_vec, vec) / denom) if denom else 0.0
+            if similarity >= min_similarity:
+                scored.append((similarity, row["shortcode"]))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:limit]
+
+        results = []
+        for similarity, shortcode in top:
+            post = db.check_cache(shortcode)
+            if not post:
+                continue
+            results.append({
+                "shortcode": shortcode,
+                "similarity": round(similarity, 4),
+                "url": post.get("url", ""),
+                "username": post.get("username", ""),
+                "title": post.get("title", ""),
+                "summary": post.get("summary", ""),
+                "tags": post.get("tags", []),
+                "category": post.get("category", ""),
+                "thumbnail": post.get("thumbnail", ""),
+            })
+
+        return {"success": True, "query": q, "count": len(results), "data": results}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

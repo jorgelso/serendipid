@@ -1235,6 +1235,34 @@ class ModelRouter:
 
         raise RuntimeError("All vision models failed.")
 
+    def generate_embedding(self, text: str) -> Optional[List[float]]:
+        """
+        Generate a text embedding via OpenAI's text-embedding-3-small.
+        Used for semantic search / similarity over analyzed posts.
+        Returns None (not an exception) if no OpenAI key is configured or
+        the call fails — embeddings are a nice-to-have, not required for a
+        post to be considered successfully analyzed.
+        """
+        api_key = self._key("OPENAI_API_KEY")
+        if not api_key or not text.strip():
+            return None
+        import requests
+        try:
+            resp = requests.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"model": "text-embedding-3-small", "input": text[:8000]},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()["data"][0]["embedding"]
+        except Exception as e:
+            print(f"  ⚠️  Embedding generation failed: {e}", flush=True)
+            return None
+
     # ── Utilities ──────────────────────────────────────────────────────────────
 
     def print_rankings(self):

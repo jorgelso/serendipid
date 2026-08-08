@@ -938,6 +938,19 @@ def main():
         except Exception as thumb_err:
             print(f"⚠️  Could not extract video thumbnail: {thumb_err}")
 
+    # Generate an embedding for semantic search (best-effort — a failure here
+    # shouldn't fail the whole analysis, the post just won't be
+    # semantically-searchable until a later backfill).
+    embedding = None
+    try:
+        from core.model_router import get_router as _get_router
+        embedding_text = f"{title}\n\n{summary_text}\n\nTags: {', '.join(tags)}"
+        embedding = _get_router().generate_embedding(embedding_text)
+        if embedding:
+            print(f"✓ Generated embedding ({len(embedding)} dims)")
+    except Exception as emb_err:
+        print(f"⚠️  Embedding generation error: {emb_err}")
+
     db.save_analysis(
         shortcode=shortcode,
         url=instagram_url,
@@ -954,6 +967,7 @@ def main():
         post_date=post_date,
         thumbnail=instagram_thumbnail,
         source_hashtags=source_hashtags,
+        embedding=embedding,
     )
 
     print(f"✓ Analysis saved to database")
