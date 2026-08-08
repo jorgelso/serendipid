@@ -89,6 +89,15 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: add source_hashtags column — original hashtags from the
+        # source platform (e.g. Instagram export), kept separate from the
+        # AI-generated 'tags' column so both are independently searchable.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN source_hashtags TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Migration: add retry columns to processing_queue
         for _col, _dflt in [
             ("retry_after",  "TEXT"),
@@ -192,6 +201,13 @@ class Database:
                 d['tags'] = []
         else:
             d['tags'] = []
+        if d.get('source_hashtags'):
+            try:
+                d['source_hashtags'] = json.loads(d['source_hashtags'])
+            except Exception:
+                d['source_hashtags'] = []
+        else:
+            d['source_hashtags'] = []
         return d
     
     # ------------------------------------------------------------------
@@ -219,8 +235,14 @@ class Database:
 
     def save_analysis(self, shortcode, url, username, title, summary, tags, music, category,
                       visual_analysis="", audio_transcription="", text_analysis="",
-                      likes=0, post_date=None, content_type="instagram", thumbnail=""):
-        """Insert or update an analysis record. Returns True on success."""
+                      likes=0, post_date=None, content_type="instagram", thumbnail="",
+                      source_hashtags=None):
+        """Insert or update an analysis record. Returns True on success.
+
+        source_hashtags: original hashtags from the source platform (e.g. an
+        Instagram export), stored separately from the AI-generated 'tags'
+        column. Accepts a list or a pre-joined string.
+        """
         if not self.is_connected():
             print("[WARNING] Database not connected. Analysis not saved.")
             return False
@@ -228,13 +250,17 @@ class Database:
             print(f"📝 Saving to database with shortcode: {shortcode}")
             now = datetime.utcnow().isoformat()
             tags_json = json.dumps(tags if isinstance(tags, list) else tags.split())
+            source_hashtags_json = json.dumps(
+                source_hashtags if isinstance(source_hashtags, list)
+                else (source_hashtags.split() if source_hashtags else [])
+            )
 
             self._conn.execute("""
                 INSERT INTO analyses
                     (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
                      thumbnail, title, summary, tags, music, category,
-                     visual_analysis, audio_transcription, text_analysis)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     visual_analysis, audio_transcription, text_analysis, source_hashtags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
                     url                 = excluded.url,
                     username            = excluded.username,
@@ -250,10 +276,11 @@ class Database:
                     category            = excluded.category,
                     visual_analysis     = excluded.visual_analysis,
                     audio_transcription = excluded.audio_transcription,
-                    text_analysis       = excluded.text_analysis
+                    text_analysis       = excluded.text_analysis,
+                    source_hashtags     = excluded.source_hashtags
             """, (shortcode, url, username, content_type, now, now, post_date, likes,
                   thumbnail, title, summary, tags_json, music, category,
-                  visual_analysis, audio_transcription, text_analysis))
+                  visual_analysis, audio_transcription, text_analysis, source_hashtags_json))
             self._conn.commit()
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True

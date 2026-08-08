@@ -15,13 +15,14 @@ Inspired by / referencing:
   • openrouter-free-model (jomonylw) — free model detection logic
 
 Priority order (defaults, adjusted dynamically by measured latency):
-  TEXT:   Groq → Gemini → OpenRouter (hardcoded best) → Dynamic free OpenRouter → Local Ollama
-  VISION: Gemini → Groq Vision → OpenRouter Vision → Local Ollama Vision
+  TEXT:   OpenAI (if configured) → Groq → Gemini → OpenRouter (hardcoded best) → Dynamic free OpenRouter → Local Ollama
+  VISION: OpenAI (if configured) → Gemini → Groq Vision → OpenRouter Vision → Local Ollama Vision
 
 API keys — store in backend/.api_keys (gitignored), one per line:
     GROQ_API_KEY=gsk_...
     GEMINI_API_KEY=AIza...
     OPENROUTER_API_KEY=sk-or-...
+    OPENAI_API_KEY=sk-...
 
 Performance state persisted to backend/model_rankings.json (rankings survive restarts).
 Dynamic model list cached in backend/openrouter_free_models.json (refreshed every 6 h).
@@ -78,6 +79,14 @@ RANKING_WEIGHTS = {
 
 MODELS: List[Dict[str, Any]] = [
     # ── TEXT ─────────────────────────────────────────────────────────────────
+    {
+        "key": "openai_gpt41",
+        "provider": "openai",
+        "model_id": "gpt-4.1",
+        "type": "text",
+        "base_priority": 0,
+        "desc": "OpenAI GPT-4.1 — primary provider (paid, tried first when configured)",
+    },
     {
         "key": "groq_gpt_oss_20b",
         "provider": "groq",
@@ -330,6 +339,14 @@ MODELS: List[Dict[str, Any]] = [
 
     # ── VISION ───────────────────────────────────────────────────────────────
     {
+        "key": "openai_gpt41_vision",
+        "provider": "openai",
+        "model_id": "gpt-4.1",
+        "type": "vision",
+        "base_priority": 0,
+        "desc": "OpenAI GPT-4.1 Vision — primary provider (paid, tried first when configured)",
+    },
+    {
         "key": "gemini_25_flash_vision",
         "provider": "gemini",
         "model_id": "gemini-2.5-flash",
@@ -522,7 +539,7 @@ class ModelRouter:
 
     def _load_api_keys(self):
         """Load API keys from environment and .api_keys file."""
-        for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
+        for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"):
             v = os.environ.get(k)
             if v:
                 self._api_keys[k] = v
@@ -550,13 +567,14 @@ class ModelRouter:
             "groq": bool(self._key("GROQ_API_KEY")),
             "gemini": bool(self._key("GEMINI_API_KEY")),
             "openrouter": bool(self._key("OPENROUTER_API_KEY")),
+            "openai": bool(self._key("OPENAI_API_KEY")),
             "ollama": True,  # Always available
         }
 
     def set_api_key(self, provider: str, api_key: str) -> bool:
         """Set an API key for a provider and persist to file."""
         key_name = f"{provider.upper()}_API_KEY"
-        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]
+        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]
         
         if key_name not in valid_providers:
             return False
@@ -571,7 +589,7 @@ class ModelRouter:
     def delete_api_key(self, provider: str) -> bool:
         """Delete an API key for a provider."""
         key_name = f"{provider.upper()}_API_KEY"
-        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"]
+        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]
         
         if key_name not in valid_providers:
             return False
@@ -848,6 +866,8 @@ class ModelRouter:
             return False
         if prov == "openrouter" and not self._key("OPENROUTER_API_KEY"):
             return False
+        if prov == "openai" and not self._key("OPENAI_API_KEY"):
+            return False
 
         s = self._state.get(model_key, self._default_model_state_dynamic(model_key))
         if s.get("down_until"):
@@ -945,7 +965,7 @@ class ModelRouter:
         r = client.chat.completions.create(
             model=model_id,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=800,
+            max_tokens=4000,
             temperature=0.7,
         )
         return r.choices[0].message.content.strip()
@@ -964,7 +984,7 @@ class ModelRouter:
         r = client.chat.completions.create(
             model=model_id,
             messages=[{"role": "user", "content": content}],
-            max_tokens=800,
+            max_tokens=4000,
             temperature=0.7,
         )
         return r.choices[0].message.content.strip()
@@ -975,7 +995,7 @@ class ModelRouter:
         model = genai.GenerativeModel(model_id)
         r = model.generate_content(
             prompt,
-            generation_config={"max_output_tokens": 800, "temperature": 0.7},
+            generation_config={"max_output_tokens": 4000, "temperature": 0.7},
         )
         return r.text.strip()
 
@@ -989,7 +1009,7 @@ class ModelRouter:
         parts.append(prompt)
         r = model.generate_content(
             parts,
-            generation_config={"max_output_tokens": 800, "temperature": 0.7},
+            generation_config={"max_output_tokens": 4000, "temperature": 0.7},
         )
         return r.text.strip()
 
@@ -1006,7 +1026,7 @@ class ModelRouter:
             json={
                 "model": model_id,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 800,
+                "max_tokens": 4000,
                 "temperature": 0.7,
                 "route": "fallback",  # Nexlify uptime-optimizer: auto-fallback on provider failures
             },
@@ -1037,9 +1057,58 @@ class ModelRouter:
             json={
                 "model": model_id,
                 "messages": [{"role": "user", "content": content}],
-                "max_tokens": 800,
+                "max_tokens": 4000,
                 "temperature": 0.7,
                 "route": "fallback",  # Nexlify uptime-optimizer: auto-fallback on provider failures
+            },
+            timeout=90,
+        )
+        if resp.status_code == 429:
+            raise Exception(f"429 rate limit: {resp.text[:200]}")
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+
+    def _openai_text(self, model_id: str, prompt: str) -> str:
+        import requests
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self._key('OPENAI_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model_id,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 4000,
+                "temperature": 0.7,
+            },
+            timeout=60,
+        )
+        if resp.status_code == 429:
+            raise Exception(f"429 rate limit: {resp.text[:200]}")
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+
+    def _openai_vision(self, model_id: str, prompt: str, images_b64: List[str]) -> str:
+        import requests
+        content: List[Dict] = []
+        for b64 in images_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            })
+        content.append({"type": "text", "text": prompt})
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self._key('OPENAI_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model_id,
+                "messages": [{"role": "user", "content": content}],
+                "max_tokens": 4000,
+                "temperature": 0.7,
             },
             timeout=90,
         )
@@ -1053,7 +1122,7 @@ class ModelRouter:
         r = ollama.generate(
             model=model_id,
             prompt=prompt,
-            options={"temperature": 0.7, "num_predict": 800},
+            options={"temperature": 0.7, "num_predict": 4000},
         )
         return r.get("response", "").strip()
 
@@ -1063,7 +1132,7 @@ class ModelRouter:
             model=model_id,
             prompt=prompt,
             images=images_b64,
-            options={"temperature": 0.7, "num_predict": 800},
+            options={"temperature": 0.7, "num_predict": 4000},
         )
         return r.get("response", "").strip()
 
@@ -1095,6 +1164,8 @@ class ModelRouter:
                     result = self._gemini_text(m["model_id"], prompt)
                 elif prov == "openrouter":
                     result = self._openrouter_text(m["model_id"], prompt)
+                elif prov == "openai":
+                    result = self._openai_text(m["model_id"], prompt)
                 elif prov == "ollama":
                     result = self._ollama_text(m["model_id"], prompt)
                 else:
@@ -1142,6 +1213,8 @@ class ModelRouter:
                     result = self._gemini_vision(m["model_id"], prompt, images_b64)
                 elif prov == "openrouter":
                     result = self._openrouter_vision(m["model_id"], prompt, images_b64)
+                elif prov == "openai":
+                    result = self._openai_vision(m["model_id"], prompt, images_b64)
                 elif prov == "ollama":
                     result = self._ollama_vision(m["model_id"], prompt, images_b64)
                 else:
@@ -1224,6 +1297,7 @@ class ModelRouter:
         parts.append("Groq ✓"        if self._key("GROQ_API_KEY")        else "Groq ✗")
         parts.append("Gemini ✓"      if self._key("GEMINI_API_KEY")      else "Gemini ✗")
         parts.append("OpenRouter ✓"  if self._key("OPENROUTER_API_KEY")  else "OpenRouter ✗")
+        parts.append("OpenAI ✓"      if self._key("OPENAI_API_KEY")      else "OpenAI ✗")
         parts.append("Ollama (fallback)")
         print(f"🌐 Model Router initialised: {' | '.join(parts)}")
 

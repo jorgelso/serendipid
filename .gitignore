@@ -34,6 +34,10 @@ backend/superbrain.db
 backend/superbrain.db-shm
 backend/superbrain.db-wal
 
+# ── Personal data / import state (not code, not for version control) ─────────
+backend/saved_collections.json
+backend/scripts/import_state.json
+
 # ── Backend temp / generated ─────────────────────────────────────────────────
 backend/temp/
 backend/static/

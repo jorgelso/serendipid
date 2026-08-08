@@ -48,7 +48,7 @@ def print_section(title):
     print(f"  {title}")
     print('─' * 80 + "\n")
 
-def generate_final_summary(results, instagram_url):
+def generate_final_summary(results, instagram_url, source_caption="", source_hashtags=None):
     """Generate comprehensive summary using all analysis results via ModelRouter."""
     from core.model_router import get_router
 
@@ -101,9 +101,21 @@ def generate_final_summary(results, instagram_url):
             if clean:
                 text_summary += f"{clean[:600]}\n"
     
+    # Extract original caption/hashtags (from the source export, if provided)
+    caption_block = ""
+    if source_caption and source_caption.strip():
+        caption_block = f"ORIGINAL POST CAPTION (unverified — may be irrelevant or spam, see instructions below):\n{source_caption.strip()}\n"
+
+    hashtags_block = ""
+    if source_hashtags:
+        hashtags_block = f"ORIGINAL POST HASHTAGS: {' '.join('#' + h.lstrip('#') for h in source_hashtags)}\n"
+
     # Combine all information
     combined_info = f"""
 INSTAGRAM POST: {instagram_url}
+
+{caption_block}
+{hashtags_block}
 
 {visual_summary}
 
@@ -115,7 +127,7 @@ INSTAGRAM POST: {instagram_url}
 """
     
     # Generate structured summary using LLM
-    prompt = f"""Based on the following analysis of an Instagram post, create a comprehensive structured summary.
+    prompt = f"""Based on the following analysis of an Instagram post, create a detailed structured summary that preserves every concrete, useful detail found below — not just a thematic overview.
 
 {combined_info}
 
@@ -125,11 +137,15 @@ Generate a report in this EXACT format:
 [Create a clear, descriptive title]
 
 📝 SUMMARY:
-[Comprehensive 3-5 sentence summary including:
+[A detailed summary — as long as it needs to be to capture the real content, not capped at a fixed sentence count. Include:
 - Main content/theme
-- Key information (locations, products, tips, itineraries, lists, tools, links, etc.)
+- Every specific, concrete detail found in the analysis above: exact ingredients/quantities, step-by-step instructions in order, specific locations/names/prices, tool/product names, numbers, measurements, links. Reproduce these specifics directly — do not paraphrase them away into vague generalities like "key ingredients" or "several steps."
+- If this is a tutorial, recipe, itinerary, or how-to, list out the actual steps/items found in the analysis above, in order, not just a description that steps exist.
 - Important highlights
-- Any actionable items or recommendations]
+- Any actionable items or recommendations
+Only include details that are actually present in the analysis above — do not invent or guess specifics that weren't captured by the visual/audio analysis. If the analysis above is thin (e.g. no clear speech was transcribed and no on-screen text was found), say so plainly rather than padding the summary with generic filler.
+
+The ORIGINAL POST CAPTION and HASHTAGS above (if present) come directly from the source platform, not from your own analysis — treat them as a potentially-useful hint, not a fact. Use judgment: if the caption genuinely describes or adds relevant detail about this specific content (e.g. it names ingredients, gives a location, explains context visible in the visual/audio analysis), incorporate that detail into the summary. If the caption looks unrelated to the actual visual/audio content — generic engagement bait, unrelated trivia, spam, or a caption that has nothing to do with what's actually shown — ignore it entirely and do not mention it or let it influence the summary, title, or tags.]
 
 🏷️ TAGS:
 [Generate 8-12 relevant hashtags/keywords]
@@ -140,7 +156,7 @@ Generate a report in this EXACT format:
 📂 CATEGORY:
 [Choose ONE from: product, places, food, software, book, tv shows, fitness, film, event]
 
-Be specific, concise, and actionable. Focus on useful information."""
+Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
 
     try:
         print("🤖 Generating comprehensive summary with AI...")
@@ -583,10 +599,23 @@ def main():
 
     print_header("🧠 SUPERBRAIN - Content Analyzer")
     
-    # Step 1: Get URL
+    # Step 1: Get URL (+ optional --caption / --hashtags passed by the API
+    # or the bulk importer, so source-provided context can inform the summary)
+    source_caption = ""
+    source_hashtags: list = []
     if len(sys.argv) > 1:
         instagram_url = sys.argv[1]
         print(f"📎 Link: {instagram_url}")
+        i = 2
+        while i < len(sys.argv):
+            if sys.argv[i] == "--caption" and i + 1 < len(sys.argv):
+                source_caption = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == "--hashtags" and i + 1 < len(sys.argv):
+                source_hashtags = [t for t in sys.argv[i + 1].split(",") if t]
+                i += 2
+            else:
+                i += 1
     else:
         instagram_url = input("📎 Enter URL (Instagram / YouTube / web page): ").strip()
 
@@ -818,7 +847,7 @@ def main():
     # Final comprehensive summary
     print_header("✅ GENERATING COMPREHENSIVE SUMMARY")
     
-    final_summary = generate_final_summary(results, instagram_url)
+    final_summary = generate_final_summary(results, instagram_url, source_caption, source_hashtags)
     
     print_section("📋 FINAL REPORT")
     print(final_summary)
@@ -924,8 +953,9 @@ def main():
         likes=likes,
         post_date=post_date,
         thumbnail=instagram_thumbnail,
+        source_hashtags=source_hashtags,
     )
-    
+
     print(f"✓ Analysis saved to database")
     
     # Step 8: Cleanup temp folder

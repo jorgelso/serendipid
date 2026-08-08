@@ -280,12 +280,16 @@ logger.info("✅ Background queue worker initialized")
 class AnalyzeRequest(BaseModel):
     url: str
     force: bool = False
+    caption: Optional[str] = None
+    hashtags: Optional[List[str]] = None
 
     class Config:
         json_schema_extra = {
             "example": {
                 "url": "https://www.instagram.com/p/DRWKk5JiL0h/",
-                "force": False
+                "force": False,
+                "caption": None,
+                "hashtags": None
             }
         }
 
@@ -542,8 +546,13 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
         logger.info(f"📊 [{shortcode}] Phase 1: Downloading content...")
 
         def _run_subprocess() -> tuple:
+            cmd = [sys.executable, "main.py", url_str]
+            if request.caption:
+                cmd += ["--caption", request.caption]
+            if request.hashtags:
+                cmd += ["--hashtags", ",".join(request.hashtags)]
             proc = subprocess.Popen(
-                [sys.executable, "main.py", url_str],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

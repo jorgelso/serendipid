@@ -119,14 +119,15 @@ def image_to_b64(image_path: str) -> str:
 #  Analyze
 # ─────────────────────────────────────────────────────────────────────────────
 
-VISION_PROMPT = """Analyze this image/video frame from an Instagram post. Provide:
-1. Main subject and what is happening
-2. Any visible text, captions, or overlays
-3. Setting / location clues
-4. Products, brands, or notable items visible
-5. Overall content theme
+VISION_PROMPT = """Analyze these image/video frames from an Instagram post in detail. Extract every concrete, useful detail visible — do not just describe the general theme.
 
-Be concise and factual."""
+1. Main subject and specific actions happening. If the frames show a sequence of steps (a tutorial, recipe, process, itinerary, etc.), describe each distinct step in order, not just the overall activity.
+2. ALL visible text, on-screen captions, numbers, measurements, quantities, prices, or overlays — transcribe them verbatim exactly as shown, not paraphrased.
+3. Specific items, ingredients, tools, products, brands, or locations visible — name each one individually rather than grouping them ("ingredients: flour, garlic, olive oil" not just "ingredients").
+4. Setting / location clues.
+5. Overall content theme.
+
+Be thorough and specific rather than concise. If this appears to be instructional content (tutorial, recipe, itinerary, how-to, review), prioritize capturing every distinct step and specific detail over a general summary. Only report what is actually visible — do not guess or invent details you cannot see in the frames."""
 
 
 def analyze(file_path: str) -> None:
