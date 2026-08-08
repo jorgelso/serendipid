@@ -75,4 +75,9 @@ anti-gravity*
 superbrain-cli/node_modules/
 superbrain-cli/payload/
 
+# ── Web app ──────────────────────────────────────────────────────────────────
+superbrain-web/node_modules/
+superbrain-web/.next/
+superbrain-web/.env*.local
+
 

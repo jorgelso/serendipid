@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+/*
+  Design direction: a naturalist's field guide / specimen index — this app's
+  whole job is noticing that separate saved reels (guitar, violin, piano...)
+  belong to the same family of interest, the way a field guide groups species
+  into a genus. Warm paper tones, a moss/rust/navy accent trio, a serif for
+  headings that has the character of old field-guide typography.
+*/
+
+:root {
+  --color-paper: #f5f1e6;
+  --color-paper-raised: #fbf8f0;
+  --color-ink: #211f1a;
+  --color-ink-muted: #6b6558;
+  --color-line: #ded4bc;
+  --color-moss: #3e5641;
+  --color-moss-soft: #e4eae0;
+  --color-rust: #a85a2a;
+  --color-rust-soft: #f0e1d2;
+  --color-navy: #2e3a52;
+  --color-danger: #8b3a3a;
+
+  /* Category accent set — fixed order, earthy family, cycled by category name. */
+  --cat-clay: #b5573a;
+  --cat-sage: #6b8e6a;
+  --cat-ochre: #b6892f;
+  --cat-plum: #7a5c7e;
+  --cat-teal: #3f7a72;
+  --cat-brick: #9c4a3f;
+  --cat-olive: #7a7a3f;
+  --cat-dust: #8a7a63;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-paper: #1a1812;
+    --color-paper-raised: #24211a;
+    --color-ink: #ede7d9;
+    --color-ink-muted: #a79e8a;
+    --color-line: #3a3629;
+    --color-moss: #86ab8c;
+    --color-moss-soft: #263028;
+    --color-rust: #d99b6c;
+    --color-rust-soft: #362a1f;
+    --color-navy: #93a6cc;
+    --color-danger: #d98787;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-paper: #1a1812;
+  --color-paper-raised: #24211a;
+  --color-ink: #ede7d9;
+  --color-ink-muted: #a79e8a;
+  --color-line: #3a3629;
+  --color-moss: #86ab8c;
+  --color-moss-soft: #263028;
+  --color-rust: #d99b6c;
+  --color-rust-soft: #362a1f;
+  --color-navy: #93a6cc;
+  --color-danger: #d98787;
+}
+
+@theme inline {
+  --color-paper: var(--color-paper);
+  --color-paper-raised: var(--color-paper-raised);
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-line: var(--color-line);
+  --color-moss: var(--color-moss);
+  --color-moss-soft: var(--color-moss-soft);
+  --color-rust: var(--color-rust);
+  --color-rust-soft: var(--color-rust-soft);
+  --color-navy: var(--color-navy);
+  --color-danger: var(--color-danger);
+
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-body: var(--font-work-sans), system-ui, sans-serif;
+  --font-label: var(--font-ibm-plex-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+::selection {
+  background: var(--color-moss-soft);
+  color: var(--color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
