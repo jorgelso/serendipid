@@ -48,11 +48,14 @@ export function sortPostsByRecency(posts: Post[]): Post[] {
 export function filterPosts(
   posts: Post[],
   collections: Collection[],
-  options: { category?: string; collectionId?: string }
+  options: { category?: string; language?: string; collectionId?: string }
 ): Post[] {
   let filtered = sortPostsByRecency(posts);
   if (options.category) {
-    filtered = filtered.filter((p) => p.category === options.category);
+    filtered = filtered.filter((p) => p.category.includes(options.category!));
+  }
+  if (options.language) {
+    filtered = filtered.filter((p) => p.language.includes(options.language!));
   }
   if (options.collectionId) {
     const collection = collections.find((c) => c.id === options.collectionId);
@@ -62,19 +65,46 @@ export function filterPosts(
   return filtered;
 }
 
+/** A post can carry 1-3 categories now — options are every distinct label
+ * seen across the library, not one-per-post. */
 export function categoryOptions(posts: Post[]): string[] {
   const set = new Set<string>();
   for (const post of posts) {
-    if (post.category) set.add(post.category);
+    for (const category of post.category) set.add(category);
   }
   return Array.from(set).sort();
 }
 
+/** A post can carry one or two languages — options are every distinct label
+ * seen across the library. */
+export function languageOptions(posts: Post[]): string[] {
+  const set = new Set<string>();
+  for (const post of posts) {
+    for (const language of post.language) set.add(language);
+  }
+  return Array.from(set).sort();
+}
+
+/** Each of a post's categories counts independently (a post with 2 labels
+ * contributes to 2 bars) — the natural reading for a multi-label taxonomy. */
 export function computeCategoryCounts(posts: Post[]): [string, number][] {
   const counts = new Map<string, number>();
   for (const post of posts) {
-    const key = post.category || "uncategorized";
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const labels = post.category.length > 0 ? post.category : ["uncategorized"];
+    for (const label of labels) {
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+}
+
+export function computeLanguageCounts(posts: Post[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const post of posts) {
+    const labels = post.language.length > 0 ? post.language : ["unknown"];
+    for (const label of labels) {
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
   }
   return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
 }
@@ -93,14 +123,18 @@ export function computeTagCounts(posts: Post[], limit = 20): [string, number][] 
 
 /** Groups shortcodes by category without materializing full post objects —
  * used for the initial page render so large fields (thumbnails) never load
- * until a category is actually expanded (see LazyPostList). */
+ * until a category is actually expanded (see LazyPostList). A post with
+ * multiple categories appears once under each — expected for a multi-label
+ * taxonomy, not a bug. */
 export function groupShortcodesByCategory(
-  posts: { shortcode: string; category: string | null }[]
+  posts: { shortcode: string; category: string[] }[]
 ): Record<string, string[]> {
   const groups: Record<string, string[]> = {};
   for (const post of posts) {
-    const key = post.category || "uncategorized";
-    (groups[key] ??= []).push(post.shortcode);
+    const labels = post.category.length > 0 ? post.category : ["uncategorized"];
+    for (const label of labels) {
+      (groups[label] ??= []).push(post.shortcode);
+    }
   }
   return groups;
 }
@@ -134,11 +168,14 @@ export function mergeSearchHitsWithPosts(
           tags: hit.tags,
           music: null,
           category: hit.category,
+          language: [],
           visual_analysis: null,
           audio_transcription: null,
           text_analysis: null,
           is_hidden: 0,
           source_hashtags: [],
+          analysis_version: 0,
+          needs_review: false,
         };
 
     return {

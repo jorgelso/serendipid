@@ -1,6 +1,7 @@
 import type { ClientPost } from "@/types/domain";
-import { CategoryBadge, TagChips } from "./Chips";
+import { CategoryBadge, CategoryBadges, LanguageBadges, TagChips } from "./Chips";
 import AnalysisDetails from "./AnalysisDetails";
+import ReviewActions from "./ReviewActions";
 
 interface PostCardProps {
   post: ClientPost & { similarity?: number };
@@ -25,9 +26,19 @@ export default function PostCard({ post }: PostCardProps) {
       )}
 
       <div className="p-4">
-        <h3 className="font-display font-semibold text-[15px] leading-snug">
-          {post.title || "Untitled reel"}
-        </h3>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="font-display font-semibold text-[15px] leading-snug">
+            {post.title || "Untitled reel"}
+          </h3>
+          {post.needs_review && (
+            <span
+              title="Categorized under the old system"
+              className="shrink-0 mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full bg-yellow-soft text-yellow-ink"
+            >
+              needs review
+            </span>
+          )}
+        </div>
 
         <a
           href={post.url}
@@ -37,6 +48,13 @@ export default function PostCard({ post }: PostCardProps) {
         >
           @{post.username}
         </a>
+
+        {(post.category.length > 1 || post.language.length > 0) && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {post.category.length > 1 && <CategoryBadges category={post.category} />}
+            <LanguageBadges language={post.language} />
+          </div>
+        )}
 
         {post.summary && (
           <p className="mt-2 text-[13px] leading-relaxed text-ink-muted line-clamp-3">
@@ -49,6 +67,8 @@ export default function PostCard({ post }: PostCardProps) {
         </div>
 
         <AnalysisDetails post={post} />
+
+        {post.needs_review && <ReviewActions shortcode={post.shortcode} url={post.url} />}
       </div>
     </article>
   );

@@ -16,15 +16,53 @@ export function colorFor(label: string): { bg: string; fg: string } {
   return PALETTE[Math.abs(hash) % PALETTE.length];
 }
 
-export function CategoryBadge({ category }: { category: string | null }) {
-  if (!category) return null;
+function CategoryPill({ category }: { category: string }) {
   const { bg, fg } = colorFor(category);
   return (
     <span
-      className="font-display text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full"
+      className="font-display text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full whitespace-nowrap"
       style={{ backgroundColor: bg, color: fg }}
     >
       {category}
+    </span>
+  );
+}
+
+/** Single pill for the thumbnail overlay — a post can carry up to 3
+ * categories, but the overlay only ever shows the primary (first) one to
+ * keep the image clean. See CategoryBadges for the full set. */
+export function CategoryBadge({ category }: { category: string[] }) {
+  if (!category || category.length === 0) return null;
+  return <CategoryPill category={category[0]} />;
+}
+
+/** Full set of a post's categories (1-3), for use in the card body rather
+ * than over the thumbnail. */
+export function CategoryBadges({ category }: { category: string[] }) {
+  if (!category || category.length === 0) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-1.5">
+      {category.map((c) => (
+        <CategoryPill key={c} category={c} />
+      ))}
+    </span>
+  );
+}
+
+/** Muted, neutral pills — deliberately not the vibrant category palette, so
+ * language reads as descriptive metadata rather than a primary classification. */
+export function LanguageBadges({ language }: { language: string[] }) {
+  if (!language || language.length === 0) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-1.5">
+      {language.map((lang) => (
+        <span
+          key={lang}
+          className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-surface-2 text-ink-muted"
+        >
+          🌐 {lang}
+        </span>
+      ))}
     </span>
   );
 }

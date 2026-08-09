@@ -17,13 +17,14 @@ export async function GET(request: NextRequest) {
   const offset = Math.max(0, Number(searchParams.get("offset") ?? 0) || 0);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(searchParams.get("limit") ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
   const category = searchParams.get("category") || undefined;
+  const language = searchParams.get("language") || undefined;
   const collectionId = searchParams.get("collection") || undefined;
 
   try {
     const config = getConfig();
     const { posts, collections } = await getExport();
 
-    const filtered = filterPosts(posts, collections, { category, collectionId });
+    const filtered = filterPosts(posts, collections, { category, language, collectionId });
     const total = filtered.length;
     const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p, config.apiUrl));
 

@@ -111,7 +111,7 @@ export function centroid(vectors: Float32Array[]): Float32Array {
 
 interface PostLike {
   tags: string[];
-  category: string | null;
+  category: string[];
 }
 
 // Boilerplate hashtags that show up on almost every Instagram reel regardless
@@ -168,8 +168,9 @@ export function labelFromPosts(posts: PostLike[]): { label: string; subLabels: s
 
   const categoryFreq = new Map<string, number>();
   for (const post of posts) {
-    if (!post.category) continue;
-    categoryFreq.set(post.category, (categoryFreq.get(post.category) ?? 0) + 1);
+    for (const category of post.category) {
+      categoryFreq.set(category, (categoryFreq.get(category) ?? 0) + 1);
+    }
   }
   if (categoryFreq.size > 0) {
     const [topCategory] = Array.from(categoryFreq.entries()).sort((a, b) => b[1] - a[1])[0];

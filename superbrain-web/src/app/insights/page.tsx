@@ -1,6 +1,11 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
 import { getExport, getThemes } from "@/lib/cache";
-import { computeCategoryCounts, computeTagCounts, groupShortcodesByCategory } from "@/lib/posts";
+import {
+  computeCategoryCounts,
+  computeLanguageCounts,
+  computeTagCounts,
+  groupShortcodesByCategory,
+} from "@/lib/posts";
 import type { Theme } from "@/types/domain";
 import StatBars from "@/components/StatBars";
 import ThemeAccordion from "@/components/ThemeAccordion";
@@ -8,7 +13,9 @@ import MoreSection from "@/components/MoreSection";
 
 interface InsightsData {
   totalPosts: number;
+  needsReviewCount: number;
   categoryCounts: [string, number][];
+  languageCounts: [string, number][];
   tagCounts: [string, number][];
   themes: Theme[];
   groupedShortcodesByCategory: Record<string, string[]>;
@@ -27,7 +34,9 @@ async function loadInsightsData(): Promise<InsightsData> {
 
   return {
     totalPosts: posts.length,
+    needsReviewCount: posts.filter((p) => p.needs_review).length,
     categoryCounts: computeCategoryCounts(posts),
+    languageCounts: computeLanguageCounts(posts),
     tagCounts: computeTagCounts(posts),
     themes,
     groupedShortcodesByCategory: groupShortcodesByCategory(unclusteredLite),
@@ -62,10 +71,27 @@ export default async function InsightsPage() {
 
       {data && (
         <div className="space-y-10">
+          {data.needsReviewCount > 0 && (
+            <section className="rounded-2xl border border-yellow-ink/30 bg-yellow-soft p-5">
+              <h2 className="font-display font-semibold text-lg text-yellow-ink mb-1">
+                {data.needsReviewCount} of {data.totalPosts} posts need review
+              </h2>
+              <p className="text-sm text-yellow-ink/80">
+                Categorized under an older version of the analysis pipeline. Open a post in Browse
+                or Search and use &ldquo;Re-run analysis&rdquo; or &ldquo;Keep as is&rdquo; on it.
+              </p>
+            </section>
+          )}
+
           <section className="rounded-2xl border border-line bg-surface p-5">
             <h2 className="font-display font-semibold text-lg mb-1">{data.totalPosts} saved posts</h2>
             <p className="text-xs text-ink-muted mb-4">by category</p>
             <StatBars entries={data.categoryCounts} />
+          </section>
+
+          <section className="rounded-2xl border border-line bg-surface p-5">
+            <h2 className="font-display font-semibold text-lg mb-4">By language</h2>
+            <StatBars entries={data.languageCounts} />
           </section>
 
           <section className="rounded-2xl border border-line bg-surface p-5">

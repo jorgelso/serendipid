@@ -10,27 +10,44 @@ export class SuperBrainApiError extends Error {
   }
 }
 
-async function request<T>(path: string, params?: Record<string, string | number>): Promise<T> {
+interface RequestOptions {
+  method?: string;
+  body?: unknown;
+  params?: Record<string, string | number>;
+  timeoutMs?: number;
+  // Per-call overrides for specific status codes, since the same code can
+  // mean different things on different endpoints (e.g. 503 means "no
+  // OPENAI_API_KEY" on /search/semantic but "analysis queue busy" on /analyze).
+  statusMessages?: Partial<Record<number, string>>;
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const config = getConfig();
   const url = new URL(`${config.apiUrl}${path}`);
-  for (const [key, value] of Object.entries(params ?? {})) {
+  for (const [key, value] of Object.entries(options.params ?? {})) {
     url.searchParams.set(key, String(value));
   }
+  const timeoutMs = options.timeoutMs ?? config.requestTimeoutMs;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
     res = await fetch(url.toString(), {
-      headers: { "X-API-Key": config.apiKey },
+      method: options.method ?? "GET",
+      headers: {
+        "X-API-Key": config.apiKey,
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
       cache: "no-store",
     });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new SuperBrainApiError(
-        `Request to ${url.toString()} timed out after ${config.requestTimeoutMs}ms.`
+        `Request to ${url.toString()} timed out after ${timeoutMs}ms.`
       );
     }
     throw new SuperBrainApiError(
@@ -46,6 +63,9 @@ async function request<T>(path: string, params?: Record<string, string | number>
       "Backend rejected the API key (401). Check SUPERBRAIN_API_KEY.",
       401
     );
+  }
+  if (options.statusMessages?.[res.status]) {
+    throw new SuperBrainApiError(options.statusMessages[res.status]!, res.status);
   }
   if (res.status === 503) {
     throw new SuperBrainApiError(
@@ -66,7 +86,7 @@ async function request<T>(path: string, params?: Record<string, string | number>
 }
 
 export async function fetchExport(limit = 50000, offset = 0): Promise<ExportPayload> {
-  return request<ExportPayload>("/export", { limit, offset, format: "json" });
+  return request<ExportPayload>("/export", { params: { limit, offset, format: "json" } });
 }
 
 export async function fetchSemanticSearch(
@@ -75,8 +95,45 @@ export async function fetchSemanticSearch(
   minSimilarity = 0
 ): Promise<SearchSemanticResponse> {
   return request<SearchSemanticResponse>("/search/semantic", {
-    q,
-    limit,
-    min_similarity: minSimilarity,
+    params: { q, limit, min_similarity: minSimilarity },
+  });
+}
+
+export interface ReanalyzeResponse {
+  success: boolean;
+  cached: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+  processing_time?: number;
+}
+
+// The full pipeline (video download, vision, transcription, music ID) runs
+// synchronously on the backend for a forced re-analysis — this can take
+// minutes, well past the default request timeout used everywhere else.
+const REANALYZE_TIMEOUT_MS = 5 * 60 * 1000;
+
+export async function reanalyzePost(url: string): Promise<ReanalyzeResponse> {
+  return request<ReanalyzeResponse>("/analyze", {
+    method: "POST",
+    body: { url, force: true },
+    timeoutMs: REANALYZE_TIMEOUT_MS,
+    statusMessages: {
+      409: "This post is already being analyzed — wait a moment and try again.",
+      503: "The backend is busy analyzing another post right now — try again shortly.",
+    },
+  });
+}
+
+export interface UpdatePostResponse {
+  success: boolean;
+  message: string;
+  shortcode: string;
+  updated_fields: string[];
+}
+
+export async function markReviewed(shortcode: string): Promise<UpdatePostResponse> {
+  return request<UpdatePostResponse>(`/post/${shortcode}`, {
+    method: "PUT",
+    body: { reviewed: true },
   });
 }

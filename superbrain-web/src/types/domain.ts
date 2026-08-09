@@ -15,12 +15,25 @@ export interface Post {
   summary: string | null;
   tags: string[];
   music: string | null;
-  category: string | null;
+  // A post can genuinely belong to 1-3 categories (backend/core/categories.py's
+  // ~20-label taxonomy) — stored as a JSON array server-side, same pattern as
+  // `tags`. Never a plain string anymore, even for single-category posts.
+  category: string[];
+  // Content language(s) actually spoken/shown on-screen (backend/core/languages.py)
+  // — a separate axis from category, same JSON-array storage pattern. Usually
+  // one entry, occasionally two for genuinely bilingual content.
+  language: string[];
   visual_analysis: string | null;
   audio_transcription: string | null;
   text_analysis: string | null;
   is_hidden: number;
   source_hashtags: string[];
+  // analysis_version / needs_review: added when the category taxonomy was
+  // overhauled (backend/core/database.py CURRENT_ANALYSIS_VERSION). A post
+  // whose analysis_version is behind the current pipeline version is flagged
+  // needs_review so the UI can surface it and offer to re-run or dismiss.
+  analysis_version: number;
+  needs_review: boolean;
   // Raw JSON-text TEXT column as /export returns it (1536-dim OpenAI vector).
   // Only ever parsed server-side for clustering — never sent to the client.
   embedding: string | null;
@@ -54,7 +67,7 @@ export interface SearchSemanticHit {
   title: string;
   summary: string;
   tags: string[];
-  category: string;
+  category: string[];
   thumbnail: string;
 }
 
