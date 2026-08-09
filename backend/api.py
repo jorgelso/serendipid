@@ -1,6 +1,6 @@
 """
 SuperBrain Instagram Content Analysis API
-Version: 1.02
+Version: 1.03
 FastAPI REST endpoints for analyzing Instagram content with MongoDB caching
 With request queuing, live progress logging, and API key authentication
 """
@@ -92,7 +92,7 @@ async def verify_token(request: Request, x_api_key: str = Header(None, descripti
 app = FastAPI(
     title="SuperBrain",
     description="AI-powered Instagram content analysis with caching",
-    version="1.02"
+    version="1.03"
 )
 
 # CORS configuration
@@ -341,7 +341,7 @@ async def root():
         "backendId": backend_id,
 
         "name": "SuperBrain Instagram Analyzer API",
-        "version": "1.02",
+        "version": "1.03",
         "status": "operational",
         "authentication": "Required - Use Access Token with X-API-Key header",
         "message": "Run start.py on the server and use the token from token.txt.",

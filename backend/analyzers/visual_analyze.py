@@ -58,6 +58,18 @@ def _get_duration_s(video_path: str) -> int:
         return 60
 
 
+def _frame_count_for_duration(duration_s: float, seconds_per_frame: float = 8.0,
+                               floor_frames: int = 4, ceiling_frames: int = 13) -> int:
+    """Scale sampled frame count with video length (~1 frame per
+    seconds_per_frame) instead of always sending a fixed 4 — a 90s reel
+    sampled only 4 times misses most of it. Clamped to [floor_frames,
+    ceiling_frames] so short clips stay as cheap as before and long ones
+    don't blow up vision-model cost/latency without bound.
+    """
+    frames = round(duration_s / seconds_per_frame)
+    return max(floor_frames, min(ceiling_frames, frames))
+
+
 def _frames_ffmpeg(video_path: str, max_frames: int = 4) -> List[str]:
     """Fallback frame extraction via ffmpeg."""
     import subprocess, tempfile, os
@@ -158,8 +170,10 @@ def analyze(file_path: str) -> None:
     images_b64: List[str] = []
 
     if suffix in (".mp4", ".avi", ".mov", ".mkv"):
-        print("🎥 Extracting video frames...")
-        images_b64 = extract_frames(str(path), max_frames=4)
+        duration = _get_duration_s(str(path))
+        max_frames = _frame_count_for_duration(duration)
+        print(f"🎥 Extracting video frames... (~{duration}s → {max_frames} frame(s))")
+        images_b64 = extract_frames(str(path), max_frames=max_frames)
         if not images_b64:
             print("❌ Could not extract any frames from video")
             return

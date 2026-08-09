@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI Performance**: Resolved 15-20s navigation freezes when navigating to Settings or Library screens by returning cached data instantly and pushing blocking calls to the background.
 - **UI Fix**: Fixed a visual bug where the 'Analyzing...' placeholder cards on the Home Screen were erroneously deleted from the feed after using the Share Intent.
 - **Visual Polish**: Converted remaining text emojis (brain, heart) in app screens to native Ionicons.
+- **Backend**: Fixed a bug where analyzing a post immediately (server idle) never actually recorded it as "processing" in the database, which could let two analyses run concurrently despite the one-at-a-time queue design, and made `GET /analysis-status/{shortcode}` incorrectly report a post as "not found" for the entire duration of its analysis.
+- **Backend**: A post's client-supplied caption/hashtag hint is no longer dropped when the request has to wait in the queue behind a busy backend — it's now carried through and forwarded once the queued item is picked up.
+- **Backend**: Downloaded media is no longer left orphaned in `temp/` if the analysis pipeline fails partway through (after download, before the result is saved) — it's now relocated to permanent storage even on failure.
+- **Backend**: A failed database write at the end of analysis is no longer silently reported as a successful save.
+- **Backend**: Visual analysis now samples a number of video frames scaled to the clip's length (~1 frame per 8s, 4-13 frames) instead of always exactly 4 regardless of duration, giving longer reels meaningfully better coverage.
 
 ## [Unreleased]
 
