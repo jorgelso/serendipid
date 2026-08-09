@@ -141,3 +141,20 @@ export async function markReviewed(shortcode: string): Promise<UpdatePostRespons
     body: { reviewed: true },
   });
 }
+
+export interface PostEdits {
+  title?: string;
+  summary?: string;
+  category?: string[];
+  language?: string[];
+}
+
+// The backend's PUT /post/{shortcode} does not validate category/language
+// against any canonical list — it accepts any strings, JSON-encodes them,
+// and overwrites the column. No enum enforcement to mirror here.
+export async function updatePost(shortcode: string, edits: PostEdits): Promise<UpdatePostResponse> {
+  return request<UpdatePostResponse>(`/post/${shortcode}`, {
+    method: "PUT",
+    body: edits,
+  });
+}

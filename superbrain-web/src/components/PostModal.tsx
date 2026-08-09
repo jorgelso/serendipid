@@ -4,8 +4,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { ClientPost } from "@/types/domain";
-import { CategoryBadges, LanguageBadges } from "./Chips";
-import MediaViewer from "./MediaViewer";
+import PostDetail from "./PostDetail";
 
 interface PostModalProps {
   post: ClientPost;
@@ -44,37 +43,17 @@ export default function PostModal({ post, onClose }: PostModalProps) {
         className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-surface p-5"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <h2 className="font-display font-semibold text-lg leading-snug">
-            {post.title || "Untitled reel"}
-          </h2>
+        <div className="flex justify-end">
           <button
             onClick={onClose}
             aria-label="Close"
-            className="shrink-0 rounded-full w-8 h-8 flex items-center justify-center hover:bg-surface-2 text-lg"
+            className="shrink-0 -mt-2 -mr-2 rounded-full w-8 h-8 flex items-center justify-center hover:bg-surface-2 text-lg"
           >
             ×
           </button>
         </div>
 
-        <MediaViewer post={post} />
-
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <a
-            href={post.url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-ink-muted hover:text-coral-ink transition-colors"
-          >
-            @{post.username}
-          </a>
-          <CategoryBadges category={post.category} />
-          <LanguageBadges language={post.language} />
-        </div>
-
-        {post.summary && (
-          <p className="mt-3 text-sm leading-relaxed text-ink-muted">{post.summary}</p>
-        )}
+        <PostDetail initialPost={post} />
 
         <div className="mt-5">
           <Link

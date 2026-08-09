@@ -5,12 +5,9 @@ import { getExport } from "@/lib/cache";
 import { toDisplayPost } from "@/lib/posts";
 import { findRelatedPosts } from "@/lib/clustering";
 import type { ClientPost } from "@/types/domain";
-import MediaViewer from "@/components/MediaViewer";
-import AnalysisDetails from "@/components/AnalysisDetails";
-import ReviewActions from "@/components/ReviewActions";
+import PostDetail from "@/components/PostDetail";
 import PostCard from "@/components/PostCard";
 import MasonryGrid from "@/components/MasonryGrid";
-import { CategoryBadges, LanguageBadges } from "@/components/Chips";
 
 interface PageData {
   post: ClientPost;
@@ -62,34 +59,7 @@ export default async function PostPage(props: PageProps<"/post/[shortcode]">) {
 
       {data && (
         <>
-          <h1 className="font-display font-semibold text-2xl mb-4">
-            {data.post.title || "Untitled reel"}
-          </h1>
-
-          <MediaViewer post={data.post} />
-
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <a
-              href={data.post.url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sm text-ink-muted hover:text-coral-ink transition-colors"
-            >
-              @{data.post.username}
-            </a>
-            <CategoryBadges category={data.post.category} />
-            <LanguageBadges language={data.post.language} />
-          </div>
-
-          {data.post.summary && (
-            <p className="mt-3 text-sm leading-relaxed text-ink-muted">{data.post.summary}</p>
-          )}
-
-          <AnalysisDetails post={data.post} />
-
-          {data.post.needs_review && (
-            <ReviewActions shortcode={data.post.shortcode} url={data.post.url} />
-          )}
+          <PostDetail initialPost={data.post} showFullDetails />
 
           {data.related.length > 0 && (
             <section className="mt-10">
