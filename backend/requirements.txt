@@ -25,6 +25,8 @@ htmldate>=1.9.0
 
 # ── Music Identification ──────────────────────────────────────────────────────
 shazamio>=0.4.0
+# audioop was removed from the stdlib in Python 3.13; pydub (a shazamio dep) still imports it.
+audioop-lts>=0.2.1; python_version >= "3.13"
 
 # ── Instagram Download ────────────────────────────────────────────────────────
 instaloader>=4.11.0

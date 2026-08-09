@@ -27,6 +27,8 @@ from urllib.parse import urlparse, urljoin
 # Ensure backend root is in sys.path (needed when run as a subprocess)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.categories import CATEGORY_PROMPT
+from core.languages import LANGUAGE_PROMPT
 
 # ---------------------------------------------------------------------------
 #  Prompt template
@@ -58,7 +60,10 @@ any products/places/tools mentioned, and the overall purpose of the page]
 [N/A — web page]
 
 📂 CATEGORY:
-[Choose exactly ONE from: product, places, food, software, book, tv shows, fitness, film, event, other]
+{category_prompt}
+
+🌐 LANGUAGE:
+{language_prompt}
 
 Be specific and factual. Extract real names, numbers, and details from the content."""
 
@@ -758,6 +763,8 @@ def analyze_webpage(url: str) -> dict:
         url=url,
         page_title=page_title or "Unknown",
         content=content[:8000],
+        category_prompt=CATEGORY_PROMPT,
+        language_prompt=LANGUAGE_PROMPT,
     )
 
     print("  🤖 Analyzing page content with AI...")

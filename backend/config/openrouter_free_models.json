@@ -1,5 +1,5 @@
 {
-  "cached_at": "2026-08-08T17:58:33.104660",
+  "cached_at": "2026-08-09T01:01:49.199419",
   "models": [
     {
       "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -68,7 +68,7 @@
             "arena": "models",
             "category": "asciiart",
             "elo": 1113,
-            "win_rate": 37.1,
+            "win_rate": 36.6,
             "rank": 51
           },
           {
@@ -82,29 +82,29 @@
             "arena": "models",
             "category": "dataviz",
             "elo": 1150,
-            "win_rate": 37.5,
+            "win_rate": 37.4,
             "rank": 73
           },
           {
             "arena": "models",
             "category": "gamedev",
-            "elo": 1167,
-            "win_rate": 38.5,
+            "elo": 1168,
+            "win_rate": 38.3,
             "rank": 64
           },
           {
             "arena": "models",
             "category": "svg",
-            "elo": 1125,
+            "elo": 1126,
             "win_rate": 37.6,
             "rank": 50
           },
           {
             "arena": "models",
             "category": "uicomponent",
-            "elo": 1175,
-            "win_rate": 38.8,
-            "rank": 61
+            "elo": 1173,
+            "win_rate": 38.6,
+            "rank": 62
           },
           {
             "arena": "models",
@@ -1108,7 +1108,7 @@
           {
             "arena": "models",
             "category": "dataviz",
-            "elo": 959,
+            "elo": 960,
             "win_rate": 39.7,
             "rank": 103
           },

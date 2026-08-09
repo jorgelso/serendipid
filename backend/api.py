@@ -137,8 +137,17 @@ _STATIC_DIR = Path(__file__).parent / "static"
 _THUMBNAILS_DIR = _STATIC_DIR / "thumbnails"
 _THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
 
+from core.media_store import MEDIA_DIR
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
 from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+# Permanently-relocated post media (video/audio/thumbnail) — see
+# core/media_store.py. Same unauthenticated-static-file pattern as /static
+# above; not gated by the API token like the JSON endpoints are. Fine for a
+# server bound to localhost, but worth knowing if this ever gets tunneled
+# (e.g. ngrok) somewhere reachable by more than just you.
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -486,7 +495,8 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
                 'summary': cached_result.get('summary', ''),
                 'tags': cached_result.get('tags', []),
                 'music': cached_result.get('music', ''),
-                'category': cached_result.get('category', '')
+                'category': cached_result.get('category', ''),
+                'needs_review': cached_result.get('needs_review', False)
             }
             
             processing_time = (datetime.now() - start_time).total_seconds()
@@ -664,7 +674,8 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
             'summary': analysis.get('summary', ''),
             'tags': analysis.get('tags', []),
             'music': analysis.get('music', ''),
-            'category': analysis.get('category', '')
+            'category': analysis.get('category', ''),
+            'needs_review': analysis.get('needs_review', False)
         }
         
         processing_time = (datetime.now() - start_time).total_seconds()
@@ -721,7 +732,8 @@ async def check_cache(shortcode: str, token: str = Depends(verify_token)):
             'summary': result.get('summary', ''),
             'tags': result.get('tags', []),
             'music': result.get('music', ''),
-            'category': result.get('category', '')
+            'category': result.get('category', ''),
+            'needs_review': result.get('needs_review', False)
         }
         
         return {
@@ -871,6 +883,29 @@ async def get_all_categories(token: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/changelog")
+async def get_changelog(token: str = Depends(verify_token)):
+    """
+    Get the analysis pipeline/taxonomy changelog (newest version first),
+    e.g. when categories were added or the pipeline changed in a way that
+    makes older posts worth re-reviewing. See CURRENT_ANALYSIS_VERSION in
+    core/database.py.
+    - Requires API authentication
+    """
+    try:
+        db = get_db()
+        history = db.get_changelog()
+
+        return {
+            "success": True,
+            "current_version": history[0]['version'] if history else None,
+            "history": history
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/category/{category}")
 async def get_by_category(
     category: str,
@@ -879,9 +914,8 @@ async def get_by_category(
 ):
     """
     Get analyses by category
-    
-    Categories: product, places, food, fashion, fitness, education, 
-                entertainment, pets, other
+
+    See GET /categories for the current list of valid category labels.
     - Requires API authentication
     """
     try:
@@ -1125,7 +1159,8 @@ class CollectionPostsRequest(BaseModel):
 ALLOWED_POST_FIELDS = {
     'shortcode', 'url', 'username', 'content_type', 'post_date',
     'likes', 'thumbnail', 'title', 'summary', 'tags', 'music', 'category',
-    'visual_analysis', 'audio_transcription', 'text_analysis'
+    'visual_analysis', 'audio_transcription', 'text_analysis', 'analysis_version',
+    'language', 'media_files'
 }
 
 class ImportData(BaseModel):
@@ -1286,12 +1321,15 @@ async def delete_post(shortcode: str, token: str = Depends(verify_token)):
 
 @app.put("/post/{shortcode}")
 async def update_post(shortcode: str, updates: dict, token: str = Depends(verify_token)):
-    """Update a post's category, title, or summary"""
+    """Update a post's category, title, summary, or mark it as reviewed"""
     try:
         db = get_db()
-        
-        # Only allow specific fields to be updated
-        allowed_fields = {'category', 'title', 'summary'}
+
+        # Only allow specific fields to be updated.
+        # 'reviewed': true clears the needs_review flag (see db.update_post)
+        # without re-running analysis — used when a post from before a
+        # pipeline change turns out to already be good enough.
+        allowed_fields = {'category', 'language', 'title', 'summary', 'reviewed'}
         filtered_updates = {k: v for k, v in updates.items() if k in allowed_fields}
         
         if not filtered_updates:
@@ -1691,6 +1729,8 @@ async def _process_import_data(data: dict, mode: str):
                 tags=filtered_post.get("tags", []),
                 music=filtered_post.get("music", ""),
                 category=filtered_post.get("category", "other"),
+                language=filtered_post.get("language", ""),
+                media_files=filtered_post.get("media_files", []),
                 visual_analysis=filtered_post.get("visual_analysis", ""),
                 audio_transcription=filtered_post.get("audio_transcription", ""),
                 text_analysis=filtered_post.get("text_analysis", ""),
@@ -1698,6 +1738,10 @@ async def _process_import_data(data: dict, mode: str):
                 post_date=filtered_post.get("post_date"),
                 content_type=filtered_post.get("content_type", "instagram"),
                 thumbnail=filtered_post.get("thumbnail", ""),
+                # Preserve the imported post's own version rather than
+                # stamping it current — a restored backup wasn't actually
+                # re-run through today's pipeline.
+                analysis_version=filtered_post.get("analysis_version", 0),
             )
             imported_posts += 1
 

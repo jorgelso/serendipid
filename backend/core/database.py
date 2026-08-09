@@ -14,6 +14,30 @@ from datetime import datetime
 # Database file path can be overridden for Docker deployments
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.parent / 'superbrain.db')))
 
+# Bump this whenever a change to the analysis pipeline is significant enough
+# that previously-saved posts are worth a human re-look (e.g. a prompt
+# rewrite, a taxonomy overhaul). Every post saved by the pipeline is stamped
+# with the version current at save time; any post whose stamped version is
+# behind this constant is flagged 'needs_review' so the frontend can surface
+# it as a review queue — without forcing a costly automatic re-analysis.
+#   1 — 2026-08-08: category taxonomy overhaul (multi-label, ~20 categories
+#       replacing the old rigid 9-category forced single-choice).
+#   2 — 2026-08-08: added content language detection (English/German/Italian/
+#       Spanish/other/no dialogue), derived from audio transcription + on-screen
+#       text — explicitly not from the post caption, which is unreliable.
+#   3 — 2026-08-08: post media (video/audio/thumbnail) is now relocated to
+#       permanent storage under media/<shortcode>/ instead of being left in
+#       temp/. Posts stamped below this version have no media_files recorded
+#       — their original download still sits in temp/ (or is gone) and needs
+#       a migration pass before a "watch original video" screen can use them.
+#   4 — 2026-08-09: added 4 categories for conspiracy/surveillance and
+#       lifestyle/health content the taxonomy didn't cover: "surveillance,
+#       psyops & government conspiracy", "lifestyle & clean living",
+#       "ai ethics & tech skepticism", "environment & sustainability".
+# This history is also kept queryable in the analysis_changelog table (see
+# _seed_changelog() below) rather than only living as a comment.
+CURRENT_ANALYSIS_VERSION = 4
+
 
 class Database:
     """SQLite database manager with caching functionality"""
@@ -148,6 +172,33 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: add analysis_version — see CURRENT_ANALYSIS_VERSION above.
+        # Existing rows default to 0, so they're automatically flagged
+        # 'needs_review' relative to any versioned pipeline change.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN analysis_version INTEGER DEFAULT 0")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: add language — JSON array of content language(s), same
+        # storage pattern as category. See core/languages.py.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN language TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: add media_files — JSON array of filenames permanently
+        # stored under media/<shortcode>/ (video, extracted audio, thumbnail,
+        # or numbered carousel items). See core/media_store.py. Empty for
+        # posts with no locally-downloaded media (YouTube, web pages).
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN media_files TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Collections table
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
@@ -191,6 +242,71 @@ class Database:
         """)
         self._conn.commit()
 
+        # Analysis changelog — queryable "what's new" history for the
+        # analysis pipeline/taxonomy, keyed by ANALYSIS_VERSION. Mirrors the
+        # comment block above CURRENT_ANALYSIS_VERSION so the history can be
+        # served over the API instead of only living in source comments.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS analysis_changelog (
+                version      INTEGER PRIMARY KEY,
+                released_at  TEXT,
+                title        TEXT,
+                description  TEXT
+            );
+        """)
+        self._conn.commit()
+        self._seed_changelog()
+
+    def _seed_changelog(self):
+        """Seed analysis_changelog with the known version history. Uses
+        INSERT OR IGNORE so re-running on an existing DB is a no-op, and new
+        versions can just be appended here going forward."""
+        entries = [
+            (0, None, "Original single-choice taxonomy",
+             "Baseline pipeline, predating the analysis_version column itself "
+             "(existing rows default to this version). Category was a single "
+             "plain-string value, auto-picked by keyword-count scoring from a "
+             "fixed 10-item set: product, places, software, book, tv shows, "
+             "fitness, film, event, food, other. No language detection; no "
+             "permanent media storage (downloads stayed in temp/)."),
+            (1, "2026-08-08", "Multi-label category taxonomy overhaul",
+             "Replaced the old rigid 9-category forced single-choice system "
+             "with a multi-label taxonomy of ~20 categories — a post can now "
+             "genuinely belong to more than one category."),
+            (2, "2026-08-08", "Content language detection",
+             "Added content language detection (English/German/Italian/"
+             "Spanish/other/no dialogue), derived from audio transcription + "
+             "on-screen text — explicitly not from the post caption, which is "
+             "unreliable."),
+            (3, "2026-08-08", "Permanent media storage",
+             "Post media (video/audio/thumbnail) is now relocated to permanent "
+             "storage under media/<shortcode>/ instead of being left in temp/. "
+             "Posts stamped below this version have no media_files recorded — "
+             "their original download still sits in temp/ (or is gone) and "
+             "needs a migration pass before a \"watch original video\" screen "
+             "can use them."),
+            (4, "2026-08-09", "Conspiracy/surveillance and lifestyle categories",
+             "Added 4 categories for content the taxonomy didn't cover: "
+             "\"surveillance, psyops & government conspiracy\", \"lifestyle & "
+             "clean living\", \"ai ethics & tech skepticism\", \"environment & "
+             "sustainability\"."),
+        ]
+        for version, released_at, title, description in entries:
+            try:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO analysis_changelog (version, released_at, title, description) VALUES (?, ?, ?, ?)",
+                    (version, released_at, title, description)
+                )
+            except sqlite3.OperationalError:
+                pass
+        self._conn.commit()
+
+    def get_changelog(self) -> list:
+        """Return the analysis pipeline/taxonomy changelog, newest version first."""
+        cur = self._conn.cursor()
+        cur.execute("SELECT version, released_at, title, description FROM analysis_changelog ORDER BY version DESC")
+        return [dict(row) for row in cur.fetchall()]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -198,7 +314,8 @@ class Database:
     # Columns safe to send to the mobile app (excludes heavy analysis blobs)
     LIGHT_COLUMNS = (
         "shortcode, url, username, content_type, analyzed_at, updated_at, "
-        "post_date, likes, thumbnail, title, summary, tags, music, category, is_hidden"
+        "post_date, likes, thumbnail, title, summary, tags, music, category, "
+        "language, is_hidden, analysis_version, media_files"
     )
 
     def _row_to_dict(self, row):
@@ -219,6 +336,36 @@ class Database:
                 d['source_hashtags'] = []
         else:
             d['source_hashtags'] = []
+        if d.get('category'):
+            try:
+                parsed_cat = json.loads(d['category'])
+                d['category'] = parsed_cat if isinstance(parsed_cat, list) else [str(parsed_cat)]
+            except Exception:
+                # Legacy rows: category was stored as a plain string before
+                # multi-category support — treat it as a single-item list.
+                d['category'] = [d['category']]
+        else:
+            d['category'] = []
+        if d.get('language'):
+            try:
+                parsed_lang = json.loads(d['language'])
+                d['language'] = parsed_lang if isinstance(parsed_lang, list) else [str(parsed_lang)]
+            except Exception:
+                d['language'] = [d['language']]
+        else:
+            d['language'] = []
+        if d.get('media_files'):
+            try:
+                parsed_media = json.loads(d['media_files'])
+                d['media_files'] = parsed_media if isinstance(parsed_media, list) else [str(parsed_media)]
+            except Exception:
+                d['media_files'] = []
+        else:
+            d['media_files'] = []
+        _sc = d.get('shortcode', '')
+        d['media_urls'] = [f"/media/{_sc}/{f}" for f in d['media_files']] if _sc else []
+        d['analysis_version'] = d.get('analysis_version') or 0
+        d['needs_review'] = d['analysis_version'] < CURRENT_ANALYSIS_VERSION
         return d
     
     # ------------------------------------------------------------------
@@ -247,7 +394,8 @@ class Database:
     def save_analysis(self, shortcode, url, username, title, summary, tags, music, category,
                       visual_analysis="", audio_transcription="", text_analysis="",
                       likes=0, post_date=None, content_type="instagram", thumbnail="",
-                      source_hashtags=None, embedding=None):
+                      source_hashtags=None, embedding=None, analysis_version=None,
+                      language=None, media_files=None):
         """Insert or update an analysis record. Returns True on success.
 
         source_hashtags: original hashtags from the source platform (e.g. an
@@ -256,6 +404,20 @@ class Database:
 
         embedding: list of floats (OpenAI text-embedding-3-small output) or
         None if embedding generation wasn't available/failed for this post.
+
+        analysis_version: defaults to CURRENT_ANALYSIS_VERSION — pass this
+        default when the pipeline just produced this result. Bulk-import /
+        restore callers should pass through the original stamped version (or
+        0 if unknown) instead, so restoring an old backup doesn't silently
+        mark posts as reviewed under the current pipeline.
+
+        language: content language(s), e.g. ["german"] — see core/languages.py.
+        Same list-or-comma-string acceptance as category.
+
+        media_files: filenames now sitting under media/<shortcode>/ (from
+        core.media_store.relocate_to_media_store), e.g. ["video.mp4",
+        "audio.mp3", "thumbnail.jpg"]. Empty/None for posts with no locally
+        downloaded media (YouTube, web pages).
         """
         if not self.is_connected():
             print("[WARNING] Database not connected. Analysis not saved.")
@@ -269,13 +431,49 @@ class Database:
                 else (source_hashtags.split() if source_hashtags else [])
             )
             embedding_json = json.dumps(embedding) if embedding else ""
+            version = CURRENT_ANALYSIS_VERSION if analysis_version is None else analysis_version
+
+            # category: a post can belong to more than one. Accept a list
+            # (current pipeline) or a comma-separated/plain string (legacy
+            # callers, bulk import) and store as a JSON array either way.
+            if isinstance(category, list):
+                category_list = [c.strip() for c in category if c and str(c).strip()]
+            elif category:
+                category_list = [c.strip() for c in str(category).split(',') if c.strip()]
+            else:
+                category_list = []
+            category_json = json.dumps(category_list)
+
+            # language: same shape as category — accept a list or a
+            # comma-separated/plain string, store as a JSON array.
+            if isinstance(language, list):
+                language_list = [l.strip() for l in language if l and str(l).strip()]
+            elif language:
+                language_list = [l.strip() for l in str(language).split(',') if l.strip()]
+            else:
+                language_list = []
+            language_json = json.dumps(language_list)
+
+            # media_files: filenames relocated under media/<shortcode>/. Same
+            # list-or-comma-string acceptance; empty/absent on this call
+            # doesn't wipe out media a previous save already recorded (same
+            # protective pattern as embedding below) — a metadata-only re-save
+            # shouldn't look like the media disappeared.
+            if isinstance(media_files, list):
+                media_files_list = [m.strip() for m in media_files if m and str(m).strip()]
+            elif media_files:
+                media_files_list = [m.strip() for m in str(media_files).split(',') if m.strip()]
+            else:
+                media_files_list = []
+            media_files_json = json.dumps(media_files_list)
 
             self._conn.execute("""
                 INSERT INTO analyses
                     (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
                      thumbnail, title, summary, tags, music, category,
-                     visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
+                     analysis_version, language, media_files)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
                     url                 = excluded.url,
                     username            = excluded.username,
@@ -293,10 +491,14 @@ class Database:
                     audio_transcription = excluded.audio_transcription,
                     text_analysis       = excluded.text_analysis,
                     source_hashtags     = excluded.source_hashtags,
-                    embedding           = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END
+                    embedding           = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END,
+                    analysis_version    = excluded.analysis_version,
+                    language            = excluded.language,
+                    media_files         = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END
             """, (shortcode, url, username, content_type, now, now, post_date, likes,
-                  thumbnail, title, summary, tags_json, music, category,
-                  visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json))
+                  thumbnail, title, summary, tags_json, music, category_json,
+                  visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
+                  version, language_json, media_files_json))
             self._conn.commit()
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True
@@ -443,14 +645,18 @@ class Database:
             return 0
 
     def get_by_category(self, category, limit=20):
-        """Return all analyses for a given category (excludes soft-deleted)."""
+        """Return all analyses tagged with the given category (a post can have
+        more than one). Matches new JSON-array rows via substring containment
+        and old plain-string rows via exact match. Excludes soft-deleted."""
         if not self.is_connected():
             return []
         try:
             cur = self._conn.cursor()
+            like_pattern = f'%"{category}"%'
             cur.execute(
-                "SELECT * FROM analyses WHERE category = ? AND (is_hidden IS NULL OR is_hidden = 0) ORDER BY analyzed_at DESC LIMIT ?",
-                (category, limit)
+                "SELECT * FROM analyses WHERE (category = ? OR category LIKE ?) "
+                "AND (is_hidden IS NULL OR is_hidden = 0) ORDER BY analyzed_at DESC LIMIT ?",
+                (category, like_pattern, limit)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
         except Exception as e:
@@ -503,11 +709,28 @@ class Database:
             cur.execute("SELECT COUNT(*) FROM collections")
             total_collections = cur.fetchone()[0]
 
+            # category is stored as a JSON array (or a legacy plain string) —
+            # tally each label a post carries rather than grouping on the raw
+            # column value, since one post can now have multiple categories.
             cur.execute(
-                "SELECT COALESCE(category,'Uncategorized') as cat, COUNT(*) as cnt "
-                "FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0) GROUP BY cat"
+                "SELECT category FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0)"
             )
-            category_counts = {r["cat"]: r["cnt"] for r in cur.fetchall()}
+            category_counts = {}
+            for r in cur.fetchall():
+                raw_cat = r["category"]
+                if not raw_cat:
+                    category_counts["Uncategorized"] = category_counts.get("Uncategorized", 0) + 1
+                    continue
+                try:
+                    labels = json.loads(raw_cat)
+                    if not isinstance(labels, list):
+                        labels = [str(labels)]
+                except Exception:
+                    labels = [raw_cat]
+                if not labels:
+                    category_counts["Uncategorized"] = category_counts.get("Uncategorized", 0) + 1
+                for label in labels:
+                    category_counts[label] = category_counts.get(label, 0) + 1
 
             storage_bytes = self.db_path.stat().st_size if self.db_path.exists() else 0
             storage_mb = round(storage_bytes / (1024 * 1024), 2)
@@ -869,7 +1092,14 @@ class Database:
 
         Args:
             shortcode: Instagram post shortcode
-            updates: dict of allowed fields (category, title, summary)
+            updates: dict of allowed fields (category, language, media_files, title, summary, reviewed)
+
+            'reviewed': True is a write-only shorthand — it doesn't map to a
+            real column. It means "I looked at this post and the existing
+            analysis is good enough, don't flag it again" without re-running
+            the (costly) analysis pipeline. It's translated into stamping
+            analysis_version = CURRENT_ANALYSIS_VERSION, which is exactly
+            what a real re-analysis would have stamped anyway.
 
         Returns:
             bool: True if updated
@@ -877,6 +1107,32 @@ class Database:
         if not self.is_connected():
             return False
         try:
+            if updates.pop("reviewed", False):
+                updates["analysis_version"] = CURRENT_ANALYSIS_VERSION
+            if "category" in updates:
+                cat = updates["category"]
+                if isinstance(cat, list):
+                    updates["category"] = json.dumps([c.strip() for c in cat if c and str(c).strip()])
+                elif cat:
+                    updates["category"] = json.dumps([c.strip() for c in str(cat).split(',') if c.strip()])
+                else:
+                    updates["category"] = json.dumps([])
+            if "language" in updates:
+                lang = updates["language"]
+                if isinstance(lang, list):
+                    updates["language"] = json.dumps([l.strip() for l in lang if l and str(l).strip()])
+                elif lang:
+                    updates["language"] = json.dumps([l.strip() for l in str(lang).split(',') if l.strip()])
+                else:
+                    updates["language"] = json.dumps([])
+            if "media_files" in updates:
+                mf = updates["media_files"]
+                if isinstance(mf, list):
+                    updates["media_files"] = json.dumps([m.strip() for m in mf if m and str(m).strip()])
+                elif mf:
+                    updates["media_files"] = json.dumps([m.strip() for m in str(mf).split(',') if m.strip()])
+                else:
+                    updates["media_files"] = json.dumps([])
             updates["updated_at"] = datetime.utcnow().isoformat()
             set_clause = ", ".join(f"{k} = ?" for k in updates)
             values = list(updates.values()) + [shortcode]

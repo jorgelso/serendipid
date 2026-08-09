@@ -11,13 +11,15 @@ from pathlib import Path
 import subprocess
 import json
 import re
-import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
 # Import local modules
 from core.link_checker import validate_link
 from core.database import get_db
+from core.categories import CATEGORY_PROMPT, parse_categories, keyword_fallback_categories
+from core.languages import LANGUAGE_PROMPT, parse_languages
+from core.media_store import relocate_to_media_store
 from analyzers.youtube_analyzer import analyze_youtube
 from analyzers.webpage_analyzer import analyze_webpage
 
@@ -144,6 +146,7 @@ Generate a report in this EXACT format:
 - Important highlights
 - Any actionable items or recommendations
 Only include details that are actually present in the analysis above — do not invent or guess specifics that weren't captured by the visual/audio analysis. If the analysis above is thin (e.g. no clear speech was transcribed and no on-screen text was found), say so plainly rather than padding the summary with generic filler.
+Do not mention the absence of structural elements that were never expected in the first place — e.g. don't say "no instructions were given" or "no steps are provided" for a meme, joke, photo, quote, or other content that isn't a tutorial/recipe/how-to. Only note what's missing when its absence is actually notable (e.g. a recipe video with no visible ingredient list). Never write a sentence whose only purpose is to point out that something isn't present.
 
 The ORIGINAL POST CAPTION and HASHTAGS above (if present) come directly from the source platform, not from your own analysis — treat them as a potentially-useful hint, not a fact. Use judgment: if the caption genuinely describes or adds relevant detail about this specific content (e.g. it names ingredients, gives a location, explains context visible in the visual/audio analysis), incorporate that detail into the summary. If the caption looks unrelated to the actual visual/audio content — generic engagement bait, unrelated trivia, spam, or a caption that has nothing to do with what's actually shown — ignore it entirely and do not mention it or let it influence the summary, title, or tags.]
 
@@ -154,7 +157,10 @@ The ORIGINAL POST CAPTION and HASHTAGS above (if present) come directly from the
 [Music/song name if found, or "No background music" or "Voiceover only"]
 
 📂 CATEGORY:
-[Choose ONE from: product, places, food, software, book, tv shows, fitness, film, event]
+{CATEGORY_PROMPT}
+
+🌐 LANGUAGE:
+{LANGUAGE_PROMPT}
 
 Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
 
@@ -226,13 +232,17 @@ def parse_summary(summary_text):
     Robust against markdown bold, missing colons, varied whitespace.
 
     Returns:
-        tuple: (title, summary, tags, music, category)
+        tuple: (title, summary, tags, music, category, language)
+        category and language are each a list of 1+ labels — a post can
+        belong to more than one category, and occasionally spans more than
+        one language (e.g. speech in one language, captions in another).
     """
     title = ""
     summary = ""
     tags = []
     music = ""
-    category = ""
+    category = []
+    language = []
 
     try:
         title   = _parse_field(summary_text, "📌", "TITLE")
@@ -256,59 +266,31 @@ def parse_summary(summary_text):
             if _mm:
                 music = _mm.group(1).strip()
 
-        # Category: grab first word/phrase that matches a known category
-        raw_cat = _parse_field(summary_text, "📂", "CATEGORY").lower()
-        # Strip markdown bold leftovers and pick first line
+        # Category: one or more comma-separated labels
+        raw_cat = _parse_field(summary_text, "📂", "CATEGORY")
         raw_cat = re.sub(r'\*+', '', raw_cat).strip()
         raw_cat = raw_cat.split('\n')[0].strip()
-        category = raw_cat
+        category = parse_categories(raw_cat)
+
+        # Language: one or more comma-separated labels (usually just one)
+        raw_lang = _parse_field(summary_text, "🌐", "LANGUAGE")
+        raw_lang = re.sub(r'\*+', '', raw_lang).strip()
+        raw_lang = raw_lang.split('\n')[0].strip()
+        language = parse_languages(raw_lang)
 
     except Exception as e:
         print(f"⚠️ Error parsing summary: {e}")
 
-    # Fallback: Auto-detect category if empty or unrecognised
-    valid_categories = {'product', 'places', 'software', 'book',
-                        'tv shows', 'fitness', 'film', 'event', 'food', 'other'}
-    if not category or category not in valid_categories:
-        category = auto_detect_category(summary_text, title, summary, tags)
+    # Fallback: only when the model's CATEGORY field was missing/unparseable
+    # (never overrides a real answer the model already gave, even a single one).
+    if not category:
+        category = keyword_fallback_categories(f"{title} {summary} {' '.join(tags)} {summary_text}")
 
-    return title, summary, tags, music, category
+    # No keyword fallback for language — guessing a language from keywords is
+    # unreliable, so an unparseable field is left empty (unknown) rather than
+    # guessed.
 
-def auto_detect_category(summary_text, title, summary, tags):
-    """
-    Auto-detect category based on content keywords
-    
-    Returns:
-        str: Detected category
-    """
-    combined = f"{title} {summary} {' '.join(tags)} {summary_text}".lower()
-    
-    # Category keywords
-    category_keywords = {
-        'product': ['camera', 'device', 'gadget', 'tech', 'phone', 'laptop', 'review', 'unbox', 'product', 'dji', 'osmo', 'action cam'],
-        'places': ['travel', 'trip', 'visit', 'destination', 'village', 'city', 'mountain', 'beach', 'hotel', 'itinerary', 'sikkim', 'location'],
-        'food': ['food', 'meal', 'cuisine', 'restaurant', 'cafe', 'dining', 'eat', 'recipe', 'cooking', 'dish', 'ingredients', 'cook', 'bake'],
-        'software': ['app', 'software', 'code', 'programming', 'developer', 'api', 'python', 'javascript'],
-        'book': ['book', 'novel', 'author', 'read', 'literature', 'story', 'chapter'],
-        'fitness': ['workout', 'fitness', 'exercise', 'gym', 'training', 'muscle', 'cardio', 'yoga'],
-        'film': ['movie', 'film', 'cinema', 'actor', 'actress', 'director', 'trailer', 'premiere'],
-        'tv shows': ['series', 'episode', 'season', 'show', 'tv show', 'streaming', 'netflix'],
-        'event': ['event', 'concert', 'festival', 'conference', 'meetup', 'workshop', 'seminar']
-    }
-    
-    # Count keyword matches
-    scores = {}
-    for category, keywords in category_keywords.items():
-        score = sum(1 for keyword in keywords if keyword in combined)
-        scores[category] = score
-    
-    # Get category with highest score
-    best_category = max(scores, key=scores.get)
-    
-    if scores[best_category] > 0:
-        return best_category
-    
-    return "other"
+    return title, summary, tags, music, category, language
 
 def run_script(script_name, args):
     """Run a Python script and return success status"""
@@ -399,18 +381,6 @@ def _clean_text(output: str) -> str:
     return _extract_section(output, "🔍 ANALYSIS:")
 
 
-def cleanup_temp_folder(folder_path):
-    """Delete temp folder after successful database save"""
-    try:
-        if False:
-            shutil.rmtree(folder_path)
-            print(f"🗑️  Cleaned up temp folder: {Path(folder_path).name}")
-            return True
-    except Exception as e:
-        print(f"⚠ Warning: Could not delete temp folder: {e}")
-    return False
-
-
 def _jpg_to_thumbnail(jpg_path) -> str:
     """
     Read a JPEG file and return it as a base64-encoded data URI.
@@ -445,6 +415,7 @@ _EMOJI_MAP = {
     "TAGS":     "🏷️",
     "MUSIC":    "🎵",
     "CATEGORY": "📂",
+    "LANGUAGE": "🌐",
 }
 
 def _sanitise_yt_raw(raw: str, post_date: str | None) -> str:
@@ -512,7 +483,7 @@ def run_youtube_analysis(url: str, shortcode: str, db):
     print_section("📋 RAW GEMINI OUTPUT")
     print(raw[:2000])
 
-    title, summary_text, tags, music, category = parse_summary(raw)
+    title, summary_text, tags, music, category, language = parse_summary(raw)
 
     # Use upload date scraped directly from YouTube page (always accurate)
     yt_post_date = result.get('post_date')
@@ -527,6 +498,7 @@ def run_youtube_analysis(url: str, shortcode: str, db):
         tags=tags,
         music=music,
         category=category,
+        language=language,
         visual_analysis='',
         audio_transcription='',
         text_analysis=raw,
@@ -565,7 +537,7 @@ def run_webpage_analysis(url: str, shortcode: str, db):
     print_section("📋 RAW AI OUTPUT")
     print(raw[:2000])
 
-    title, summary_text, tags, music, category = parse_summary(raw)
+    title, summary_text, tags, music, category, language = parse_summary(raw)
     # Use on-page title as fallback if AI did not extract one
     if not title and page_title:
         title = page_title
@@ -580,6 +552,7 @@ def run_webpage_analysis(url: str, shortcode: str, db):
         tags=tags,
         music=music,
         category=category,
+        language=language,
         visual_analysis='',
         audio_transcription='',
         text_analysis=raw,
@@ -657,7 +630,14 @@ def main():
         print(f"📝 SUMMARY:\n{cached.get('summary', 'N/A')}\n")
         print(f"🏷️ TAGS:\n{', '.join(cached.get('tags', []))}\n")
         print(f"🎵 MUSIC:\n{cached.get('music', 'N/A')}\n")
-        print(f"📂 CATEGORY:\n{cached.get('category', 'N/A')}\n")
+        cached_category = cached.get('category') or []
+        if isinstance(cached_category, str):
+            cached_category = [cached_category]
+        print(f"📂 CATEGORY:\n{', '.join(cached_category) or 'N/A'}\n")
+        cached_language = cached.get('language') or []
+        if isinstance(cached_language, str):
+            cached_language = [cached_language]
+        print(f"🌐 LANGUAGE:\n{', '.join(cached_language) or 'N/A'}\n")
         print("=" * 80)
         print("✅ Retrieved from cache (no AI processing needed)")
         print("=" * 80 + "\n")
@@ -853,7 +833,7 @@ def main():
     print(final_summary)
     
     # Extract structured data from summary for database
-    title, summary_text, tags, music, category = parse_summary(final_summary)
+    title, summary_text, tags, music, category, language = parse_summary(final_summary)
     
     # OVERRIDE LLM MUSIC WITH DIRECT SHAZAM OUTPUT TO PRESERVE LINKS
     if results.get('music_identification'):
@@ -951,6 +931,18 @@ def main():
     except Exception as emb_err:
         print(f"⚠️  Embedding generation error: {emb_err}")
 
+    # Move the downloaded video/audio/thumbnail out of temp/ (caption-named,
+    # transient) into media/<shortcode>/ (stable, permanent) — this is what
+    # lets a future "watch original video" screen find a post's files without
+    # depending on Instagram still hosting them. Must happen after the
+    # thumbnail/frame extraction above, which still reads from temp/.
+    print_section("🎞️  Relocating media to permanent storage")
+    media_files = relocate_to_media_store(download_folder, shortcode)
+    if media_files:
+        print(f"✓ Moved {len(media_files)} file(s) to media/{shortcode}/: {', '.join(media_files)}")
+    else:
+        print("⚠ No media files relocated (nothing found in temp folder, or move failed)")
+
     db.save_analysis(
         shortcode=shortcode,
         url=instagram_url,
@@ -960,6 +952,8 @@ def main():
         tags=tags,
         music=music,
         category=category,
+        language=language,
+        media_files=media_files,
         visual_analysis=visual_text,
         audio_transcription=audio_text,
         text_analysis=text_text,
@@ -971,15 +965,6 @@ def main():
     )
 
     print(f"✓ Analysis saved to database")
-    
-    # Step 8: Cleanup temp folder
-    print_section("🧹 Step 5: Cleanup")
-    
-    if cleanup_temp_folder(download_folder):
-        print(f"✓ Temp folder deleted successfully")
-    else:
-        print(f"⚠ Temp folder not deleted (may need manual cleanup)")
-    
     print("\n" + "=" * 80)
     print(f"📊 Analyses Complete: Visual({len(results['visual'])}), Audio({len(results['audio_transcription'])}), Music({len(results['music_identification'])}), Text({len(results['text'])})")
     print(f"⏱️  Total Time: {analysis_elapsed:.1f}s")

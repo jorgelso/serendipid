@@ -11,14 +11,21 @@ watch, listen, and read the video natively at Google's data centre.
 
 import os
 import re
+import sys
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+
+# Ensure backend root is on sys.path (needed when imported as a subprocess/module)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core.categories import CATEGORY_PROMPT
+from core.languages import LANGUAGE_PROMPT
 
 API_KEYS_FILE = Path(__file__).resolve().parent.parent / "config" / ".api_keys"
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
-YOUTUBE_PROMPT = """Watch this YouTube video carefully and write a structured analysis report.
+YOUTUBE_PROMPT = f"""Watch this YouTube video carefully and write a structured analysis report.
 
 Generate the report in this EXACT format (use these exact emoji headers):
 
@@ -45,7 +52,10 @@ identifiable background music, write "No background music". If it's voiceover
 only, write "Voiceover only".]
 
 📂 CATEGORY:
-[Choose exactly ONE from: product, places, food, software, book, tv shows, fitness, film, event, other]
+{CATEGORY_PROMPT}
+
+🌐 LANGUAGE:
+{LANGUAGE_PROMPT}
 
 Be specific, accurate, and extractive — pull out real names, numbers, and facts from the video."""
 

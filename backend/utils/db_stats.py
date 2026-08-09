@@ -89,8 +89,9 @@ def get_database_stats():
             for i, doc in enumerate(recent, 1):
                 title = (doc.get('title') or 'No title')[:50]
                 date = doc.get('analyzed_at', 'Unknown')
-                category = doc.get('category', 'N/A')
-                print(f"{i}. [{category}] {title}")
+                category = doc.get('category') or []
+                category = ', '.join(category) if isinstance(category, list) else category
+                print(f"{i}. [{category or 'N/A'}] {title}")
                 print(f"   Analyzed: {date}")
         else:
             print("No posts yet")
