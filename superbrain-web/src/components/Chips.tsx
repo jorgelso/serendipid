@@ -67,6 +67,16 @@ export function LanguageBadges({ language }: { language: string[] }) {
   );
 }
 
+/** Warning-toned badge for the "missing video, needs re-fetch" case — see
+ * lib/media.ts::isMissingVideo for the exact condition. */
+export function MissingVideoBadge() {
+  return (
+    <span className="font-display text-[11px] font-semibold px-2.5 py-1 rounded-full bg-yellow-ink text-bg whitespace-nowrap">
+      🎬 no video
+    </span>
+  );
+}
+
 export function TagChips({ tags, limit }: { tags: string[]; limit?: number }) {
   if (!tags || tags.length === 0) return null;
   const shown = limit ? tags.slice(0, limit) : tags;

@@ -1,5 +1,5 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getExport } from "@/lib/cache";
+import { getCacheTimestamps, getExport } from "@/lib/cache";
 import { getConfig } from "@/lib/config";
 import { sortPostsByRecency, toDisplayPost } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
@@ -7,18 +7,25 @@ import InfiniteFeed from "@/components/InfiniteFeed";
 
 const PAGE_SIZE = 24;
 
-async function loadInitialFeed(): Promise<{ posts: ClientPost[]; total: number }> {
+interface Feed {
+  posts: ClientPost[];
+  total: number;
+  fetchedAt: string | null;
+}
+
+async function loadInitialFeed(): Promise<Feed> {
   const config = getConfig();
   const { posts } = await getExport();
   const sorted = sortPostsByRecency(posts);
   return {
     posts: sorted.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p, config.apiUrl)),
     total: sorted.length,
+    fetchedAt: getCacheTimestamps().exportFetchedAt,
   };
 }
 
 export default async function HomePage() {
-  let feed: { posts: ClientPost[]; total: number } | null = null;
+  let feed: Feed | null = null;
   let errorMessage: string | null = null;
 
   try {
@@ -41,7 +48,18 @@ export default async function HomePage() {
         </div>
       )}
 
-      {feed && <InfiniteFeed initialPosts={feed.posts} total={feed.total} pageSize={PAGE_SIZE} />}
+      {feed && (
+        <InfiniteFeed
+          // Keyed on the cache's fetch timestamp so clicking "Rescan library"
+          // (router.refresh()) forces a remount instead of leaving the old
+          // client-side pagination state in place — see the identical fix
+          // and explanation in app/browse/page.tsx.
+          key={feed.fetchedAt ?? "initial"}
+          initialPosts={feed.posts}
+          total={feed.total}
+          pageSize={PAGE_SIZE}
+        />
+      )}
     </div>
   );
 }

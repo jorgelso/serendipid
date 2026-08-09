@@ -79,6 +79,14 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
 
       {data && (
         <InfiniteFeed
+          // InfiniteFeed keeps its own "loaded posts" state client-side for
+          // pagination — without a key tied to the active filters, React
+          // treats it as the same component instance across a filter change
+          // (same position in the tree) and keeps the OLD state instead of
+          // picking up the new initialPosts prop, which is exactly the
+          // "filter changes the URL but not what's shown" bug. The key
+          // forces a remount whenever the filter combination changes.
+          key={`${category}|${language}|${collection}`}
           initialPosts={data.posts}
           total={data.total}
           pageSize={PAGE_SIZE}

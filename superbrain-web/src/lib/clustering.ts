@@ -284,3 +284,31 @@ export function computeThemes(
 
   return { themes, unclusteredShortcodes };
 }
+
+/** Nearest neighbors of a single post by embedding cosine similarity — a
+ * simple O(n) point-to-all comparison, not the full two-pass clustering
+ * above (no need for micro-clusters/themes just to rank "what's like this
+ * one post"). Powers the dedicated post page's "related" section. */
+export function findRelatedPosts(
+  target: Post,
+  posts: Post[],
+  limit = 8
+): { shortcode: string; similarity: number }[] {
+  const targetVector = parseEmbedding(target.embedding);
+  if (!targetVector) return [];
+  const targetNormalized = normalize(targetVector);
+
+  const scored: { shortcode: string; similarity: number }[] = [];
+  for (const post of posts) {
+    if (post.shortcode === target.shortcode) continue;
+    const vector = parseEmbedding(post.embedding);
+    if (!vector) continue;
+    scored.push({
+      shortcode: post.shortcode,
+      similarity: dot(targetNormalized, normalize(vector)),
+    });
+  }
+
+  scored.sort((a, b) => b.similarity - a.similarity);
+  return scored.slice(0, limit);
+}

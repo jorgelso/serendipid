@@ -26,12 +26,24 @@ export function toClientPost(post: Post): ClientPost {
   return rest;
 }
 
-/** Strips the embedding and resolves the thumbnail to an absolute URL in one
- * step — the shape every post should be in by the time it reaches a client
- * component. */
+/** media_urls come back as relative paths ("/media/{shortcode}/video.mp4")
+ * — the /media mount has no auth dependency (same as /static), so prefixing
+ * with the backend's base URL is all a browser needs to fetch/play them
+ * directly. */
+export function resolveMediaUrls(mediaUrls: string[], apiBaseUrl: string): string[] {
+  return mediaUrls.map((u) => (u.startsWith("/media/") ? `${apiBaseUrl}${u}` : u));
+}
+
+/** Strips the embedding and resolves the thumbnail + media URLs to absolute
+ * URLs in one step — the shape every post should be in by the time it
+ * reaches a client component. */
 export function toDisplayPost(post: Post, apiBaseUrl: string): ClientPost {
   const client = toClientPost(post);
-  return { ...client, thumbnail: resolveThumbnailUrl(client.thumbnail, apiBaseUrl) };
+  return {
+    ...client,
+    thumbnail: resolveThumbnailUrl(client.thumbnail, apiBaseUrl),
+    media_urls: resolveMediaUrls(client.media_urls, apiBaseUrl),
+  };
 }
 
 /** Most-recently-analyzed first — the ordering behind the Home/Browse feeds. */
@@ -176,6 +188,8 @@ export function mergeSearchHitsWithPosts(
           source_hashtags: [],
           analysis_version: 0,
           needs_review: false,
+          media_files: [],
+          media_urls: [],
         };
 
     return {
@@ -185,6 +199,7 @@ export function mergeSearchHitsWithPosts(
       tags: hit.tags ?? base.tags,
       category: hit.category ?? base.category,
       thumbnail: resolveThumbnailUrl(hit.thumbnail ?? base.thumbnail, apiBaseUrl),
+      media_urls: resolveMediaUrls(base.media_urls, apiBaseUrl),
       similarity: hit.similarity,
     };
   });

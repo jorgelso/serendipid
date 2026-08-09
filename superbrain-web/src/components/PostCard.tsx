@@ -1,28 +1,49 @@
+"use client";
+
+import { useState } from "react";
 import type { ClientPost } from "@/types/domain";
-import { CategoryBadge, CategoryBadges, LanguageBadges, TagChips } from "./Chips";
+import { isMissingVideo } from "@/lib/media";
+import { CategoryBadge, CategoryBadges, LanguageBadges, MissingVideoBadge, TagChips } from "./Chips";
 import AnalysisDetails from "./AnalysisDetails";
 import ReviewActions from "./ReviewActions";
+import PostModal from "./PostModal";
 
 interface PostCardProps {
   post: ClientPost & { similarity?: number };
 }
 
 export default function PostCard({ post }: PostCardProps) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const missingVideo = isMissingVideo(post);
+
   return (
-    <article className="break-inside-avoid mb-5 rounded-3xl bg-surface border border-line overflow-hidden shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] transition-transform duration-200 hover:-translate-y-1 hover:rotate-[-0.3deg]">
+    <article className="self-start rounded-3xl bg-surface border border-line overflow-hidden shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] transition-transform duration-200 hover:-translate-y-1 hover:rotate-[-0.3deg]">
       {post.thumbnail && (
-        <div className="relative">
+        <button
+          type="button"
+          onClick={() => setModalOpen(true)}
+          className="relative w-full block cursor-pointer group/thumb"
+          aria-label="Open post"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={post.thumbnail} alt="" className="w-full block" loading="lazy" />
+          <div className="absolute inset-0 bg-ink/0 group-hover/thumb:bg-ink/20 transition-colors flex items-center justify-center">
+            <span className="opacity-0 group-hover/thumb:opacity-100 transition-opacity text-bg text-3xl drop-shadow">
+              ▶
+            </span>
+          </div>
           <div className="absolute top-3 left-3">
             <CategoryBadge category={post.category} />
           </div>
-          {typeof post.similarity === "number" && (
-            <div className="absolute top-3 right-3 bg-ink/70 text-bg text-[11px] font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">
-              {(post.similarity * 100).toFixed(0)}% match
-            </div>
-          )}
-        </div>
+          <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5">
+            {typeof post.similarity === "number" && (
+              <span className="bg-ink/70 text-bg text-[11px] font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">
+                {(post.similarity * 100).toFixed(0)}% match
+              </span>
+            )}
+            {missingVideo && <MissingVideoBadge />}
+          </div>
+        </button>
       )}
 
       <div className="p-4">
@@ -70,6 +91,8 @@ export default function PostCard({ post }: PostCardProps) {
 
         {post.needs_review && <ReviewActions shortcode={post.shortcode} url={post.url} />}
       </div>
+
+      {modalOpen && <PostModal post={post} onClose={() => setModalOpen(false)} />}
     </article>
   );
 }

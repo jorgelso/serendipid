@@ -28,6 +28,16 @@ export interface Post {
   text_analysis: string | null;
   is_hidden: number;
   source_hashtags: string[];
+  // Filenames/paths for the permanently-stored original media (backend/core/
+  // media_store.py). Carousels use numbered entries ("1.mp4", "2.jpg", ...)
+  // instead of "video.mp4"/"thumbnail.jpg". Empty arrays mean nothing was
+  // downloaded for this post (content_type === "instagram" with no .mp4 here
+  // is the "missing video, needs re-fetch" case — see lib/media.ts).
+  media_files: string[];
+  // Same list as media_files, already relative paths ("/media/{shortcode}/...").
+  // Resolved to absolute URLs server-side (see lib/posts.ts toDisplayPost) —
+  // the /media mount has no auth dependency, same as /static.
+  media_urls: string[];
   // analysis_version / needs_review: added when the category taxonomy was
   // overhauled (backend/core/database.py CURRENT_ANALYSIS_VERSION). A post
   // whose analysis_version is behind the current pipeline version is flagged
