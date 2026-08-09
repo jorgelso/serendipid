@@ -75,7 +75,13 @@ export default function PostDetail({ initialPost, showFullDetails = false }: Pos
       {showFullDetails && (
         <>
           <AnalysisDetails post={post} />
-          {post.needs_review && <ReviewActions shortcode={post.shortcode} url={post.url} />}
+          {post.needs_review && (
+            <ReviewActions
+              shortcode={post.shortcode}
+              url={post.url}
+              analysisVersion={post.analysis_version}
+            />
+          )}
         </>
       )}
     </div>

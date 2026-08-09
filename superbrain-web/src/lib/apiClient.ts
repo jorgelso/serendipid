@@ -1,5 +1,5 @@
 import { getConfig } from "./config";
-import type { ExportPayload, SearchSemanticResponse } from "@/types/domain";
+import type { ChangelogResponse, ExportPayload, SearchSemanticResponse } from "@/types/domain";
 
 export class SuperBrainApiError extends Error {
   status?: number;
@@ -91,6 +91,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 export async function fetchExport(limit = 50000, offset = 0): Promise<ExportPayload> {
   return request<ExportPayload>("/export", { params: { limit, offset, format: "json" } });
+}
+
+export async function fetchChangelog(): Promise<ChangelogResponse> {
+  return request<ChangelogResponse>("/changelog");
 }
 
 export async function fetchSemanticSearch(

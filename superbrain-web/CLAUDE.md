@@ -38,11 +38,19 @@ This is the load-bearing convention in this codebase: **only server-side code (S
 
 - `src/lib/config.ts` reads the backend URL/API key and is commented as **must never be imported from a `"use client"` component** — that's what keeps `SUPERBRAIN_API_KEY` out of the browser bundle. Preserve this boundary when adding new backend calls: add a typed function to `apiClient.ts` and a thin `route.ts` wrapper, don't reach for `fetch` from a client component.
 - `src/lib/apiClient.ts` — single `request<T>()` wrapper (adds `X-API-Key`, `AbortController` timeout, per-status custom error messages via `SuperBrainApiError`) with one typed function per backend endpoint (`fetchExport()`, `fetchSemanticSearch()`, `reanalyzePost()`, etc.).
-- `src/app/api/*/route.ts` (feed, posts, clusters, taxonomy, topics, reanalyze, refresh, mark-reviewed, update-post) are thin: parse request → call `apiClient`/`cache` → return JSON, translating `SuperBrainApiError` into an HTTP response.
+- `src/app/api/*/route.ts` (feed, posts, clusters, taxonomy, topics, reanalyze, refresh, mark-reviewed, update-post, vector-space, thumbnail) are thin: parse request → call `apiClient`/`cache` → return JSON, translating `SuperBrainApiError` into an HTTP response.
 
 ### Caching
 
-`src/lib/cache.ts` holds the full `/export` payload and derived clustering "themes" in memory on `globalThis` (survives dev HMR). It's invalidated (`invalidateCache()`) after any mutation — `update-post`, `mark-reviewed`, `reanalyze`, `refresh`. If you add a new mutation route, call `invalidateCache()` from it or reads will serve stale data.
+`src/lib/cache.ts` holds the full `/export` payload and derived clustering "themes" (`src/lib/clustering.ts`) and "vector space" layout (`src/lib/vectorSpace.ts`) in memory on `globalThis` (survives dev HMR). It's invalidated (`invalidateCache()`) after any mutation — `update-post`, `mark-reviewed`, `reanalyze`, `refresh`. If you add a new mutation route, call `invalidateCache()` from it or reads will serve stale data.
+
+### 3D vector-space view (`/space`)
+
+Plots every post as a point in a rotatable 3D scene (`react-three-fiber` + `@react-three/drei`), positioned by projecting its stored embedding down to 3D with `umap-js` (`src/lib/vectorSpace.ts`, seeded for a stable layout across recomputes) and colored by `computeThemes()`'s existing cluster assignment (`src/lib/clustering.ts`) — no backend changes needed, since `/export` already returns embeddings and this reuses the same cached payload every other page uses. A few things worth knowing if you touch it:
+
+- **Categorical colors are a separate palette**, not this app's coral/teal/lavender accent tokens — those accents fail CVD-separation validation when checked as a scatter/all-pairs categorical set (see the `dataviz` skill). The 8-hue palette lives as `--viz-series-1..8` / `--viz-neutral` in `globals.css`, read at runtime via `src/lib/useVizPalette.ts` (three.js material colors need real hex, not a CSS var, so this is the one place that bridges the two). Only the first 3 slots are guaranteed distinguishable in every simultaneous on-screen pairing; slots 4-8 lean on the always-visible legend/hover label as secondary encoding. Themes past the 8th (by size) fold into a shared "other" bucket rather than cycling colors.
+- **Thumbnails are proxied**, never sent inline. `Post.thumbnail` can be a full `data:image/...;base64,...` URI (this backend's actual storage format, not just a documented possibility) — inlining that for every point in the page payload is what balloons it to tens of MB. `src/app/api/thumbnail/[shortcode]/route.ts` decodes/streams it (or redirects for a plain URL) behind a short, cacheable `/api/thumbnail/{shortcode}` path instead; `computeVectorSpaceLayout()` only ever puts that short path on a `VectorSpacePoint`, never the raw thumbnail field.
+- Full post detail (for the click-to-open modal) is fetched lazily via the existing `/api/posts?shortcodes=` route, not carried in the initial point payload — `VectorSpacePoint` is deliberately lighter than `ClientPost` (no summary/transcripts/embedding).
 
 ### Data fetching pattern — no React Query/SWR/Redux
 
@@ -61,6 +69,7 @@ This is the load-bearing convention in this codebase: **only server-side code (S
 - `/search` — semantic search
 - `/post/[shortcode]` — single post detail
 - `/insights` — stats / taxonomy view
+- `/space` — 3D vector-space view (every post plotted by embedding similarity, colored by cluster)
 
 ### Styling
 

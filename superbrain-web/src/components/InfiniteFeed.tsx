@@ -33,7 +33,15 @@ export default function InfiniteFeed({ initialPosts, total, pageSize, params = {
       const res = await fetch(`/api/feed?${query.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Couldn't load more posts.");
-      setPosts((prev) => [...prev, ...data.posts]);
+      // The underlying export cache can be invalidated (reanalyze/mark-reviewed/
+      // update-post/refresh) between the initial page load and a "load more"
+      // click, shifting offsets — that can hand back a post already in `prev`.
+      // Dedupe by shortcode so React never sees two siblings with the same key.
+      setPosts((prev) => {
+        const seen = new Set(prev.map((p) => p.shortcode));
+        const fresh = (data.posts as ClientPost[]).filter((p) => !seen.has(p.shortcode));
+        return [...prev, ...fresh];
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load more posts.");
     } finally {

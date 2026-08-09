@@ -37,6 +37,10 @@ PYTHON      = sys.executable          # path that launched this script
 VENV_PYTHON = (VENV_DIR / "Scripts" / "python.exe") if IS_WINDOWS else (VENV_DIR / "bin" / "python")
 VENV_PIP    = (VENV_DIR / "Scripts" / "pip.exe")    if IS_WINDOWS else (VENV_DIR / "bin" / "pip")
 
+# Default 5000 collides with macOS AirPlay Receiver, which listens on 5000
+# on every Mac by default — so the backend defaults to 5050 instead.
+PORT        = 5050
+
 # ── ANSI colours (stripped on Windows unless ANSICON / Windows Terminal) ──────
 def _ansi(code): return f"\033[{code}m"
 RESET  = _ansi(0);  BOLD   = _ansi(1)
@@ -1174,7 +1178,6 @@ def launch_backend():
     ensure_runtime_dependencies()
 
     # ── Port conflict check ───────────────────────────────────────────────────
-    PORT = 5000
     pid = _check_port(PORT)
     if pid is not None:
         if pid > 0:
@@ -1230,7 +1233,7 @@ def launch_backend():
                     if IS_WINDOWS:
                         info(f"Run manually:  netstat -ano | findstr :{PORT}")
                         info("Then:         taskkill /PID <pid> /T /F")
-                        info("Or inspect:    powershell Get-NetTCPConnection -LocalPort 5000 -State Listen")
+                        info(f"Or inspect:    powershell Get-NetTCPConnection -LocalPort {PORT} -State Listen")
                     else:
                         info(f"Run:  lsof -ti TCP:{PORT} -sTCP:LISTEN | xargs kill -9")
                     sys.exit(1)
@@ -1385,9 +1388,9 @@ def launch_backend_status():
 
     _display_connect_qr(url, token)
     
-    local_url = "http://127.0.0.1:5000"
+    local_url = f"http://127.0.0.1:{PORT}"
     local_ip = _detect_local_ip()
-    network_url = f"http://{local_ip}:5000"
+    network_url = f"http://{local_ip}:{PORT}"
     
     nl()
     print(f"    Local URL      \u2192  {CYAN}{local_url}{RESET}")

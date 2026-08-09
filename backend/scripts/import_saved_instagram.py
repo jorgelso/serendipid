@@ -38,7 +38,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = SCRIPT_DIR.parent
 
-DEFAULT_SERVER_URL = "http://localhost:5000"
+DEFAULT_SERVER_URL = "http://localhost:5050"
 DEFAULT_STATE_FILE = SCRIPT_DIR / "import_state.json"
 DEFAULT_DELAY_MIN = 8.0
 DEFAULT_DELAY_MAX = 20.0

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **CLI status Command**: Run 'superbrain-server status' (or 'update') to show server QR code and URLs instantly and safely without crashing on startup port conflicts.
 - **Mobile Retry Queue Screen**: A dedicated screen in Settings to see failed analyses, allowing you to directly delete stuck processing items using a new 'DELETE /queue/{shortcode}' endpoint.
+- **3D Vector-Space View (Web)**: New '/space' page in the web viewer plots every saved reel as a point in a rotatable 3D scene, positioned by embedding similarity (UMAP) and colored by existing topic clusters, with a hover preview and click-through to the full post — a way to see the shape of your library, not just list it. Built entirely on the existing '/export' data (no backend changes).
 
 ### Fixed & Changed
 - **UI Performance**: Resolved 15-20s navigation freezes when navigating to Settings or Library screens by returning cached data instantly and pushing blocking calls to the background.

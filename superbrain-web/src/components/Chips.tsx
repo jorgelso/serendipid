@@ -1,3 +1,5 @@
+import type { ChangelogResponse } from "@/types/domain";
+
 const PALETTE = [
   { bg: "var(--color-coral-soft)", fg: "var(--color-coral-ink)" },
   { bg: "var(--color-teal-soft)", fg: "var(--color-teal-ink)" },
@@ -37,12 +39,14 @@ export function CategoryBadge({ category }: { category: string[] }) {
 }
 
 /** Full set of a post's categories (1-3), for use in the card body rather
- * than over the thumbnail. */
+ * than over the thumbnail. Deduped — a post whose category array has a
+ * repeated label (a data-quality slip upstream, not the common case) would
+ * otherwise render the same pill twice with a duplicate React key. */
 export function CategoryBadges({ category }: { category: string[] }) {
   if (!category || category.length === 0) return null;
   return (
     <span className="inline-flex flex-wrap gap-1.5">
-      {category.map((c) => (
+      {Array.from(new Set(category)).map((c) => (
         <CategoryPill key={c} category={c} />
       ))}
     </span>
@@ -55,7 +59,7 @@ export function LanguageBadges({ language }: { language: string[] }) {
   if (!language || language.length === 0) return null;
   return (
     <span className="inline-flex flex-wrap gap-1.5">
-      {language.map((lang) => (
+      {Array.from(new Set(language)).map((lang) => (
         <span
           key={lang}
           className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-surface-2 text-ink-muted"
@@ -77,10 +81,47 @@ export function MissingVideoBadge() {
   );
 }
 
+/** Colored "N versions behind" pill for a post whose analysis_version is
+ * older than the pipeline's current_version (see backend's /changelog and
+ * CURRENT_ANALYSIS_VERSION). Color is a continuous red→green spectrum via
+ * CSS color-mix() between the existing mint (green, one version behind) and
+ * coral (red, as outdated as possible — analysis_version 0) tokens, so it
+ * tracks light/dark theme automatically without new hex values or JS color
+ * math. Renders nothing while the changelog hasn't loaded yet, or once the
+ * post is already current. */
+export function VersionBehindBadge({
+  analysisVersion,
+  changelog,
+}: {
+  analysisVersion: number;
+  changelog: ChangelogResponse | null;
+}) {
+  if (!changelog || changelog.current_version == null) return null;
+  const versionsBehind = changelog.current_version - analysisVersion;
+  if (versionsBehind <= 0) return null;
+
+  const span = Math.max(changelog.current_version - 1, 1);
+  const percent = Math.min(1, Math.max(0, (versionsBehind - 1) / span)) * 100;
+  const bg = `color-mix(in srgb, var(--color-mint-soft) ${100 - percent}%, var(--color-coral-soft) ${percent}%)`;
+  const fg = `color-mix(in srgb, var(--color-mint-ink) ${100 - percent}%, var(--color-coral-ink) ${percent}%)`;
+  const label = `${versionsBehind} version${versionsBehind === 1 ? "" : "s"} behind`;
+
+  return (
+    <span
+      title={`Analyzed with an older pipeline version — ${label} the current one`}
+      className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+      style={{ backgroundColor: bg, color: fg }}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function TagChips({ tags, limit }: { tags: string[]; limit?: number }) {
   if (!tags || tags.length === 0) return null;
-  const shown = limit ? tags.slice(0, limit) : tags;
-  const remaining = limit && tags.length > limit ? tags.length - limit : 0;
+  const uniqueTags = Array.from(new Set(tags));
+  const shown = limit ? uniqueTags.slice(0, limit) : uniqueTags;
+  const remaining = limit && uniqueTags.length > limit ? uniqueTags.length - limit : 0;
   return (
     <span className="inline-flex flex-wrap gap-1.5">
       {shown.map((tag) => {

@@ -2,18 +2,28 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useChangelog } from "@/lib/useChangelog";
 
 interface ReviewActionsProps {
   shortcode: string;
   url: string;
+  analysisVersion: number;
 }
 
 type State = "idle" | "reanalyzing" | "marking" | "done" | "error";
 
-export default function ReviewActions({ shortcode, url }: ReviewActionsProps) {
+export default function ReviewActions({ shortcode, url, analysisVersion }: ReviewActionsProps) {
   const router = useRouter();
+  const changelog = useChangelog();
   const [state, setState] = useState<State>("idle");
   const [message, setMessage] = useState<string | null>(null);
+
+  const versionsBehind =
+    changelog?.current_version != null ? changelog.current_version - analysisVersion : null;
+  const bannerText =
+    versionsBehind != null && versionsBehind > 0
+      ? `Analyzed ${versionsBehind} version${versionsBehind === 1 ? "" : "s"} behind the current pipeline`
+      : "Categorized under the old system";
 
   async function post(path: string, body: unknown, fallbackError: string) {
     const res = await fetch(path, {
@@ -67,7 +77,7 @@ export default function ReviewActions({ shortcode, url }: ReviewActionsProps) {
 
   return (
     <div className="mt-3 rounded-xl bg-yellow-soft px-3 py-2.5">
-      <p className="text-xs font-bold text-yellow-ink mb-2">Categorized under the old system</p>
+      <p className="text-xs font-bold text-yellow-ink mb-2">{bannerText}</p>
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={handleReanalyze}

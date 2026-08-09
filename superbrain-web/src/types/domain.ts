@@ -69,6 +69,23 @@ export interface ExportPayload {
   stats: Record<string, unknown>;
 }
 
+// Mirrors backend/api.py's GET /changelog (backend/core/database.py's
+// analysis_changelog table) — newest version first. Used to turn a post's
+// bare `analysis_version` into a human-readable "N versions behind" and to
+// list what changed since it was analyzed.
+export interface ChangelogEntry {
+  version: number;
+  released_at: string | null;
+  title: string;
+  description: string;
+}
+
+export interface ChangelogResponse {
+  success: boolean;
+  current_version: number | null;
+  history: ChangelogEntry[];
+}
+
 export interface SearchSemanticHit {
   shortcode: string;
   similarity: number;
@@ -101,4 +118,27 @@ export interface Theme {
   subLabels: string[];
   postCount: number;
   microClusters: MicroCluster[];
+}
+
+// A post plotted in the 3D vector-space view (src/app/space). Deliberately as
+// light as ClientPost's fuller shape — no summary/transcripts/embedding, just
+// enough to render a point, a hover preview, and a click-through lookup by
+// shortcode. "theme-N" (N = 0-7) selects one of the 8 validated categorical
+// hues in src/app/globals.css (--viz-series-1..8); "other" is every theme
+// past the 8th, ranked by size; "unclustered" is a post with no theme at all
+// (see computeThemes()'s unclusteredShortcodes). All three render as the
+// shared --viz-neutral color, distinguished only by their (always-visible)
+// legend/hover label — see dataviz skill's relief rule.
+export type VectorSpaceColorSlot = `theme-${number}` | "other" | "unclustered";
+
+export interface VectorSpacePoint {
+  shortcode: string;
+  position: [number, number, number];
+  colorSlot: VectorSpaceColorSlot;
+  themeId: string | null;
+  themeLabel: string;
+  title: string | null;
+  category: string[];
+  thumbnail: string | null;
+  videoUrl: string | null;
 }

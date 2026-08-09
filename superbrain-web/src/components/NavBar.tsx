@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/browse", label: "Browse" },
   { href: "/search", label: "Search" },
   { href: "/insights", label: "Insights" },
+  { href: "/space", label: "Space" },
 ];
 
 export default function NavBar() {

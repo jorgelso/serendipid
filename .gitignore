@@ -33,6 +33,10 @@ backend/yt_error.txt
 backend/superbrain.db
 backend/superbrain.db-shm
 backend/superbrain.db-wal
+backend/backups/
+
+# ── Media (downloaded videos/audio/images, not for version control) ──────────
+backend/media/
 
 # ── Personal data / import state (not code, not for version control) ─────────
 backend/saved_collections.json

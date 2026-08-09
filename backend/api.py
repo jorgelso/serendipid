@@ -1064,7 +1064,7 @@ async def connect_info(request: Request):
     """
     # Build the base URL from the incoming request
     scheme = request.headers.get('x-forwarded-proto', request.url.scheme)
-    host = request.headers.get('x-forwarded-host', request.headers.get('host', 'localhost:5000'))
+    host = request.headers.get('x-forwarded-host', request.headers.get('host', 'localhost:5050'))
     base_url = f"{scheme}://{host}"
 
     return {
@@ -2053,6 +2053,6 @@ async def delete_instagram_credentials(token: str = Depends(verify_token)):
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting SuperBrain API...")
-    print("📖 API Docs: http://localhost:5000/docs")
-    print("🔍 Interactive: http://localhost:5000/redoc")
-    uvicorn.run("api:app", host="0.0.0.0", port=5000, reload=False)
+    print("📖 API Docs: http://localhost:5050/docs")
+    print("🔍 Interactive: http://localhost:5050/redoc")
+    uvicorn.run("api:app", host="0.0.0.0", port=5050, reload=False)
