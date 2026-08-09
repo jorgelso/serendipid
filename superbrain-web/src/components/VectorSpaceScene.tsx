@@ -135,11 +135,14 @@ function SpaceBackdrop() {
 // OrbitControls' built-in pan (right-drag / two-finger-drag) is easy to miss
 // on a trackpad, and orbiting alone only ever spins around a fixed pivot —
 // it can't get you close to a cluster that isn't near the origin. WASD/arrow
-// keys translate the camera and the orbit target together, so the user can
-// actually fly through the point cloud rather than just rotate around it.
+// keys translate the camera so the user can actually fly through the point
+// cloud rather than just rotate around it.
 function KeyboardFly({ controlsRef }: { controlsRef: React.RefObject<OrbitControlsImpl | null> }) {
   const { camera } = useThree();
   const pressed = useRef<Set<string>>(new Set());
+  // Distance from camera to orbit target, captured fresh each time a flight
+  // starts (not a fixed constant) — null means "not currently flying."
+  const pivotDistance = useRef<number | null>(null);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => pressed.current.add(e.key.toLowerCase());
@@ -160,11 +163,24 @@ function KeyboardFly({ controlsRef }: { controlsRef: React.RefObject<OrbitContro
   useFrame((_, delta) => {
     const keys = pressed.current;
     const controls = controlsRef.current;
-    if (!controls || keys.size === 0) return;
+    if (!controls) return;
+
+    if (keys.size === 0) {
+      // Not flying — leave the pivot exactly where it last landed, so a
+      // drag-rotate right after stopping still pivots around that spot.
+      // Only reset the *captured distance* so the next flight re-measures
+      // from wherever the user has since zoomed/orbited to.
+      pivotDistance.current = null;
+      return;
+    }
 
     const { forward, right, move } = scratch.current;
     camera.getWorldDirection(forward);
     right.crossVectors(forward, camera.up).normalize();
+
+    if (pivotDistance.current === null) {
+      pivotDistance.current = camera.position.distanceTo(controls.target);
+    }
 
     move.set(0, 0, 0);
     if (keys.has("w") || keys.has("arrowup")) move.add(forward);
@@ -177,7 +193,14 @@ function KeyboardFly({ controlsRef }: { controlsRef: React.RefObject<OrbitContro
 
     move.normalize().multiplyScalar(40 * delta);
     camera.position.add(move);
-    controls.target.add(move);
+    // Pin the orbit pivot directly ahead of the camera at a fixed distance,
+    // instead of translating it by the same delta as before — that kept the
+    // pivot at "wherever it happened to end up," which could drift away
+    // from what's actually centered in view after enough combined flying
+    // and rotating. Pinning it to "straight ahead, fixed distance" means a
+    // drag-rotate right after flying always pivots around whatever you're
+    // actually looking at.
+    controls.target.copy(camera.position).addScaledVector(forward, pivotDistance.current);
     controls.update();
   });
 

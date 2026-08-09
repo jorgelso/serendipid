@@ -39,7 +39,6 @@ export default async function HomePage() {
     <div className="mx-auto max-w-6xl px-5 py-8">
       <div className="mb-6">
         <h1 className="font-display font-semibold text-3xl">Your feed</h1>
-        <p className="mt-1 text-ink-muted text-sm">Everything you&rsquo;ve saved, freshest first.</p>
       </div>
 
       {errorMessage && (
