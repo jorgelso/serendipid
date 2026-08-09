@@ -133,6 +133,13 @@ max_concurrent = 1  # Process one post at a time - queue others sequentially
 _active_processes: dict = {}        # shortcode -> subprocess.Popen
 _active_processes_lock = threading.Lock()
 
+# Guards the "is there capacity? -> claim it" admission decision shared by the
+# /analyze fast path and queue_worker's background pickup. Without this, both
+# can independently read get_processing()/get_queue() as having spare
+# capacity at the same moment and both start a main.py subprocess, silently
+# breaking the max_concurrent=1 guarantee below.
+_queue_admission_lock = threading.Lock()
+
 _STATIC_DIR = Path(__file__).parent / "static"
 _THUMBNAILS_DIR = _STATIC_DIR / "thumbnails"
 _THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
@@ -208,72 +215,79 @@ def queue_worker():
                         )
                         db.add_to_queue(r_item['shortcode'], r_item['url'])
 
-            # Check if we have capacity
-            processing = db.get_processing()
-            if len(processing) < max_concurrent:
-                # Get next item from queue
-                queue = db.get_queue()
-                if queue:
-                    item = queue[0]  # Get first item
-                    shortcode = item['shortcode']
-                    url = item['url']
-                    
-                    logger.info(f"📋 Queue alert: Processing next in queue")
-                    logger.info(f"📊 Queue status: {len(queue) - 1} remaining after this | Starting: {shortcode}")
-                    logger.info(f"📤 [{shortcode}] Starting analysis from queue...")
-                    
-                    # Mark as processing
-                    db.mark_processing(shortcode)
-                    
-                    # Run analysis
+            # Check if we have capacity and claim the next queued item, if
+            # any, atomically — held together so a concurrent /analyze fast
+            # path can't slip in between the capacity check and the claim.
+            item = None
+            with _queue_admission_lock:
+                processing = db.get_processing()
+                if len(processing) < max_concurrent:
+                    queue = db.get_queue()
+                    if queue:
+                        item = queue[0]  # Get first item
+                        shortcode = item['shortcode']
+                        url = item['url']
+                        db.mark_processing(shortcode, url)
+
+            if item:
+                logger.info(f"📋 Queue alert: Processing next in queue")
+                logger.info(f"📊 Queue status: {len(queue) - 1} remaining after this | Starting: {shortcode}")
+                logger.info(f"📤 [{shortcode}] Starting analysis from queue...")
+
+                # Run analysis
+                try:
+                    cmd = [sys.executable, "main.py", url]
+                    if item.get('caption'):
+                        cmd += ["--caption", item['caption']]
+                    if item.get('hashtags'):
+                        cmd += ["--hashtags", ",".join(item['hashtags'])]
+                    process = subprocess.Popen(
+                        cmd,
+                        cwd=Path(__file__).parent,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        bufsize=1
+                    )
+
+                    # Register so delete_post can kill it
+                    with _active_processes_lock:
+                        _active_processes[shortcode] = process
+
+                    # Wait for completion
                     try:
-                        process = subprocess.Popen(
-                            [sys.executable, "main.py", url],
-                            cwd=Path(__file__).parent,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            encoding="utf-8",
-                            bufsize=1
-                        )
-
-                        # Register so delete_post can kill it
-                        with _active_processes_lock:
-                            _active_processes[shortcode] = process
-
-                        # Wait for completion
-                        try:
-                            process.wait(timeout=600)
-                        except subprocess.TimeoutExpired:
-                            logger.error(f"❌ [{shortcode}] Process timed out after 10 minutes. Killing...")
-                            process.kill()
-                            process.wait()
-                            db.remove_from_queue(shortcode)
-                            continue
-
-                        with _active_processes_lock:
-                            _active_processes.pop(shortcode, None)
-
-                        # If the post was deleted while processing, skip queue cleanup
-                        # (delete_post already called remove_from_queue)
-                        if process.returncode == -9 or process.returncode == -15:
-                            logger.info(f"🛑 [{shortcode}] Analysis killed (post was deleted)")
-                        elif process.returncode == 0:
-                            logger.info(f"✅ Queue item completed: {shortcode}")
-                            db.remove_from_queue(shortcode)
-                        elif process.returncode == 2:
-                            # main.py queued this item for retry — status already set in DB
-                            logger.info(f"⏰ [{shortcode}] Quota exhausted — moved to retry queue")
-                            db.remove_from_queue(shortcode)
-                        else:
-                            logger.error(f"❌ Queue item failed (rc={process.returncode}): {shortcode}")
-                            db.remove_from_queue(shortcode)
-
-                    except Exception as e:
-                        with _active_processes_lock:
-                            _active_processes.pop(shortcode, None)
-                        logger.error(f"❌ Error processing queue item {shortcode}: {e}")
+                        process.wait(timeout=600)
+                    except subprocess.TimeoutExpired:
+                        logger.error(f"❌ [{shortcode}] Process timed out after 10 minutes. Killing...")
+                        process.kill()
+                        process.wait()
                         db.remove_from_queue(shortcode)
+                        continue
+
+                    with _active_processes_lock:
+                        _active_processes.pop(shortcode, None)
+
+                    # If the post was deleted while processing, skip queue cleanup
+                    # (delete_post already called remove_from_queue)
+                    if process.returncode == -9 or process.returncode == -15:
+                        logger.info(f"🛑 [{shortcode}] Analysis killed (post was deleted)")
+                    elif process.returncode == 0:
+                        logger.info(f"✅ Queue item completed: {shortcode}")
+                        db.remove_from_queue(shortcode)
+                    elif process.returncode == 2:
+                        # main.py queued this item for retry — status already set in DB
+                        logger.info(f"⏰ [{shortcode}] Quota exhausted — moved to retry queue")
+                        db.remove_from_queue(shortcode)
+                    else:
+                        logger.error(f"❌ Queue item failed (rc={process.returncode}): {shortcode}")
+                        db.remove_from_queue(shortcode)
+
+                except Exception as e:
+                    with _active_processes_lock:
+                        _active_processes.pop(shortcode, None)
+                    logger.error(f"❌ Error processing queue item {shortcode}: {e}")
+                    db.remove_from_queue(shortcode)
             
             # Sleep before next check
             time.sleep(5)
@@ -511,48 +525,54 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
         
         # Step 2: Not in cache - check if already being processed
         logger.info(f"💾 [{shortcode}] Not in cache")
-        
-        # Check if already in queue or processing
-        processing_items = db.get_processing()
-        if shortcode in processing_items:
-            logger.warning(f"⏳ [{shortcode}] Already being processed. Please wait...")
-            raise HTTPException(
-                status_code=409, 
-                detail="This URL is already being analyzed. Please wait and try again in a moment."
-            )
-        
-        # Check if URL is already in queue - if so, remove the old queued item
-        queue_items = db.get_queue()
-        for item in queue_items:
-            if item['shortcode'] == shortcode:
-                logger.info(f"🔄 [{shortcode}] Duplicate found in queue - removing old entry and processing fresh request")
-                db.remove_from_queue(shortcode)
-                break
-        
-        # Step 3: Check queue size (re-fetch after potential duplicate removal)
-        queue_items = db.get_queue()
-        if len(processing_items) >= max_concurrent:
-            logger.warning(f"🚦 [{shortcode}] Server busy - 1 post analyzing. Adding to queue...")
-            queue_position = db.add_to_queue(shortcode, request.url)
-            if queue_position > 0:
-                logger.info(f"📝 [{shortcode}] ✅ Added to queue at position {queue_position}")
-                logger.info(f"📊 Queue status: {len(queue_items) + 1} waiting | 1 analyzing")
+
+        # The whole "is there capacity? -> claim it" decision is held under
+        # one lock, shared with queue_worker's background pickup — otherwise
+        # two requests (or this request racing the background worker) can
+        # both observe spare capacity before either claims it, and both end
+        # up spawning a main.py subprocess despite max_concurrent=1.
+        with _queue_admission_lock:
+            # Check if already in queue or processing
+            processing_items = db.get_processing()
+            if shortcode in processing_items:
+                logger.warning(f"⏳ [{shortcode}] Already being processed. Please wait...")
                 raise HTTPException(
-                    status_code=503,
-                    detail=f"Server busy analyzing 1 post. Your request is queued (position: {queue_position}). It will be processed automatically. Check back in a few minutes."
+                    status_code=409,
+                    detail="This URL is already being analyzed. Please wait and try again in a moment."
                 )
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to add to queue. Please try again."
-                )
-        
-        # Step 4: Start processing
-        if len(queue_items) > 0:
-            logger.info(f"📊 Queue status: {len(queue_items)} waiting | Starting: {shortcode}")
-        logger.info(f"🚀 [{shortcode}] Starting analysis...")
-        db.mark_processing(shortcode)
-        
+
+            # Check if URL is already in queue - if so, remove the old queued item
+            queue_items = db.get_queue()
+            for item in queue_items:
+                if item['shortcode'] == shortcode:
+                    logger.info(f"🔄 [{shortcode}] Duplicate found in queue - removing old entry and processing fresh request")
+                    db.remove_from_queue(shortcode)
+                    break
+
+            # Step 3: Check queue size (re-fetch after potential duplicate removal)
+            queue_items = db.get_queue()
+            if len(processing_items) >= max_concurrent:
+                logger.warning(f"🚦 [{shortcode}] Server busy - 1 post analyzing. Adding to queue...")
+                queue_position = db.add_to_queue(shortcode, request.url, request.caption, request.hashtags)
+                if queue_position > 0:
+                    logger.info(f"📝 [{shortcode}] ✅ Added to queue at position {queue_position}")
+                    logger.info(f"📊 Queue status: {len(queue_items) + 1} waiting | 1 analyzing")
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Server busy analyzing 1 post. Your request is queued (position: {queue_position}). It will be processed automatically. Check back in a few minutes."
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to add to queue. Please try again."
+                    )
+
+            # Step 4: Start processing
+            if len(queue_items) > 0:
+                logger.info(f"📊 Queue status: {len(queue_items)} waiting | Starting: {shortcode}")
+            logger.info(f"🚀 [{shortcode}] Starting analysis...")
+            db.mark_processing(shortcode, url_str, content_type)
+
         # Run main.py as subprocess — executed in a thread pool so the asyncio
         # event loop stays free to serve /ping and other requests during analysis.
         logger.info(f"📊 [{shortcode}] Phase 1: Downloading content...")

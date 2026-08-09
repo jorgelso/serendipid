@@ -139,6 +139,11 @@ class Database:
             ("attempts",     "INTEGER DEFAULT 0"),
             ("reason",       "TEXT"),
             ("content_type", "TEXT"),
+            # Client-supplied caption/hashtags hint (see AnalyzeRequest) — kept
+            # on the queue row so a busy server queuing the request doesn't
+            # drop this context before queue_worker eventually spawns main.py.
+            ("caption",      "TEXT"),
+            ("hashtags",     "TEXT"),
         ]:
             try:
                 self._conn.execute(
@@ -881,8 +886,14 @@ class Database:
 
     # ==================== QUEUE MANAGEMENT ====================
 
-    def add_to_queue(self, shortcode, url):
-        """Add item to processing queue. Returns queue position (1-based), or -1 on error."""
+    def add_to_queue(self, shortcode, url, caption=None, hashtags=None):
+        """Add item to processing queue. Returns queue position (1-based), or -1 on error.
+
+        caption/hashtags: optional client-supplied hint (see AnalyzeRequest),
+        persisted so queue_worker can still forward it to main.py once this
+        item is eventually picked up — otherwise it's silently lost for any
+        request that arrives while the server is busy.
+        """
         if not self.is_connected():
             return -1
         try:
@@ -904,15 +915,18 @@ class Database:
             position = (row[0] + 1) if row[0] is not None else 1
 
             now = datetime.utcnow().isoformat()
+            hashtags_json = json.dumps(hashtags) if hashtags else ''
             self._conn.execute("""
-                INSERT INTO processing_queue (shortcode, url, status, position, added_at, updated_at)
-                VALUES (?, ?, 'queued', ?, ?, ?)
+                INSERT INTO processing_queue (shortcode, url, status, position, added_at, updated_at, caption, hashtags)
+                VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
                     url        = excluded.url,
                     status     = 'queued',
                     position   = excluded.position,
-                    updated_at = excluded.updated_at
-            """, (shortcode, url, position, now, now))
+                    updated_at = excluded.updated_at,
+                    caption    = excluded.caption,
+                    hashtags   = excluded.hashtags
+            """, (shortcode, url, position, now, now, caption or '', hashtags_json))
             self._conn.commit()
             return position
         except Exception as e:
@@ -926,13 +940,23 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                "SELECT shortcode, url, position FROM processing_queue "
+                "SELECT shortcode, url, position, caption, hashtags FROM processing_queue "
                 "WHERE status = 'queued' ORDER BY position"
             )
-            return [
-                {"shortcode": r["shortcode"], "url": r["url"], "position": r["position"]}
-                for r in cur.fetchall()
-            ]
+            result = []
+            for r in cur.fetchall():
+                try:
+                    hashtags = json.loads(r["hashtags"]) if r["hashtags"] else []
+                except (json.JSONDecodeError, TypeError):
+                    hashtags = []
+                result.append({
+                    "shortcode": r["shortcode"],
+                    "url": r["url"],
+                    "position": r["position"],
+                    "caption": r["caption"] or '',
+                    "hashtags": hashtags,
+                })
+            return result
         except Exception as e:
             print(f"[WARNING]  Error getting queue: {e}")
             return []
@@ -951,17 +975,30 @@ class Database:
             print(f"[WARNING]  Error getting processing items: {e}")
             return []
 
-    def mark_processing(self, shortcode):
-        """Mark a queued item as currently processing."""
+    def mark_processing(self, shortcode, url=None, content_type=None):
+        """Mark an item as currently processing.
+
+        Upserts rather than plain-UPDATEs: the caller may not have gone
+        through add_to_queue() first (e.g. the fast path that processes a
+        request immediately when the server is idle), in which case no row
+        exists yet and a bare UPDATE would silently match zero rows — leaving
+        get_processing() blind to it. url/content_type are only used to seed
+        a new row; an existing row's url/content_type/position are left
+        untouched.
+        """
         if not self.is_connected():
             return False
         try:
             now = datetime.utcnow().isoformat()
             self._conn.execute("""
-                UPDATE processing_queue
-                SET status = 'processing', started_at = ?, updated_at = ?
-                WHERE shortcode = ?
-            """, (now, now, shortcode))
+                INSERT INTO processing_queue
+                    (shortcode, url, content_type, status, position, added_at, started_at, updated_at)
+                VALUES (?, ?, ?, 'processing', 0, ?, ?, ?)
+                ON CONFLICT(shortcode) DO UPDATE SET
+                    status     = 'processing',
+                    started_at = excluded.started_at,
+                    updated_at = excluded.updated_at
+            """, (shortcode, url or '', content_type or '', now, now, now))
             self._conn.commit()
             return True
         except Exception as e:

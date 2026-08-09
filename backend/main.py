@@ -729,207 +729,222 @@ def main():
     print("Heavy: Visual (video processing), Audio (Whisper)")
     print("Light: Music (Shazam), Text (metadata)")
     
-    results = {
-        'visual': [],
-        'audio_transcription': [],
-        'music_identification': [],
-        'text': []
-    }
-    
-    all_tasks = []
-    analysis_start = time.time()
-    
-    # === PHASE 1: Visual Analysis (HEAVY) - Run alone ===
-    if mp4_files or jpg_files:
-        print(f"\n🎬 Phase 1: Visual Analysis (Heavy Task)")
-        
-        for video in mp4_files:
-            result = run_analysis_task("Visual", 'analyzers/visual_analyze.py', str(video), "heavy")
-            if result['success']:
-                results['visual'].append({
-                    'file': result['file'],
-                    'type': 'video',
-                    'output': result['output']
-                })
-                print(_clean_visual(result['output'])[:600] + "\n")
-        
-        for img in jpg_files:
-            result = run_analysis_task("Visual", 'analyzers/visual_analyze.py', str(img), "heavy")
-            if result['success']:
-                results['visual'].append({
-                    'file': result['file'],
-                    'type': 'image',
-                    'output': result['output']
-                })
-                print(_clean_visual(result['output'])[:600] + "\n")
-    
-    # === PHASE 2: Audio Transcription (HEAVY) - Run alone ===
-    if mp3_files:
-        print(f"\n🎙️ Phase 2: Audio Transcription (Heavy Task)")
-        
-        for audio in mp3_files:
-            result = run_analysis_task("Audio", 'analyzers/audio_transcribe.py', str(audio), "heavy")
-            if result['success']:
-                results['audio_transcription'].append({
-                    'file': result['file'],
-                    'output': result['output']
-                })
-                print(_clean_audio(result['output'])[:600] + "\n")
-    
-    # === PHASE 3: Light tasks in PARALLEL ===
-    print(f"\n⚡ Phase 3: Light Tasks (Parallel Execution)")
-    
-    light_tasks = []
-    
-    # Add music identification tasks
-    for audio in mp3_files:
-        light_tasks.append(('music', 'analyzers/music_identifier.py', str(audio)))
-    
-    # Add text analysis tasks
-    for info_file in info_files:
-        light_tasks.append(('text', 'analyzers/text_analyzer.py', str(info_file)))
-    
-    if light_tasks:
-        # Run light tasks in parallel (max 3 concurrent)
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {}
-            
-            for task_type, script, file_path in light_tasks:
-                task_name = "Music ID" if task_type == 'music' else "Text"
-                future = executor.submit(run_analysis_task, task_name, script, file_path, "light")
-                futures[future] = task_type
-            
-            # Collect results as they complete
-            for future in as_completed(futures):
-                task_type = futures[future]
-                result = future.result()
-                
-                if result['success']:
-                    if task_type == 'music':
-                        results['music_identification'].append({
-                            'file': result['file'],
-                            'output': result['output']
-                        })
-                    else:  # text
-                        results['text'].append({
-                            'file': result['file'],
-                            'output': result['output']
-                        })
-                    
-                    if task_type == 'music':
-                        print(result['output'][:400] + "\n")
-                    else:
-                        print(_clean_text(result['output'])[:600] + "\n")
-    
-    analysis_elapsed = time.time() - analysis_start
-    print(f"\n⏱️  Total Analysis Time: {analysis_elapsed:.1f}s")
-    
-    # Final comprehensive summary
-    print_header("✅ GENERATING COMPREHENSIVE SUMMARY")
-    
-    final_summary = generate_final_summary(results, instagram_url, source_caption, source_hashtags)
-    
-    print_section("📋 FINAL REPORT")
-    print(final_summary)
-    
-    # Extract structured data from summary for database
-    title, summary_text, tags, music, category, language = parse_summary(final_summary)
-    
-    # OVERRIDE LLM MUSIC WITH DIRECT SHAZAM OUTPUT TO PRESERVE LINKS
-    if results.get('music_identification'):
-        for item in results['music_identification']:
-            out = item['output']
-            if 'Song:' in out:
-                song = [l.split('Song:')[1].strip() for l in out.split('\n') if 'Song:' in l][0]
-                artist_line = [l.split('Artist:')[1].strip() for l in out.split('\n') if 'Artist:' in l]
-                artist = artist_line[0] if artist_line else 'Unknown'
-                link = ""
-                spot_line = [l.split('Spotify:')[1].strip() for l in out.split('\n') if 'Spotify:' in l]
-                apple_line = [l.split('Apple Music:')[1].strip() for l in out.split('\n') if 'Apple Music:' in l]
-                if spot_line:
-                    link = spot_line[0]
-                elif apple_line:
-                    link = apple_line[0]
-                music = f"{song} by {artist}"
-                if link:
-                    music += f" | {link}"
-                break
-            elif 'No match found' in out:
-                music = "No music identified"
-                break
-
-    
-    # Get additional metadata from info.txt if available
-    username = ""
-    likes = 0
-    post_date = None
-    
-    if info_files:
-        try:
-            with open(info_files[0], 'r', encoding='utf-8') as f:
-                content = f.read()
-                username_match = re.search(r'Username: @(\S+)', content)
-                likes_match = re.search(r'Likes: (\d+)', content)
-                date_match = re.search(r'Date: ([\d\-: ]+)', content)
-                
-                if username_match:
-                    username = username_match.group(1)
-                if likes_match:
-                    likes = int(likes_match.group(1))
-                if date_match:
-                    post_date = date_match.group(1)
-        except:
-            pass
-    
-    # Save to database
-    print_section("💾 Saving to Database")
-
-    # Combine analysis texts — extract clean content (not raw stdout)
-    visual_text = "\n\n".join([_clean_visual(r['output']) for r in results['visual']])
-    audio_text = "\n\n".join([_clean_audio(r['output']) for r in results['audio_transcription']])
-    text_text = "\n\n".join([_clean_text(r['output']) for r in results['text']])
-
-    # — Instagram thumbnail: first downloaded jpg (converted to base64) —
-    instagram_thumbnail = ""
-    if jpg_files:
-        print(f"🖼️  Saving thumbnail from {jpg_files[0].name}...")
-        instagram_thumbnail = _jpg_to_thumbnail(jpg_files[0])
-    elif mp4_files:
-        # Try to extract first frame from the video using cv2
-        try:
-            import cv2
-            import base64
-            import tempfile
-            cap = cv2.VideoCapture(str(mp4_files[0]))
-            ret, frame = cap.read()
-            cap.release()
-            if ret:
-                import cv2 as _cv2
-                # Resize to 480 wide keeping aspect
-                h, w = frame.shape[:2]
-                new_w = 480
-                new_h = int(h * new_w / w)
-                frame = _cv2.resize(frame, (new_w, new_h))
-                ok, buf = _cv2.imencode(".jpg", frame, [_cv2.IMWRITE_JPEG_QUALITY, 75])
-                if ok:
-                    encoded = base64.b64encode(buf.tobytes()).decode()
-                    instagram_thumbnail = f"data:image/jpeg;base64,{encoded}"
-                    print("🖼️  Saved first-frame thumbnail from video")
-        except Exception as thumb_err:
-            print(f"⚠️  Could not extract video thumbnail: {thumb_err}")
-
-    # Generate an embedding for semantic search (best-effort — a failure here
-    # shouldn't fail the whole analysis, the post just won't be
-    # semantically-searchable until a later backfill).
-    embedding = None
+    # Guard the whole analysis phase so a bug anywhere in it (parsing,
+    # summary generation, thumbnail extraction, embedding) can't crash the
+    # process before the downloaded media is relocated out of temp/ below —
+    # that would silently orphan the download forever. On failure we still
+    # relocate whatever was downloaded (so it isn't lost/orphaned) before
+    # exiting non-zero, same as any other pipeline failure.
     try:
-        from core.model_router import get_router as _get_router
-        embedding_text = f"{title}\n\n{summary_text}\n\nTags: {', '.join(tags)}"
-        embedding = _get_router().generate_embedding(embedding_text)
-        if embedding:
-            print(f"✓ Generated embedding ({len(embedding)} dims)")
-    except Exception as emb_err:
-        print(f"⚠️  Embedding generation error: {emb_err}")
+        results = {
+            'visual': [],
+            'audio_transcription': [],
+            'music_identification': [],
+            'text': []
+        }
+    
+        all_tasks = []
+        analysis_start = time.time()
+    
+        # === PHASE 1: Visual Analysis (HEAVY) - Run alone ===
+        if mp4_files or jpg_files:
+            print(f"\n🎬 Phase 1: Visual Analysis (Heavy Task)")
+        
+            for video in mp4_files:
+                result = run_analysis_task("Visual", 'analyzers/visual_analyze.py', str(video), "heavy")
+                if result['success']:
+                    results['visual'].append({
+                        'file': result['file'],
+                        'type': 'video',
+                        'output': result['output']
+                    })
+                    print(_clean_visual(result['output'])[:600] + "\n")
+        
+            for img in jpg_files:
+                result = run_analysis_task("Visual", 'analyzers/visual_analyze.py', str(img), "heavy")
+                if result['success']:
+                    results['visual'].append({
+                        'file': result['file'],
+                        'type': 'image',
+                        'output': result['output']
+                    })
+                    print(_clean_visual(result['output'])[:600] + "\n")
+    
+        # === PHASE 2: Audio Transcription (HEAVY) - Run alone ===
+        if mp3_files:
+            print(f"\n🎙️ Phase 2: Audio Transcription (Heavy Task)")
+        
+            for audio in mp3_files:
+                result = run_analysis_task("Audio", 'analyzers/audio_transcribe.py', str(audio), "heavy")
+                if result['success']:
+                    results['audio_transcription'].append({
+                        'file': result['file'],
+                        'output': result['output']
+                    })
+                    print(_clean_audio(result['output'])[:600] + "\n")
+    
+        # === PHASE 3: Light tasks in PARALLEL ===
+        print(f"\n⚡ Phase 3: Light Tasks (Parallel Execution)")
+    
+        light_tasks = []
+    
+        # Add music identification tasks
+        for audio in mp3_files:
+            light_tasks.append(('music', 'analyzers/music_identifier.py', str(audio)))
+    
+        # Add text analysis tasks
+        for info_file in info_files:
+            light_tasks.append(('text', 'analyzers/text_analyzer.py', str(info_file)))
+    
+        if light_tasks:
+            # Run light tasks in parallel (max 3 concurrent)
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {}
+            
+                for task_type, script, file_path in light_tasks:
+                    task_name = "Music ID" if task_type == 'music' else "Text"
+                    future = executor.submit(run_analysis_task, task_name, script, file_path, "light")
+                    futures[future] = task_type
+            
+                # Collect results as they complete
+                for future in as_completed(futures):
+                    task_type = futures[future]
+                    result = future.result()
+                
+                    if result['success']:
+                        if task_type == 'music':
+                            results['music_identification'].append({
+                                'file': result['file'],
+                                'output': result['output']
+                            })
+                        else:  # text
+                            results['text'].append({
+                                'file': result['file'],
+                                'output': result['output']
+                            })
+                    
+                        if task_type == 'music':
+                            print(result['output'][:400] + "\n")
+                        else:
+                            print(_clean_text(result['output'])[:600] + "\n")
+    
+        analysis_elapsed = time.time() - analysis_start
+        print(f"\n⏱️  Total Analysis Time: {analysis_elapsed:.1f}s")
+    
+        # Final comprehensive summary
+        print_header("✅ GENERATING COMPREHENSIVE SUMMARY")
+    
+        final_summary = generate_final_summary(results, instagram_url, source_caption, source_hashtags)
+    
+        print_section("📋 FINAL REPORT")
+        print(final_summary)
+    
+        # Extract structured data from summary for database
+        title, summary_text, tags, music, category, language = parse_summary(final_summary)
+    
+        # OVERRIDE LLM MUSIC WITH DIRECT SHAZAM OUTPUT TO PRESERVE LINKS
+        if results.get('music_identification'):
+            for item in results['music_identification']:
+                out = item['output']
+                if 'Song:' in out:
+                    song = [l.split('Song:')[1].strip() for l in out.split('\n') if 'Song:' in l][0]
+                    artist_line = [l.split('Artist:')[1].strip() for l in out.split('\n') if 'Artist:' in l]
+                    artist = artist_line[0] if artist_line else 'Unknown'
+                    link = ""
+                    spot_line = [l.split('Spotify:')[1].strip() for l in out.split('\n') if 'Spotify:' in l]
+                    apple_line = [l.split('Apple Music:')[1].strip() for l in out.split('\n') if 'Apple Music:' in l]
+                    if spot_line:
+                        link = spot_line[0]
+                    elif apple_line:
+                        link = apple_line[0]
+                    music = f"{song} by {artist}"
+                    if link:
+                        music += f" | {link}"
+                    break
+                elif 'No match found' in out:
+                    music = "No music identified"
+                    break
+
+    
+        # Get additional metadata from info.txt if available
+        username = ""
+        likes = 0
+        post_date = None
+    
+        if info_files:
+            try:
+                with open(info_files[0], 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    username_match = re.search(r'Username: @(\S+)', content)
+                    likes_match = re.search(r'Likes: (\d+)', content)
+                    date_match = re.search(r'Date: ([\d\-: ]+)', content)
+                
+                    if username_match:
+                        username = username_match.group(1)
+                    if likes_match:
+                        likes = int(likes_match.group(1))
+                    if date_match:
+                        post_date = date_match.group(1)
+            except:
+                pass
+    
+        # Save to database
+        print_section("💾 Saving to Database")
+
+        # Combine analysis texts — extract clean content (not raw stdout)
+        visual_text = "\n\n".join([_clean_visual(r['output']) for r in results['visual']])
+        audio_text = "\n\n".join([_clean_audio(r['output']) for r in results['audio_transcription']])
+        text_text = "\n\n".join([_clean_text(r['output']) for r in results['text']])
+
+        # — Instagram thumbnail: first downloaded jpg (converted to base64) —
+        instagram_thumbnail = ""
+        if jpg_files:
+            print(f"🖼️  Saving thumbnail from {jpg_files[0].name}...")
+            instagram_thumbnail = _jpg_to_thumbnail(jpg_files[0])
+        elif mp4_files:
+            # Try to extract first frame from the video using cv2
+            try:
+                import cv2
+                import base64
+                import tempfile
+                cap = cv2.VideoCapture(str(mp4_files[0]))
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    import cv2 as _cv2
+                    # Resize to 480 wide keeping aspect
+                    h, w = frame.shape[:2]
+                    new_w = 480
+                    new_h = int(h * new_w / w)
+                    frame = _cv2.resize(frame, (new_w, new_h))
+                    ok, buf = _cv2.imencode(".jpg", frame, [_cv2.IMWRITE_JPEG_QUALITY, 75])
+                    if ok:
+                        encoded = base64.b64encode(buf.tobytes()).decode()
+                        instagram_thumbnail = f"data:image/jpeg;base64,{encoded}"
+                        print("🖼️  Saved first-frame thumbnail from video")
+            except Exception as thumb_err:
+                print(f"⚠️  Could not extract video thumbnail: {thumb_err}")
+
+        # Generate an embedding for semantic search (best-effort — a failure here
+        # shouldn't fail the whole analysis, the post just won't be
+        # semantically-searchable until a later backfill).
+        embedding = None
+        try:
+            from core.model_router import get_router as _get_router
+            embedding_text = f"{title}\n\n{summary_text}\n\nTags: {', '.join(tags)}"
+            embedding = _get_router().generate_embedding(embedding_text)
+            if embedding:
+                print(f"✓ Generated embedding ({len(embedding)} dims)")
+        except Exception as emb_err:
+            print(f"⚠️  Embedding generation error: {emb_err}")
+    except Exception as e:
+        print(f"\n❌ Analysis pipeline failed: {e}")
+        import traceback
+        traceback.print_exc()
+        print_section("🎞️  Relocating media to permanent storage (after failure)")
+        relocate_to_media_store(download_folder, shortcode)
+        sys.exit(1)
+
 
     # Move the downloaded video/audio/thumbnail out of temp/ (caption-named,
     # transient) into media/<shortcode>/ (stable, permanent) — this is what
@@ -943,7 +958,7 @@ def main():
     else:
         print("⚠ No media files relocated (nothing found in temp folder, or move failed)")
 
-    db.save_analysis(
+    saved = db.save_analysis(
         shortcode=shortcode,
         url=instagram_url,
         username=username,
@@ -963,6 +978,15 @@ def main():
         source_hashtags=source_hashtags,
         embedding=embedding,
     )
+
+    if not saved:
+        # save_analysis() already printed the underlying error. Exit non-zero
+        # so api.py/queue_worker treat this as a failure instead of silently
+        # marking the item complete — the media was already relocated above,
+        # but with no DB row pointing at it (and the caller can decide whether
+        # to have the user retry).
+        print("❌ Analysis pipeline succeeded but the database write failed — see error above.")
+        sys.exit(1)
 
     print(f"✓ Analysis saved to database")
     print("\n" + "=" * 80)
