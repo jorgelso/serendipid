@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { ClientPost, Theme, VectorSpaceColorSlot, VectorSpacePoint } from "@/types/domain";
+import type { VectorSpaceSceneHandle } from "./VectorSpaceScene";
 import VectorSpaceLegend from "./VectorSpaceLegend";
 import PostModal from "./PostModal";
 
@@ -29,6 +30,7 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
   const [selectedPost, setSelectedPost] = useState<ClientPost | null>(null);
   const [loadingShortcode, setLoadingShortcode] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const sceneRef = useRef<VectorSpaceSceneHandle>(null);
 
   async function handleSelect(shortcode: string) {
     setLoadingShortcode(shortcode);
@@ -51,12 +53,22 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
 
   return (
     <div className="fixed inset-0 z-0">
-      <VectorSpaceScene points={points} activeColorSlot={activeColorSlot} onSelect={handleSelect} />
+      <VectorSpaceScene ref={sceneRef} points={points} activeColorSlot={activeColorSlot} onSelect={handleSelect} />
 
       <div className="pointer-events-none absolute inset-0 flex items-start justify-between px-4 pb-4 pt-20">
-        <div className="pointer-events-auto rounded-2xl border border-line bg-surface/90 px-4 py-2.5 text-xs text-ink-muted shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
-          <span className="font-display font-bold text-ink">{points.length} reels</span> · drag to
-          rotate · scroll to zoom
+        <div className="pointer-events-auto flex items-center gap-2">
+          <div className="rounded-2xl border border-line bg-surface/90 px-4 py-2.5 text-xs text-ink-muted shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
+            <span className="font-display font-bold text-ink">{points.length} reels</span> · drag to
+            rotate · scroll to zoom
+          </div>
+          <button
+            type="button"
+            onClick={() => sceneRef.current?.resetCamera()}
+            title="Reset view"
+            className="rounded-2xl border border-line bg-surface/90 px-3 py-2.5 text-xs font-bold text-ink-muted shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md transition-colors hover:text-ink"
+          >
+            ↺ Reset view
+          </button>
         </div>
         <VectorSpaceLegend
           themes={themes}

@@ -90,6 +90,99 @@ function normalizeLayout(raw: number[][]): [number, number, number][] {
   ]);
 }
 
+// UMAP routinely places very-similar posts almost exactly on top of each
+// other, especially the "unclustered" majority (no theme is a strong enough
+// pull to keep them apart) — great for measuring similarity, bad for a
+// scene where you need to see and click individual points. A few rounds of
+// simple pairwise repulsion (push apart any pair closer than MIN_SEPARATION,
+// same idea as d3-force's collide) gives every point real breathing room
+// without materially changing the overall cluster shape. O(n^2) per pass —
+// fine at personal-library scale (a few hundred to low thousands of posts,
+// computed once and cached alongside the rest of this layout); capped for
+// safety if a library ever gets huge enough for that to matter.
+const MIN_SEPARATION = 1.4;
+const DECLUTTER_ITERATIONS = 6;
+const DECLUTTER_MAX_POINTS = 4000;
+
+function declutter(positions: [number, number, number][]): [number, number, number][] {
+  if (positions.length > DECLUTTER_MAX_POINTS) return positions;
+  const pts = positions.map((p) => [...p] as [number, number, number]);
+  const random = mulberry32(UMAP_SEED ^ 0x9e3779b9);
+
+  for (let iter = 0; iter < DECLUTTER_ITERATIONS; iter++) {
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const dx = pts[j][0] - pts[i][0];
+        const dy = pts[j][1] - pts[i][1];
+        const dz = pts[j][2] - pts[i][2];
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (dist < 1e-6) {
+          // Exact (or near-exact) overlap — nudge apart in a random
+          // direction rather than dividing by a near-zero distance.
+          const jitter = () => (random() - 0.5) * MIN_SEPARATION;
+          pts[j][0] += jitter();
+          pts[j][1] += jitter();
+          pts[j][2] += jitter();
+          continue;
+        }
+        if (dist >= MIN_SEPARATION) continue;
+
+        const push = (MIN_SEPARATION - dist) / 2;
+        const nx = (dx / dist) * push;
+        const ny = (dy / dist) * push;
+        const nz = (dz / dist) * push;
+        pts[i][0] -= nx;
+        pts[i][1] -= ny;
+        pts[i][2] -= nz;
+        pts[j][0] += nx;
+        pts[j][1] += ny;
+        pts[j][2] += nz;
+      }
+    }
+  }
+
+  return pts;
+}
+
+// DISABLED per user request — reverted to the neutral-slot-based glow
+// dimming in VectorSpaceScene.tsx instead. Left in place (commented, not
+// deleted) in case density-based glow scaling is wanted again later.
+//
+// However well-separated the layout is, a point buried in a tight cluster
+// still has many neighbors nearby — its glow (see VectorSpaceScene's
+// GlowLayer) should recede in proportion, so a dense area reads as distinct
+// dots instead of a merged wash, while a genuinely isolated point keeps its
+// full glow. Same O(n^2) pairwise-distance shape as declutter() above (and
+// the same size cap), just counting instead of pushing.
+// const DENSITY_RADIUS = 2.5;
+// const DENSITY_SATURATION = 10; // neighbor count at which glow bottoms out
+// const MIN_GLOW_SCALE = 0.35;
+//
+// function computeGlowScales(positions: [number, number, number][]): number[] {
+//   const n = positions.length;
+//   const neighborCounts = new Array(n).fill(0);
+//   if (n > DECLUTTER_MAX_POINTS) return neighborCounts.map(() => 1);
+//
+//   const radiusSq = DENSITY_RADIUS * DENSITY_RADIUS;
+//   for (let i = 0; i < n; i++) {
+//     for (let j = i + 1; j < n; j++) {
+//       const dx = positions[j][0] - positions[i][0];
+//       const dy = positions[j][1] - positions[i][1];
+//       const dz = positions[j][2] - positions[i][2];
+//       if (dx * dx + dy * dy + dz * dz < radiusSq) {
+//         neighborCounts[i]++;
+//         neighborCounts[j]++;
+//       }
+//     }
+//   }
+//
+//   return neighborCounts.map((count) => {
+//     const t = Math.min(count, DENSITY_SATURATION) / DENSITY_SATURATION;
+//     return 1 - t * (1 - MIN_GLOW_SCALE);
+//   });
+// }
+
 /** Below this, UMAP's neighbor graph isn't meaningful (and nNeighbors can't
  * be clamped sensibly) — spread points on a small ring instead of crashing
  * or projecting garbage. A fresh library with a handful of saved reels hits
@@ -138,7 +231,8 @@ export function computeVectorSpaceLayout(
           return umap.fit(vectors) as number[][];
         })();
 
-  const positions = normalizeLayout(rawPositions);
+  const positions = declutter(normalizeLayout(rawPositions));
+  // const glowScales = computeGlowScales(positions); // disabled — see computeGlowScales' comment above
 
   return shortcodes.map((shortcode, i) => {
     const post = postsByShortcode.get(shortcode)!;
@@ -160,6 +254,7 @@ export function computeVectorSpaceLayout(
       // tens of MB across a few hundred points.
       thumbnail: post.thumbnail ? `/api/thumbnail/${post.shortcode}` : null,
       videoUrl,
+      // glowScale: glowScales[i], // disabled — see computeGlowScales' comment above
     };
   });
 }

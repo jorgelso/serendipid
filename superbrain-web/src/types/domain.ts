@@ -141,4 +141,11 @@ export interface VectorSpacePoint {
   category: string[];
   thumbnail: string | null;
   videoUrl: string | null;
+  // Density-based glow scaling disabled (reverted to neutral-slot-based
+  // dimming in VectorSpaceScene.tsx) — field commented out, not deleted, in
+  // case it's wanted again later. Was: 0-1, based on how many other points
+  // sit within a fixed radius of this one (see computeGlowScales() in
+  // src/lib/vectorSpace.ts) — 1 for an isolated point, down to a floor for
+  // one buried in a dense cluster.
+  // glowScale: number;
 }

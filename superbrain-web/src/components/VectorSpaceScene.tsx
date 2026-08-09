@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Grid, Html, Instance, Instances, Line, OrbitControls, Stars, Text } from "@react-three/drei";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Html, Instance, Instances, Line, OrbitControls, Stars } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { VectorSpaceColorSlot, VectorSpacePoint } from "@/types/domain";
 import { colorForSlot, useVizPalette } from "@/lib/useVizPalette";
@@ -15,40 +15,99 @@ interface VectorSpaceSceneProps {
   onSelect: (shortcode: string) => void;
 }
 
-const POINT_RADIUS = 0.65;
+export interface VectorSpaceSceneHandle {
+  resetCamera: () => void;
+}
+
+const DEFAULT_CAMERA_POSITION: [number, number, number] = [0, 20, 90];
+
+// Bridges the imperative reset handle (owned by the outer, DOM-land
+// component below) into the r3f tree — useThree()/the camera instance only
+// exist inside <Canvas>, not in the component that renders it, so this
+// registers the actual reset closure once mounted rather than trying to
+// call useThree() from outside the Canvas.
+function CameraController({
+  controlsRef,
+  registerReset,
+}: {
+  controlsRef: React.RefObject<OrbitControlsImpl | null>;
+  registerReset: (fn: () => void) => void;
+}) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    registerReset(() => {
+      camera.position.set(...DEFAULT_CAMERA_POSITION);
+      const controls = controlsRef.current;
+      if (controls) {
+        controls.target.set(0, 0, 0);
+        controls.update();
+      }
+    });
+  }, [camera, controlsRef, registerReset]);
+
+  return null;
+}
+
+// A point is three coordinated layers, not one shaded sphere: a small
+// "hot" core (lightened toward white, opaque — the interactive hit target),
+// a bigger additive mid-glow in the true category color, and a soft additive
+// outer bloom. Sized so the glow, not the core, dominates the silhouette —
+// a flat-lit single sphere reads as "an opaque ball" no matter how large its
+// halo is, since the sphere itself has zero internal falloff.
+const CORE_RADIUS = 0.4;
+const MID_RADIUS = 0.6;
+const OUTER_RADIUS = 1;
 const HOVER_SCALE = 1.6;
 
-// Deliberately independent of the app's light/dark theme tokens — this view
-// gets a fixed "lab instrument" aesthetic (see useVizPalette for the one
-// place that *does* follow the app theme: the categorical point colors).
 const SCENE_BACKGROUND = "#050506";
 const DIMMED_COLOR = "#3a3a3d";
 
 // Matches vectorSpace.ts's TARGET_RADIUS (24) with a bit of headroom so the
-// axes/grid visibly frame the point cloud instead of clipping it.
-const AXIS_HALF_LENGTH = 32;
+// bounding box/starfield visibly frame the point cloud instead of clipping.
+const HALF_EXTENT = 32;
+
+function lightenColor(hex: string, amount: number): string {
+  return `#${new THREE.Color(hex).lerp(new THREE.Color("#ffffff"), amount).getHexString()}`;
+}
+
+// A faint wireframe box enclosing the data reads as a containment
+// field/data volume.
+function BoundingBox() {
+  const geometry = useMemo(
+    () => new THREE.EdgesGeometry(new THREE.BoxGeometry(HALF_EXTENT * 2, HALF_EXTENT * 2, HALF_EXTENT * 2)),
+    []
+  );
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color="#8a8a90" transparent opacity={0.25} />
+    </lineSegments>
+  );
+}
+
 const AXES: { dir: [number, number, number]; label: string }[] = [
   { dir: [1, 0, 0], label: "X" },
   { dir: [0, 1, 0], label: "Y" },
   { dir: [0, 0, 1], label: "Z" },
 ];
 
+// Labels are plain HTML (via drei's Html, same technique as the hover card)
+// rather than drei's <Text> — <Text> (troika-three-text) does async font
+// loading through a worker/OffscreenCanvas, and that path reliably crashed
+// the WebGL context in this environment (see git history/PR notes). Html
+// sidesteps it entirely.
 function Axes() {
   return (
     <>
       {AXES.map(({ dir, label }) => {
-        const end: [number, number, number] = [
-          dir[0] * AXIS_HALF_LENGTH,
-          dir[1] * AXIS_HALF_LENGTH,
-          dir[2] * AXIS_HALF_LENGTH,
-        ];
+        const end: [number, number, number] = [dir[0] * HALF_EXTENT, dir[1] * HALF_EXTENT, dir[2] * HALF_EXTENT];
         const start: [number, number, number] = [-end[0], -end[1], -end[2]];
         return (
           <group key={label}>
             <Line points={[start, end]} color="white" lineWidth={1} transparent opacity={0.55} />
-            <Text position={end} fontSize={1.6} color="#d9d9d9" anchorX="center" anchorY="middle">
-              {label}
-            </Text>
+            <Html position={end} center style={{ pointerEvents: "none" }}>
+              <span className="font-display text-sm font-semibold text-[#d9d9d9]">{label}</span>
+            </Html>
           </group>
         );
       })}
@@ -56,25 +115,19 @@ function Axes() {
   );
 }
 
-// A starfield behind everything is what actually fixes "the background feels
-// empty" from every camera angle — three large shaded grid planes turned out
-// to be too much fragment-shader work at full-screen/retina resolution
-// (drove a WebGLRenderer context loss on load). One floor grid plus stars
-// keeps the "vector space" cue without the GPU cost.
+// Two layered starfields (near/bright + far/dim) for a bit of parallax
+// depth. drei's Stars sizes points as `factor * 30 / distanceFromCamera`
+// (see its shader) — the original radius/depth (160/100) placed stars
+// 160-260 units out while the camera sits ~90 units from the data, so at a
+// modest factor they rendered as barely-visible specks. Pulled the shells
+// much closer (just outside the ~32-unit bounding box) and pushed factor way
+// up so they're unmistakably there. Static: nothing in this scene moves on
+// its own, only in response to the user's own camera controls.
 function SpaceBackdrop() {
   return (
     <>
-      <Stars radius={140} depth={60} count={2500} factor={2.4} saturation={0} fade speed={0.4} />
-      <Grid
-        args={[AXIS_HALF_LENGTH * 2, AXIS_HALF_LENGTH * 2]}
-        cellColor="#2c2c30"
-        sectionColor="#55555a"
-        sectionThickness={1}
-        cellThickness={0.5}
-        fadeDistance={120}
-        fadeStrength={1.5}
-        infiniteGrid={false}
-      />
+      <Stars radius={130} depth={110} count={9000} factor={5.5} saturation={0} fade speed={0.5} />
+      <Stars radius={70} depth={45} count={1200} factor={8} saturation={0} fade speed={0.8} />
     </>
   );
 }
@@ -131,76 +184,183 @@ function KeyboardFly({ controlsRef }: { controlsRef: React.RefObject<OrbitContro
   return null;
 }
 
-function Point({
-  point,
-  color,
-  dimmed,
-  onSelect,
-}: {
+// @react-three/fiber does not itself handle WebGL context loss (nothing in
+// its source listens for `webglcontextlost`) — and per the WebGL spec, a
+// lost context is only auto-restored by the browser if something calls
+// `event.preventDefault()` on that event. Without this, any context loss
+// (GPU driver hiccup, resource pressure, the tab being backgrounded) leaves
+// the canvas permanently blank instead of recovering.
+function ContextLossHandler() {
+  const { gl } = useThree();
+
+  useEffect(() => {
+    const canvasEl = gl.domElement;
+    const onLost = (e: Event) => {
+      e.preventDefault();
+      console.warn("[space] WebGL context lost — attempting automatic recovery.");
+    };
+    const onRestored = () => console.info("[space] WebGL context restored.");
+
+    canvasEl.addEventListener("webglcontextlost", onLost);
+    canvasEl.addEventListener("webglcontextrestored", onRestored);
+    return () => {
+      canvasEl.removeEventListener("webglcontextlost", onLost);
+      canvasEl.removeEventListener("webglcontextrestored", onRestored);
+    };
+  }, [gl]);
+
+  return null;
+}
+
+interface ColoredPoint {
   point: VectorSpacePoint;
   color: string;
-  dimmed: boolean;
-  onSelect: (shortcode: string) => void;
+  coreColor: string;
+}
+
+function colorFor(isDimmed: boolean, layerColor: string): string {
+  return isDimmed ? DIMMED_COLOR : layerColor;
+}
+
+// "Unclustered"/"other" points (see vectorSpace.ts) are usually most of the
+// library and share one neutral gray — their glow is what actually melts
+// into an indistinct mass when dense, since there's no color variation to
+// tell overlapping instances apart in the first place. Real clusters stay at
+// full glow so they keep popping. (Restored — density-based glow scaling
+// via VectorSpacePoint.glowScale was tried and then reverted; see
+// vectorSpace.ts's commented-out computeGlowScales.)
+function isNeutralSlot(slot: VectorSpaceColorSlot): boolean {
+  return slot === "unclustered" || slot === "other";
+}
+
+const NEUTRAL_GLOW_SCALE = 0.45;
+
+// Purely visual, non-interactive glow ring — one instanced draw call
+// regardless of point count. Rendered twice (mid + outer) around the
+// interactive core below.
+function GlowLayer({
+  colored,
+  radius,
+  opacity,
+  activeColorSlot,
+  hoveredShortcode,
+}: {
+  colored: ColoredPoint[];
+  radius: number;
+  opacity: number;
+  activeColorSlot: VectorSpaceColorSlot | null;
+  hoveredShortcode: string | null;
 }) {
-  const [isHovered, setIsHovered] = useState(false);
-
-  // Instanced meshes don't support per-instance opacity out of the box (the
-  // shared material would need to be uniformly transparent), so "isolate
-  // this cluster" is expressed as shrink + desaturate-toward-neutral instead
-  // of alpha — visually recedes without fighting the instancing API.
-  const effectiveColor = dimmed ? DIMMED_COLOR : color;
-  const effectiveScale = (isHovered ? HOVER_SCALE : 1) * (dimmed ? 0.35 : 1);
-
   return (
-    <Instance
-      position={point.position}
-      color={effectiveColor}
-      scale={effectiveScale}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        setIsHovered(true);
-        document.body.style.cursor = "pointer";
-      }}
-      onPointerOut={(e) => {
-        e.stopPropagation();
-        setIsHovered(false);
-        document.body.style.cursor = "auto";
-      }}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect(point.shortcode);
-      }}
-    >
-      {isHovered && (
-        // No distanceFactor: that scales the card down the farther the
-        // camera sits from this point (great for a 3D label, unreadable for
-        // a video preview) — the card stays a fixed, legible screen size
-        // regardless of zoom instead.
-        <Html style={{ pointerEvents: "none" }} zIndexRange={[100, 0]}>
-          <div style={{ transform: "translate(24px, -50%)" }}>
-            <HoverPreviewCard point={point} />
-          </div>
-        </Html>
-      )}
-    </Instance>
+    <Instances limit={colored.length || 1} range={colored.length}>
+      <sphereGeometry args={[radius, 12, 12]} />
+      <meshBasicMaterial
+        transparent
+        opacity={opacity}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        toneMapped={false}
+      />
+      {colored.map(({ point, color }) => {
+        const isDimmed = activeColorSlot !== null && point.colorSlot !== activeColorSlot;
+        const isHovered = hoveredShortcode === point.shortcode;
+        const neutralScale = isNeutralSlot(point.colorSlot) ? NEUTRAL_GLOW_SCALE : 1;
+        return (
+          <Instance
+            key={point.shortcode}
+            position={point.position}
+            color={colorFor(isDimmed, color)}
+            // scale={(isHovered ? HOVER_SCALE : 1) * (isDimmed ? 0.35 : 1) * point.glowScale} // density-based glow, disabled
+            scale={(isHovered ? HOVER_SCALE : 1) * (isDimmed ? 0.35 : 1) * neutralScale}
+          />
+        );
+      })}
+    </Instances>
   );
 }
 
-export default function VectorSpaceScene({ points, activeColorSlot, onSelect }: VectorSpaceSceneProps) {
+// The interactive "hot core" — small, lightened toward white so it reads as
+// a bright light source rather than a flat opaque ball, and the one layer
+// that actually handles hover/click.
+function CoreLayer({
+  colored,
+  activeColorSlot,
+  hoveredShortcode,
+  onHover,
+  onSelect,
+}: {
+  colored: ColoredPoint[];
+  activeColorSlot: VectorSpaceColorSlot | null;
+  hoveredShortcode: string | null;
+  onHover: (shortcode: string | null) => void;
+  onSelect: (shortcode: string) => void;
+}) {
+  return (
+    <Instances limit={colored.length || 1} range={colored.length}>
+      <sphereGeometry args={[CORE_RADIUS, 16, 16]} />
+      <meshBasicMaterial toneMapped={false} />
+      {colored.map(({ point, coreColor }) => {
+        const isDimmed = activeColorSlot !== null && point.colorSlot !== activeColorSlot;
+        const isHovered = hoveredShortcode === point.shortcode;
+        return (
+          <Instance
+            key={point.shortcode}
+            position={point.position}
+            color={colorFor(isDimmed, coreColor)}
+            scale={(isHovered ? HOVER_SCALE : 1) * (isDimmed ? 0.35 : 1)}
+            onPointerOver={(e: ThreeEvent<PointerEvent>) => {
+              e.stopPropagation();
+              onHover(point.shortcode);
+              document.body.style.cursor = "pointer";
+            }}
+            onPointerOut={(e: ThreeEvent<PointerEvent>) => {
+              e.stopPropagation();
+              onHover(null);
+              document.body.style.cursor = "auto";
+            }}
+            onClick={(e: ThreeEvent<MouseEvent>) => {
+              e.stopPropagation();
+              onSelect(point.shortcode);
+            }}
+          />
+        );
+      })}
+    </Instances>
+  );
+}
+
+const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProps>(function VectorSpaceScene(
+  { points, activeColorSlot, onSelect },
+  ref
+) {
   const palette = useVizPalette();
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const [hoveredShortcode, setHoveredShortcode] = useState<string | null>(null);
+  const resetFnRef = useRef<() => void>(() => {});
 
-  const colored = useMemo(
-    () => points.map((point) => ({ point, color: colorForSlot(palette, point.colorSlot) })),
+  useImperativeHandle(ref, () => ({
+    resetCamera: () => resetFnRef.current(),
+  }));
+
+  const colored = useMemo<ColoredPoint[]>(
+    () =>
+      points.map((point) => {
+        const color = colorForSlot(palette, point.colorSlot);
+        return { point, color, coreColor: lightenColor(color, 0.18) };
+      }),
     [points, palette]
   );
 
+  const hoveredPoint = useMemo(
+    () => (hoveredShortcode ? points.find((p) => p.shortcode === hoveredShortcode) : null),
+    [points, hoveredShortcode]
+  );
+
   return (
-    <Canvas camera={{ position: [0, 20, 90], fov: 50 }} dpr={[1, 1.5]}>
+    <Canvas camera={{ position: DEFAULT_CAMERA_POSITION, fov: 50 }} dpr={[1, 1.5]}>
       <color attach="background" args={[SCENE_BACKGROUND]} />
-      {/* No lights: points use meshBasicMaterial (unlit, always full
-          brightness against black) and Line/Text/Grid/Stars are all
-          self-illuminated — nothing left in the scene reads lighting. */}
+      {/* No lights: every layer below is unlit (meshBasicMaterial) and
+          self-illuminated — nothing in the scene reads lighting. */}
       <OrbitControls
         ref={controlsRef}
         enableDamping
@@ -211,22 +371,42 @@ export default function VectorSpaceScene({ points, activeColorSlot, onSelect }: 
         screenSpacePanning
         makeDefault
       />
+      <ContextLossHandler />
+      <CameraController controlsRef={controlsRef} registerReset={(fn) => (resetFnRef.current = fn)} />
       <KeyboardFly controlsRef={controlsRef} />
       <SpaceBackdrop />
+      <BoundingBox />
       <Axes />
-      <Instances limit={points.length || 1} range={points.length}>
-        <sphereGeometry args={[POINT_RADIUS, 24, 24]} />
-        <meshBasicMaterial toneMapped={false} />
-        {colored.map(({ point, color }) => (
-          <Point
-            key={point.shortcode}
-            point={point}
-            color={color}
-            dimmed={activeColorSlot !== null && point.colorSlot !== activeColorSlot}
-            onSelect={onSelect}
-          />
-        ))}
-      </Instances>
+      <GlowLayer
+        colored={colored}
+        radius={OUTER_RADIUS}
+        opacity={0.07}
+        activeColorSlot={activeColorSlot}
+        hoveredShortcode={hoveredShortcode}
+      />
+      <GlowLayer
+        colored={colored}
+        radius={MID_RADIUS}
+        opacity={0.28}
+        activeColorSlot={activeColorSlot}
+        hoveredShortcode={hoveredShortcode}
+      />
+      <CoreLayer
+        colored={colored}
+        activeColorSlot={activeColorSlot}
+        hoveredShortcode={hoveredShortcode}
+        onHover={setHoveredShortcode}
+        onSelect={onSelect}
+      />
+      {hoveredPoint && (
+        <Html position={hoveredPoint.position} style={{ pointerEvents: "none" }} zIndexRange={[100, 0]}>
+          <div style={{ transform: "translate(24px, -50%)" }}>
+            <HoverPreviewCard point={hoveredPoint} />
+          </div>
+        </Html>
+      )}
     </Canvas>
   );
-}
+});
+
+export default VectorSpaceScene;
