@@ -58,24 +58,28 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     clearTimeout(timeout);
   }
 
-  if (res.status === 401) {
-    throw new SuperBrainApiError(
-      "Backend rejected the API key (401). Check SUPERBRAIN_API_KEY.",
-      401
-    );
-  }
-  if (options.statusMessages?.[res.status]) {
-    throw new SuperBrainApiError(options.statusMessages[res.status]!, res.status);
-  }
-  if (res.status === 503) {
-    throw new SuperBrainApiError(
-      "Backend could not generate an embedding (503) — is OPENAI_API_KEY " +
-        "configured on the backend? Semantic search is unavailable.",
-      503
-    );
-  }
   if (!res.ok) {
-    const body = await res.text();
+    // Drain the body exactly once, regardless of which branch below throws —
+    // leaving it unconsumed was leaving the underlying gzip/keep-alive stream
+    // dangling, which is what caused the MaxListenersExceededWarning on Gzip.
+    const body = await res.text().catch(() => "");
+
+    if (res.status === 401) {
+      throw new SuperBrainApiError(
+        "Backend rejected the API key (401). Check SUPERBRAIN_API_KEY.",
+        401
+      );
+    }
+    if (options.statusMessages?.[res.status]) {
+      throw new SuperBrainApiError(options.statusMessages[res.status]!, res.status);
+    }
+    if (res.status === 503) {
+      throw new SuperBrainApiError(
+        "Backend could not generate an embedding (503) — is OPENAI_API_KEY " +
+          "configured on the backend? Semantic search is unavailable.",
+        503
+      );
+    }
     throw new SuperBrainApiError(
       `Backend error ${res.status} calling ${path}: ${body.slice(0, 300)}`,
       res.status
