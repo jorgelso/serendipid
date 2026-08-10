@@ -33,6 +33,7 @@ backend/yt_error.txt
 backend/superbrain.db
 backend/superbrain.db-shm
 backend/superbrain.db-wal
+backend/superbrain.db.bak-*
 backend/backups/
 
 # ── Media (downloaded videos/audio/images, not for version control) ──────────
