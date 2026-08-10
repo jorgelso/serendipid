@@ -19,6 +19,7 @@ from core.link_checker import validate_link
 from core.database import get_db
 from core.categories import CATEGORY_PROMPT, parse_categories, keyword_fallback_categories
 from core.languages import LANGUAGE_PROMPT, parse_languages
+from core.importance import IMPORTANCE_PROMPT, parse_importance, apply_trusted_creator_boost
 from core.media_store import relocate_to_media_store
 from analyzers.youtube_analyzer import analyze_youtube
 from analyzers.webpage_analyzer import analyze_webpage
@@ -162,6 +163,9 @@ The ORIGINAL POST CAPTION and HASHTAGS above (if present) come directly from the
 🌐 LANGUAGE:
 {LANGUAGE_PROMPT}
 
+⭐ IMPORTANCE:
+{IMPORTANCE_PROMPT}
+
 Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
 
     try:
@@ -232,10 +236,12 @@ def parse_summary(summary_text):
     Robust against markdown bold, missing colons, varied whitespace.
 
     Returns:
-        tuple: (title, summary, tags, music, category, language)
+        tuple: (title, summary, tags, music, category, language, importance)
         category and language are each a list of 1+ labels — a post can
         belong to more than one category, and occasionally spans more than
         one language (e.g. speech in one language, captions in another).
+        importance is an int 1-5, or None if the model's field was missing/
+        unparseable (no keyword-fallback guess, same reasoning as language).
     """
     title = ""
     summary = ""
@@ -243,6 +249,7 @@ def parse_summary(summary_text):
     music = ""
     category = []
     language = []
+    importance = None
 
     try:
         title   = _parse_field(summary_text, "📌", "TITLE")
@@ -278,6 +285,10 @@ def parse_summary(summary_text):
         raw_lang = raw_lang.split('\n')[0].strip()
         language = parse_languages(raw_lang)
 
+        # Importance: single 1-5 score
+        raw_importance = _parse_field(summary_text, "⭐", "IMPORTANCE")
+        importance = parse_importance(raw_importance)
+
     except Exception as e:
         print(f"⚠️ Error parsing summary: {e}")
 
@@ -290,7 +301,7 @@ def parse_summary(summary_text):
     # unreliable, so an unparseable field is left empty (unknown) rather than
     # guessed.
 
-    return title, summary, tags, music, category, language
+    return title, summary, tags, music, category, language, importance
 
 def run_script(script_name, args):
     """Run a Python script and return success status"""
@@ -483,7 +494,9 @@ def run_youtube_analysis(url: str, shortcode: str, db):
     print_section("📋 RAW GEMINI OUTPUT")
     print(raw[:2000])
 
-    title, summary_text, tags, music, category, language = parse_summary(raw)
+    title, summary_text, tags, music, category, language, importance = parse_summary(raw)
+    yt_channel = result.get('channel', '')
+    importance = apply_trusted_creator_boost(importance, yt_channel)
 
     # Use upload date scraped directly from YouTube page (always accurate)
     yt_post_date = result.get('post_date')
@@ -492,13 +505,14 @@ def run_youtube_analysis(url: str, shortcode: str, db):
     db.save_analysis(
         shortcode=shortcode,
         url=url,
-        username=result.get('channel', ''),
+        username=yt_channel,
         title=title,
         summary=summary_text,
         tags=tags,
         music=music,
         category=category,
         language=language,
+        importance=importance,
         visual_analysis='',
         audio_transcription='',
         text_analysis=raw,
@@ -537,7 +551,9 @@ def run_webpage_analysis(url: str, shortcode: str, db):
     print_section("📋 RAW AI OUTPUT")
     print(raw[:2000])
 
-    title, summary_text, tags, music, category, language = parse_summary(raw)
+    title, summary_text, tags, music, category, language, importance = parse_summary(raw)
+    webpage_author = result.get('author', '')
+    importance = apply_trusted_creator_boost(importance, webpage_author)
     # Use on-page title as fallback if AI did not extract one
     if not title and page_title:
         title = page_title
@@ -546,13 +562,14 @@ def run_webpage_analysis(url: str, shortcode: str, db):
     db.save_analysis(
         shortcode=shortcode,
         url=url,
-        username=result.get('author', ''),
+        username=webpage_author,
         title=title,
         summary=summary_text,
         tags=tags,
         music=music,
         category=category,
         language=language,
+        importance=importance,
         visual_analysis='',
         audio_transcription='',
         text_analysis=raw,
@@ -840,7 +857,7 @@ def main():
         print(final_summary)
     
         # Extract structured data from summary for database
-        title, summary_text, tags, music, category, language = parse_summary(final_summary)
+        title, summary_text, tags, music, category, language, importance = parse_summary(final_summary)
     
         # OVERRIDE LLM MUSIC WITH DIRECT SHAZAM OUTPUT TO PRESERVE LINKS
         if results.get('music_identification'):
@@ -887,7 +904,9 @@ def main():
                         post_date = date_match.group(1)
             except:
                 pass
-    
+
+        importance = apply_trusted_creator_boost(importance, username)
+
         # Save to database
         print_section("💾 Saving to Database")
 
@@ -968,6 +987,7 @@ def main():
         music=music,
         category=category,
         language=language,
+        importance=importance,
         media_files=media_files,
         visual_analysis=visual_text,
         audio_transcription=audio_text,

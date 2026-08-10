@@ -16,7 +16,7 @@ export interface Post {
   tags: string[];
   music: string | null;
   // A post can genuinely belong to 1-3 categories (backend/core/categories.py's
-  // ~20-label taxonomy) — stored as a JSON array server-side, same pattern as
+  // ~30-label taxonomy) — stored as a JSON array server-side, same pattern as
   // `tags`. Never a plain string anymore, even for single-category posts.
   category: string[];
   // Content language(s) actually spoken/shown on-screen (backend/core/languages.py)
@@ -86,6 +86,15 @@ export interface ChangelogResponse {
   history: ChangelogEntry[];
 }
 
+export interface CategoriesResponse {
+  success: boolean;
+  categories: { id: string; name: string; count: number }[];
+  // Full canonical taxonomy (backend/core/categories.py), independent of
+  // which categories currently have posts.
+  canonical: string[];
+  total: number;
+}
+
 export interface SearchSemanticHit {
   shortcode: string;
   similarity: number;
@@ -130,6 +139,53 @@ export interface Theme {
 // shared --viz-neutral color, distinguished only by their (always-visible)
 // legend/hover label — see dataviz skill's relief rule.
 export type VectorSpaceColorSlot = `theme-${number}` | "other" | "unclustered";
+
+// Mirrors backend/core/rag.py's _light_source() — the citation shape
+// attached to an assistant chat message, not the full retrieved post (no
+// audio_transcription/visual_analysis/text_analysis, same idea as
+// ClientPost stripping `embedding`). No `thumbnail` either — that's
+// resolved client-side via /api/thumbnail/{shortcode} (see ChatSourceCards)
+// instead of embedding a base64 blob in every stored chat message.
+export interface ChatSource {
+  shortcode: string;
+  similarity: number;
+  url: string;
+  username: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  category: string[] | string;
+}
+
+// Mirrors backend/core/database.py's chat_messages table /
+// _chat_message_row_to_dict (sources is JSON-decoded server-side).
+export interface ChatMessage {
+  id: string;
+  thread_id: string;
+  role: "user" | "assistant";
+  content: string;
+  sources: ChatSource[];
+  created_at: string;
+}
+
+// Mirrors backend/core/database.py's chat_threads table.
+export interface ChatThread {
+  id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// GET /chat/threads/{id}'s response shape (thread + full message history).
+export interface ChatThreadDetail extends ChatThread {
+  messages: ChatMessage[];
+}
+
+// POST /chat/threads/{id}/messages's response shape.
+export interface ChatMessageExchange {
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
+}
 
 export interface VectorSpacePoint {
   shortcode: string;

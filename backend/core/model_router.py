@@ -491,6 +491,37 @@ MODELS: List[Dict[str, Any]] = [
         "base_priority": 100,
         "desc": "Local Ollama Qwen3-VL 4B — LAST RESORT (requires Ollama running)",
     },
+
+    # ── CHAT (RAG chatbot answer generation) ────────────────────────────────
+    # Deliberately separate from the "text" task's provider order/keys above
+    # — the chatbot always tries Gemini, then OpenAI (its own dedicated
+    # OPENAI_CHAT_API_KEY, kept independent from OPENAI_API_KEY which is used
+    # for analysis summaries and embeddings), then local Ollama.
+    {
+        "key": "chat_gemini_flash",
+        "provider": "gemini",
+        "model_id": "gemini-2.5-flash",
+        "type": "chat",
+        "base_priority": 0,
+        "desc": "Gemini 2.5 Flash — primary provider for RAG chatbot answers",
+    },
+    {
+        "key": "chat_openai_gpt41",
+        "provider": "openai",
+        "model_id": "gpt-4.1",
+        "type": "chat",
+        "base_priority": 1,
+        "key_name": "OPENAI_CHAT_API_KEY",
+        "desc": "OpenAI GPT-4.1 (dedicated chatbot key) — second fallback for RAG chatbot",
+    },
+    {
+        "key": "chat_local_qwen3",
+        "provider": "ollama",
+        "model_id": "qwen3-vl:4b",
+        "type": "chat",
+        "base_priority": 2,
+        "desc": "Local Ollama — LAST RESORT for RAG chatbot (requires Ollama running)",
+    },
 ]
 
 MODELS_BY_KEY: Dict[str, Dict] = {m["key"]: m for m in MODELS}
@@ -539,7 +570,7 @@ class ModelRouter:
 
     def _load_api_keys(self):
         """Load API keys from environment and .api_keys file."""
-        for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"):
+        for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_CHAT_API_KEY"):
             v = os.environ.get(k)
             if v:
                 self._api_keys[k] = v
@@ -866,7 +897,10 @@ class ModelRouter:
             return False
         if prov == "openrouter" and not self._key("OPENROUTER_API_KEY"):
             return False
-        if prov == "openai" and not self._key("OPENAI_API_KEY"):
+        # "key_name" lets a model entry use a dedicated key instead of the
+        # default OPENAI_API_KEY (e.g. the chat task's own OPENAI_CHAT_API_KEY,
+        # kept independent from the key used for analysis/embeddings).
+        if prov == "openai" and not self._key(m.get("key_name", "OPENAI_API_KEY")):
             return False
 
         s = self._state.get(model_key, self._default_model_state_dynamic(model_key))
@@ -990,26 +1024,30 @@ class ModelRouter:
         return r.choices[0].message.content.strip()
 
     def _gemini_text(self, model_id: str, prompt: str) -> str:
-        import google.generativeai as genai
-        genai.configure(api_key=self._key("GEMINI_API_KEY"))
-        model = genai.GenerativeModel(model_id)
-        r = model.generate_content(
-            prompt,
-            generation_config={"max_output_tokens": 4000, "temperature": 0.7},
+        from google import genai
+        from google.genai import types as gtypes
+        client = genai.Client(api_key=self._key("GEMINI_API_KEY"))
+        r = client.models.generate_content(
+            model=model_id,
+            contents=[prompt],
+            config=gtypes.GenerateContentConfig(max_output_tokens=4000, temperature=0.7),
         )
         return r.text.strip()
 
     def _gemini_vision(self, model_id: str, prompt: str, images_b64: List[str]) -> str:
-        import google.generativeai as genai
-        genai.configure(api_key=self._key("GEMINI_API_KEY"))
-        model = genai.GenerativeModel(model_id)
-        parts: List[Any] = []
-        for b64 in images_b64:
-            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+        from google import genai
+        from google.genai import types as gtypes
+        import base64
+        client = genai.Client(api_key=self._key("GEMINI_API_KEY"))
+        parts: List[Any] = [
+            gtypes.Part.from_bytes(data=base64.b64decode(b64), mime_type="image/jpeg")
+            for b64 in images_b64
+        ]
         parts.append(prompt)
-        r = model.generate_content(
-            parts,
-            generation_config={"max_output_tokens": 4000, "temperature": 0.7},
+        r = client.models.generate_content(
+            model=model_id,
+            contents=parts,
+            config=gtypes.GenerateContentConfig(max_output_tokens=4000, temperature=0.7),
         )
         return r.text.strip()
 
@@ -1068,12 +1106,12 @@ class ModelRouter:
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
 
-    def _openai_text(self, model_id: str, prompt: str) -> str:
+    def _openai_text(self, model_id: str, prompt: str, api_key: Optional[str] = None) -> str:
         import requests
         resp = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {self._key('OPENAI_API_KEY')}",
+                "Authorization": f"Bearer {api_key or self._key('OPENAI_API_KEY')}",
                 "Content-Type": "application/json",
             },
             json={
@@ -1185,6 +1223,53 @@ class ModelRouter:
                 print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
 
         raise RuntimeError("All text models failed.")
+
+    def generate_chat_text(self, prompt: str) -> str:
+        """
+        Generate a RAG chatbot answer using the "chat" task's own provider
+        order (Gemini → OpenAI[dedicated OPENAI_CHAT_API_KEY] → local Ollama)
+        — deliberately separate from generate_text()'s "text" task, so the
+        chatbot's provider/key choice never depends on what's configured for
+        analysis/summary generation.
+        Raises RuntimeError if all fail.
+        """
+        ranked = self._ranked_models("chat")
+        if not ranked:
+            raise RuntimeError(
+                "No chat models available. Add GEMINI_API_KEY, OPENAI_CHAT_API_KEY, "
+                "or run local Ollama."
+            )
+
+        for key in ranked:
+            m = MODELS_BY_KEY.get(key) or self._dynamic_models.get(key)
+            if not m:
+                continue
+            print(f"  💬 [{m['provider'].upper()}] {m['model_id']} ...", flush=True)
+            t0 = time.time()
+            try:
+                prov = m["provider"]
+                if prov == "gemini":
+                    result = self._gemini_text(m["model_id"], prompt)
+                elif prov == "openai":
+                    result = self._openai_text(
+                        m["model_id"], prompt, api_key=self._key(m.get("key_name", "OPENAI_API_KEY"))
+                    )
+                elif prov == "ollama":
+                    result = self._ollama_text(m["model_id"], prompt)
+                else:
+                    continue
+
+                elapsed = time.time() - t0
+                self._record_success(key, elapsed)
+                print(f"  ✓ {elapsed:.1f}s", flush=True)
+                return result
+
+            except Exception as e:
+                status = 429 if "429" in str(e) else 0
+                self._record_failure(key, str(e), status_code=status)
+                print(f"  ✗ Failed ({type(e).__name__}), trying next …", flush=True)
+
+        raise RuntimeError("All chat models failed.")
 
     def analyze_images(self, prompt: str, images_b64: List[str]) -> str:
         """

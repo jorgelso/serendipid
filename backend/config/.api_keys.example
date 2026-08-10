@@ -18,6 +18,13 @@ GEMINI_API_KEY=AIzaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 OPENROUTER_API_KEY=sk-or-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
+# Used ONLY by the RAG chatbot's answer-generation step (core/rag.py via
+# ModelRouter.generate_chat_text's "chat" task: Gemini -> OpenAI -> local
+# Ollama) — deliberately separate from OPENAI_API_KEY above, which is used
+# for post analysis/summaries and for generating embeddings. Optional: if
+# unset, the chatbot just skips straight to local Ollama when Gemini fails.
+OPENAI_CHAT_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
 # Instagram account used for downloading posts (instagrapi / Private API).
 # Use a secondary/burner account — not your main personal account.
 # Session is cached in .instagram_session.json after first login.

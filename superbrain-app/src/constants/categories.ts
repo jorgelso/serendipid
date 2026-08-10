@@ -10,6 +10,13 @@ export const DEFAULT_CATEGORIES = [
   { id: 'film', name: 'Film', icon: 'film', count: 0 },
   { id: 'tv shows', name: 'TV Shows', icon: 'tv', count: 0 },
   { id: 'event', name: 'Event', icon: 'calendar', count: 0 },
+  { id: 'fashion & style', name: 'Fashion & Style', icon: 'shirt', count: 0 },
+  { id: 'beauty & skincare', name: 'Beauty & Skincare', icon: 'sparkles', count: 0 },
+  { id: 'money & finance', name: 'Money & Finance', icon: 'cash', count: 0 },
+  { id: 'home & interior design', name: 'Home & Interior Design', icon: 'home', count: 0 },
+  { id: 'relationships & dating', name: 'Relationships & Dating', icon: 'heart', count: 0 },
+  { id: 'pets & animals', name: 'Pets & Animals', icon: 'paw', count: 0 },
+  { id: 'career & productivity', name: 'Career & Productivity', icon: 'briefcase', count: 0 },
   { id: 'other', name: 'Other', icon: 'pricetag', count: 0 },
 ];
 
@@ -26,6 +33,13 @@ export const CATEGORY_ICONS: Record<string, string> = {
   'film': 'film-outline',
   'tv shows': 'tv-outline',
   'event': 'calendar-outline',
+  'fashion & style': 'shirt-outline',
+  'beauty & skincare': 'sparkles-outline',
+  'money & finance': 'cash-outline',
+  'home & interior design': 'home-outline',
+  'relationships & dating': 'heart-outline',
+  'pets & animals': 'paw-outline',
+  'career & productivity': 'briefcase-outline',
   'other': 'pricetag-outline',
   'uncategorized': 'help-circle-outline',
 };

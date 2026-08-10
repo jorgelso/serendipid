@@ -1,11 +1,11 @@
 {
   "openai_gpt41": {
     "key": "openai_gpt41",
-    "avg_response_s": 4.764650207866781,
-    "success_count": 422,
+    "avg_response_s": 3.420441266139467,
+    "success_count": 449,
     "fail_count": 1,
     "down_until": null,
-    "last_used": "2026-08-09T04:07:07.272560",
+    "last_used": "2026-08-10T01:17:39.020535",
     "last_error": null,
     "base_priority": 0
   },
@@ -21,11 +21,11 @@
   },
   "groq_llama33_70b": {
     "key": "groq_llama33_70b",
-    "avg_response_s": 1.7818052785754506,
-    "success_count": 56,
-    "fail_count": 14,
-    "down_until": "2026-08-09T03:52:54.663039",
-    "last_used": "2026-08-09T03:22:54.167315",
+    "avg_response_s": 1.8682694790912215,
+    "success_count": 89,
+    "fail_count": 15,
+    "down_until": "2026-08-10T01:43:03.469905",
+    "last_used": "2026-08-10T01:13:00.019645",
     "last_error": "Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kzh8ataten68294v8vsw2nsh` service tier `on_demand` on tokens per day (TPD): Limit",
     "base_priority": 1
   },
@@ -321,11 +321,11 @@
   },
   "openai_gpt41_vision": {
     "key": "openai_gpt41_vision",
-    "avg_response_s": 5.416329891393075,
-    "success_count": 703,
+    "avg_response_s": 8.15047447788489,
+    "success_count": 767,
     "fail_count": 1,
     "down_until": null,
-    "last_used": "2026-08-09T04:06:57.934602",
+    "last_used": "2026-08-10T01:17:29.566318",
     "last_error": null,
     "base_priority": 0
   },
@@ -343,20 +343,20 @@
     "key": "gemini_25_flash_lite_vision",
     "avg_response_s": 6.709401964075168,
     "success_count": 14,
-    "fail_count": 34,
-    "down_until": "2026-08-09T03:27:25.713506",
+    "fail_count": 37,
+    "down_until": "2026-08-10T01:20:47.745970",
     "last_used": "2026-02-24T09:45:09.831171",
-    "last_error": "No module named 'google.generativeai'",
+    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 1.5
   },
   "gemini_25_pro_vision": {
     "key": "gemini_25_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 64,
-    "down_until": "2026-08-09T04:01:24.488815",
+    "fail_count": 69,
+    "down_until": "2026-08-10T01:20:30.473124",
     "last_used": null,
-    "last_error": "No module named 'google.generativeai'",
+    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 2
   },
   "gemini_3_flash_vision": {
@@ -373,20 +373,20 @@
     "key": "gemini_3_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 36,
-    "down_until": "2026-08-09T03:27:25.712885",
+    "fail_count": 39,
+    "down_until": "2026-08-10T01:20:47.259702",
     "last_used": null,
-    "last_error": "No module named 'google.generativeai'",
+    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3
   },
   "gemini_31_pro_vision": {
     "key": "gemini_31_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 32,
-    "down_until": "2026-08-09T03:27:25.714069",
+    "fail_count": 33,
+    "down_until": "2026-08-10T01:13:34.102219",
     "last_used": null,
-    "last_error": "No module named 'google.generativeai'",
+    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3.5
   },
   "gemini_20_flash_vision": {
@@ -508,6 +508,36 @@
     "last_used": null,
     "last_error": "No module named 'ollama'",
     "base_priority": 100
+  },
+  "chat_gemini_flash": {
+    "key": "chat_gemini_flash",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 3,
+    "down_until": "2026-08-10T00:53:08.778139",
+    "last_used": null,
+    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
+    "base_priority": 0
+  },
+  "chat_openai_gpt41": {
+    "key": "chat_openai_gpt41",
+    "avg_response_s": 4.597268488407135,
+    "success_count": 3,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": "2026-08-10T00:48:18.081994",
+    "last_error": null,
+    "base_priority": 1
+  },
+  "chat_local_qwen3": {
+    "key": "chat_local_qwen3",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 3,
+    "down_until": "2026-08-09T19:51:34.800633",
+    "last_used": null,
+    "last_error": "No module named 'ollama'",
+    "base_priority": 2
   },
   "dyn_nvidia_nemotron-3-ultra-550b-a55b_free": {
     "key": "dyn_nvidia_nemotron-3-ultra-550b-a55b_free",

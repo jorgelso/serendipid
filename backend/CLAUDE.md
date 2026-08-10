@@ -48,6 +48,7 @@ python core/model_router.py refresh    # force-refresh the OpenRouter free-model
 python utils/db_stats.py               # database statistics
 python utils/manage_token.py           # view/reset the API access token
 python scripts/backfill_embeddings.py  # generate embeddings for posts saved before that feature existed
+python scripts/score_importance.py     # score importance (1-5) for posts saved before that feature existed
 python instagram/instagram_login.py    # interactive Instagram login (handles 2FA), caches session
 ```
 
@@ -70,11 +71,12 @@ One module per analysis concern, each exposing `analyze_<x>(url) -> dict` return
 
 - **`database.py`** — SQLite (stdlib `sqlite3`, no ORM), WAL mode, `DATABASE_PATH` env var (defaults to `backend/superbrain.db`). Tables: `analyses` (main content), `processing_queue`, `collections` (seeded with a default "Watch Later"), `deleted_log` (soft-delete sync for mobile), `analysis_changelog`. Singleton: `get_db()`.
   - **No migration framework.** Schema changes are added as `ALTER TABLE ... ADD COLUMN` wrapped in `try/except sqlite3.OperationalError: pass` in `_create_tables()` — idempotent, runs on every startup. Follow this exact pattern for new columns; don't introduce Alembic or a separate migration step.
-  - `CURRENT_ANALYSIS_VERSION` (currently `4`) is stamped on every saved post; posts saved under an older pipeline version get flagged for review. Its history is queryable over the API via `GET /changelog` (backed by the `analysis_changelog` table, seeded in `_seed_changelog()`). **This changelog exists and should be kept current: whenever the reel/Instagram analysis process changes, add a matching entry to both `_seed_changelog()` and the version-history comment block directly above the constant. Only bump `CURRENT_ANALYSIS_VERSION` itself when the change is significant enough to be worth flagging previously-saved posts for review** — not every change to the pipeline warrants that (use judgment, or ask).
+  - `CURRENT_ANALYSIS_VERSION` (currently `6`) is stamped on every saved post; posts saved under an older pipeline version get flagged for review. Its history is queryable over the API via `GET /changelog` (backed by the `analysis_changelog` table, seeded in `_seed_changelog()`). **This changelog exists and should be kept current: whenever the reel/Instagram analysis process changes, add a matching entry to both `_seed_changelog()` and the version-history comment block directly above the constant. Only bump `CURRENT_ANALYSIS_VERSION` itself when the change is significant enough to be worth flagging previously-saved posts for review** — not every change to the pipeline warrants that (use judgment, or ask).
 - **`model_router.py`** — the AI Model Router (below).
 - **`link_checker.py`** — detects whether a URL is Instagram/YouTube/webpage.
 - **`media_store.py`** — relocates downloaded media from `temp/` to permanent `media/<shortcode>/`.
 - **`categories.py`, `category_manager.py`, `languages.py`** — taxonomy normalization and language-detection prompts used across analyzers.
+- **`importance.py`** — importance-scoring prompt/parser (see "Importance scoring" below).
 
 ### AI Model Router (`core/model_router.py`)
 
@@ -116,3 +118,12 @@ Interactive docs: `http://localhost:5000/docs` (Swagger) and `/redoc`.
 
 - Do not add Claude, or any `Co-Authored-By: Claude` / Claude Code attribution trailer, to commit messages in this repo.
 - Use Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, etc.) for commit message subject lines, matching existing history.
+
+## Importance scoring
+
+Every post gets a 1-5 `importance` score (`analyses.importance`, nullable) rating how much lasting/reusable value it has, so posts can be sorted by "worth revisiting" instead of only by recency (`GET /recent?sort=importance`, see `core/database.py:get_recent_light`). This exists specifically so low-value content (memes, pure personal-branding clips) doesn't crowd out genuinely useful content (a taught technique, a well-developed idea) in review.
+
+- **`core/importance.py`** — `IMPORTANCE_PROMPT` (spliced into `main.py`'s structured summary prompt as the `⭐ IMPORTANCE` field, alongside `📂 CATEGORY`/`🌐 LANGUAGE`) and `parse_importance()`. The rubric is deliberately **topic- and format-agnostic** — it scores on depth of payload (a fully-explained technique, or a genuinely developed idea/argument — practical and conceptual value are weighted equally, so philosophy/book content that "sparks thought" scores as well as a concrete how-to) rather than on subject matter or whether the post is formatted as a meme/joke. A meme can score high if a real insight can reasonably be extrapolated from its premise even when unstated; a "serious"-sounding post scores low if it only shows off or namedrops without explaining anything. Calibrated against real saved posts (not written in the abstract) — see the comment above `IMPORTANCE_PROMPT` for the specific before/after example that shaped the wording.
+- **`TRUSTED_CREATORS`** (also in `core/importance.py`) — a small, explicit, code-level allowlist of usernames whose posts the user has manually confirmed are consistently worth revisiting, independent of any single post's per-post score (the LLM scores each post in isolation with no memory of other posts by the same creator, so this is a deliberate override, not something asked of the model). `apply_trusted_creator_boost()` floors — never lowers — a trusted creator's score at 4. Seeded with `erinmerylstudy`. Applied in `main.py` right after `username`/`channel`/`author` is resolved for each of the three pipelines (Instagram, YouTube, webpage), and again in the backfill script from the post's already-stored `username`.
+- Existing posts (saved before this feature) have `importance IS NULL`, not `0` — "unscored" is kept distinguishable from "scored low." Run `python scripts/score_importance.py` to backfill them: it scores from each post's already-stored title/summary/tags/category (no re-download, no full re-analysis) and stamps the post to `CURRENT_ANALYSIS_VERSION` on success, which is what clears it from the version-6 review-queue flag.
+- This is `CURRENT_ANALYSIS_VERSION` bump **6** — see the version-history comment above the constant and the matching `_seed_changelog()` entry in `core/database.py` for the full description.

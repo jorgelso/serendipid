@@ -8,6 +8,7 @@ Self-hosted, zero-config, file-based database
 import sqlite3
 import json
 import os
+import uuid
 from pathlib import Path
 from datetime import datetime
 
@@ -34,9 +35,18 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.pa
 #       lifestyle/health content the taxonomy didn't cover: "surveillance,
 #       psyops & government conspiracy", "lifestyle & clean living",
 #       "ai ethics & tech skepticism", "environment & sustainability".
+#   5 — 2026-08-09: added 7 categories for personal/lifestyle content the
+#       taxonomy didn't cover: "fashion & style", "beauty & skincare",
+#       "money & finance", "home & interior design", "relationships &
+#       dating", "pets & animals", "career & productivity".
+#   6 — 2026-08-09: added importance scoring — a 1-5 rating of how much
+#       lasting/reusable value a post has (see core/importance.py), so posts
+#       can be sorted by "worth revisiting" instead of only by recency.
+#       Posts stamped below this version have no importance score yet; run
+#       scripts/score_importance.py to backfill them without a full re-analysis.
 # This history is also kept queryable in the analysis_changelog table (see
 # _seed_changelog() below) rather than only living as a comment.
-CURRENT_ANALYSIS_VERSION = 4
+CURRENT_ANALYSIS_VERSION = 6
 
 
 class Database:
@@ -204,6 +214,16 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: add importance — 1-5 rating of how much lasting/reusable
+        # value a post has (see core/importance.py). NULL (not 0) for posts
+        # saved before this feature existed or where the model's field was
+        # unparseable, so "no score yet" is distinguishable from "scored low".
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN importance INTEGER DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Collections table
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
@@ -262,6 +282,29 @@ class Database:
         self._conn.commit()
         self._seed_changelog()
 
+        # RAG chatbot — persisted multi-turn conversations. sources is a
+        # JSON-encoded array of {shortcode, similarity, title, url, username,
+        # thumbnail} for the posts an assistant reply drew on (empty for user
+        # messages).
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS chat_threads (
+                id          TEXT PRIMARY KEY,
+                title       TEXT,
+                created_at  TEXT,
+                updated_at  TEXT
+            );
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id          TEXT PRIMARY KEY,
+                thread_id   TEXT NOT NULL,
+                role        TEXT NOT NULL,
+                content     TEXT NOT NULL,
+                sources     TEXT DEFAULT '[]',
+                created_at  TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages (thread_id, created_at);
+        """)
+        self._conn.commit()
+
     def _seed_changelog(self):
         """Seed analysis_changelog with the known version history. Uses
         INSERT OR IGNORE so re-running on an existing DB is a no-op, and new
@@ -295,6 +338,21 @@ class Database:
              "\"surveillance, psyops & government conspiracy\", \"lifestyle & "
              "clean living\", \"ai ethics & tech skepticism\", \"environment & "
              "sustainability\"."),
+            (5, "2026-08-09", "Fashion, beauty and lifestyle categories",
+             "Added 7 categories for personal/lifestyle content the taxonomy "
+             "didn't cover: \"fashion & style\", \"beauty & skincare\", "
+             "\"money & finance\", \"home & interior design\", "
+             "\"relationships & dating\", \"pets & animals\", \"career & "
+             "productivity\"."),
+            (6, "2026-08-09", "Importance scoring",
+             "Added a 1-5 importance score rating how much lasting/reusable "
+             "value a post has, judged on depth of payload (a fully-explained "
+             "technique or a genuinely developed idea) rather than topic or "
+             "format — a meme can score high if real insight can be drawn "
+             "from it, and a \"serious\"-sounding post can score low if it "
+             "only shows off or namedrops. Posts stamped below this version "
+             "have no score yet; run scripts/score_importance.py to backfill "
+             "them from already-stored data without a full re-analysis."),
         ]
         for version, released_at, title, description in entries:
             try:
@@ -320,7 +378,7 @@ class Database:
     LIGHT_COLUMNS = (
         "shortcode, url, username, content_type, analyzed_at, updated_at, "
         "post_date, likes, thumbnail, title, summary, tags, music, category, "
-        "language, is_hidden, analysis_version, media_files"
+        "language, is_hidden, analysis_version, media_files, importance"
     )
 
     def _row_to_dict(self, row):
@@ -400,7 +458,7 @@ class Database:
                       visual_analysis="", audio_transcription="", text_analysis="",
                       likes=0, post_date=None, content_type="instagram", thumbnail="",
                       source_hashtags=None, embedding=None, analysis_version=None,
-                      language=None, media_files=None):
+                      language=None, media_files=None, importance=None):
         """Insert or update an analysis record. Returns True on success.
 
         source_hashtags: original hashtags from the source platform (e.g. an
@@ -423,6 +481,10 @@ class Database:
         core.media_store.relocate_to_media_store), e.g. ["video.mp4",
         "audio.mp3", "thumbnail.jpg"]. Empty/None for posts with no locally
         downloaded media (YouTube, web pages).
+
+        importance: 1-5 rating of lasting/reusable value (see
+        core/importance.py), or None if unscored/unparseable — left NULL
+        rather than guessed, same reasoning as language.
         """
         if not self.is_connected():
             print("[WARNING] Database not connected. Analysis not saved.")
@@ -477,8 +539,8 @@ class Database:
                     (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
                      thumbnail, title, summary, tags, music, category,
                      visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
-                     analysis_version, language, media_files)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     analysis_version, language, media_files, importance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
                     url                 = excluded.url,
                     username            = excluded.username,
@@ -499,11 +561,12 @@ class Database:
                     embedding           = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END,
                     analysis_version    = excluded.analysis_version,
                     language            = excluded.language,
-                    media_files         = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END
+                    media_files         = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END,
+                    importance          = CASE WHEN excluded.importance IS NOT NULL THEN excluded.importance ELSE analyses.importance END
             """, (shortcode, url, username, content_type, now, now, post_date, likes,
                   thumbnail, title, summary, tags_json, music, category_json,
                   visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
-                  version, language_json, media_files_json))
+                  version, language_json, media_files_json, importance))
             self._conn.commit()
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True
@@ -528,6 +591,55 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error updating embedding: {e}")
             return False
+
+    def update_importance(self, shortcode, importance) -> bool:
+        """Set the importance score for an existing post and stamp it as
+        reviewed under CURRENT_ANALYSIS_VERSION — used by the backfill
+        script so it doesn't need to re-run full analysis. Bumping the
+        version here is what clears the post from the 'needs_review' queue
+        the version-6 bump otherwise flagged it into."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute(
+                "UPDATE analyses SET importance = ?, analysis_version = ? WHERE shortcode = ?",
+                (importance, CURRENT_ANALYSIS_VERSION, shortcode),
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error updating importance: {e}")
+            return False
+
+    def get_posts_missing_importance(self):
+        """Return [{shortcode, username, title, summary, tags, category}, ...]
+        for every post that doesn't have an importance score yet — used by
+        the backfill script."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.execute(
+                "SELECT shortcode, username, title, summary, tags, category FROM analyses "
+                "WHERE importance IS NULL"
+            )
+            out = []
+            for shortcode, username, title, summary, tags_json, category_json in cur.fetchall():
+                try:
+                    tags = json.loads(tags_json) if tags_json else []
+                except Exception:
+                    tags = []
+                try:
+                    category = json.loads(category_json) if category_json else []
+                except Exception:
+                    category = []
+                out.append({
+                    "shortcode": shortcode, "username": username, "title": title,
+                    "summary": summary, "tags": tags, "category": category,
+                })
+            return out
+        except Exception as e:
+            print(f"[WARNING]  Error fetching posts missing importance: {e}")
+            return []
 
     def get_posts_missing_embedding(self):
         """Return [{shortcode, title, summary, tags: [...]}, ...] for every
@@ -587,16 +699,25 @@ class Database:
             print(f"[WARNING]  Error retrieving recent: {e}")
             return []
 
-    def get_recent_light(self, limit=50, offset=0):
-        """Return recent posts with only UI-essential fields (no analysis blobs)."""
+    def get_recent_light(self, limit=50, offset=0, sort="recent"):
+        """Return recent posts with only UI-essential fields (no analysis blobs).
+
+        sort: "recent" (default, analyzed_at DESC) or "importance" (importance
+        DESC, unscored posts last, analyzed_at DESC as tie-breaker).
+        """
         if not self.is_connected():
             return []
+        order_clause = (
+            "ORDER BY importance IS NULL, importance DESC, analyzed_at DESC"
+            if sort == "importance" else
+            "ORDER BY analyzed_at DESC"
+        )
         try:
             cur = self._conn.cursor()
             cur.execute(
                 f"SELECT {self.LIGHT_COLUMNS} FROM analyses "
                 "WHERE (is_hidden IS NULL OR is_hidden = 0) "
-                "ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
+                f"{order_clause} LIMIT ? OFFSET ?",
                 (limit, offset)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -1276,6 +1397,131 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error deleting collection: {e}")
             return False
+
+    # ------------------------------------------------------------------
+    # RAG chatbot — chat_threads / chat_messages
+    # ------------------------------------------------------------------
+
+    def _chat_message_row_to_dict(self, row):
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d['sources'] = json.loads(d.get('sources') or '[]')
+        except Exception:
+            d['sources'] = []
+        return d
+
+    def create_chat_thread(self, title=None):
+        """Create a new chat thread. Returns the saved dict, or None on failure."""
+        if not self.is_connected():
+            return None
+        try:
+            thread_id = uuid.uuid4().hex
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "INSERT INTO chat_threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (thread_id, title, now, now)
+            )
+            self._conn.commit()
+            return self.get_chat_thread(thread_id)
+        except Exception as e:
+            print(f"[WARNING]  Error creating chat thread: {e}")
+            return None
+
+    def list_chat_threads(self):
+        """Return all chat threads, most-recently-updated first."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM chat_threads ORDER BY updated_at DESC")
+            return [dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error listing chat threads: {e}")
+            return []
+
+    def get_chat_thread(self, thread_id):
+        """Return a single chat thread by id, or None."""
+        if not self.is_connected():
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM chat_threads WHERE id = ?", (thread_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            print(f"[WARNING]  Error getting chat thread: {e}")
+            return None
+
+    def touch_chat_thread(self, thread_id, title=None):
+        """Update a thread's updated_at (and title, if given and not already set)."""
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            if title:
+                cur = self._conn.execute(
+                    "UPDATE chat_threads SET updated_at = ?, title = COALESCE(title, ?) WHERE id = ?",
+                    (now, title, thread_id)
+                )
+            else:
+                cur = self._conn.execute(
+                    "UPDATE chat_threads SET updated_at = ? WHERE id = ?",
+                    (now, thread_id)
+                )
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error touching chat thread: {e}")
+            return False
+
+    def delete_chat_thread(self, thread_id):
+        """Delete a thread and its messages. Returns True if the thread existed."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute("DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,))
+            cur = self._conn.execute("DELETE FROM chat_threads WHERE id = ?", (thread_id,))
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error deleting chat thread: {e}")
+            return False
+
+    def get_chat_messages(self, thread_id):
+        """Return all messages for a thread, oldest first."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC",
+                (thread_id,)
+            )
+            return [self._chat_message_row_to_dict(row) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting chat messages: {e}")
+            return []
+
+    def add_chat_message(self, thread_id, role, content, sources=None):
+        """Append a message to a thread. Returns the saved dict, or None on failure."""
+        if not self.is_connected():
+            return None
+        try:
+            message_id = uuid.uuid4().hex
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "INSERT INTO chat_messages (id, thread_id, role, content, sources, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (message_id, thread_id, role, content, json.dumps(sources or []), now)
+            )
+            self._conn.commit()
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM chat_messages WHERE id = ?", (message_id,))
+            return self._chat_message_row_to_dict(cur.fetchone())
+        except Exception as e:
+            print(f"[WARNING]  Error adding chat message: {e}")
+            return None
 
 
 # ------------------------------------------------------------------

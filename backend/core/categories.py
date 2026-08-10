@@ -37,6 +37,13 @@ CATEGORIES = [
     "lifestyle & clean living",
     "ai ethics & tech skepticism",
     "environment & sustainability",
+    "fashion & style",
+    "beauty & skincare",
+    "money & finance",
+    "home & interior design",
+    "relationships & dating",
+    "pets & animals",
+    "career & productivity",
     "other",
 ]
 
@@ -117,6 +124,13 @@ _KEYWORD_CATEGORIES = {
     "lifestyle & clean living": ["detox", "microplastic", "toxin", "clean eating", "non-toxic", "pantry swap", "endocrine disruptor"],
     "ai ethics & tech skepticism": ["ai risk", "artificial intelligence", "ai ethics", "against ai", "ai backlash", "big tech"],
     "environment & sustainability": ["climate", "sustainability", "pollution", "eco-friendly", "environment", "carbon footprint", "renewable"],
+    "fashion & style": ["outfit", "ootd", "fashion", "style tips", "wardrobe", "streetwear", "thrift", "capsule wardrobe"],
+    "beauty & skincare": ["skincare", "makeup", "beauty routine", "grwm", "moisturizer", "serum", "cosmetics"],
+    "money & finance": ["budgeting", "investing", "side hustle", "personal finance", "stock market", "passive income", "net worth", "saving money"],
+    "home & interior design": ["home decor", "interior design", "home organization", "diy home", "apartment tour", "furniture", "room makeover"],
+    "relationships & dating": ["dating", "relationship advice", "breakup", "situationship", "boyfriend", "girlfriend", "marriage advice"],
+    "pets & animals": ["dog", "cat", "puppy", "kitten", "pet care", "animal rescue", "vet"],
+    "career & productivity": ["productivity", "career advice", "job interview", "resume", "time management", "work-life balance", "workplace"],
 }
 
 

@@ -29,7 +29,8 @@ from pathlib import Path
 from core.database import get_db
 from core.link_checker import validate_link
 from core.model_router import get_router
-import numpy as np
+from core.categories import CATEGORIES
+from core import rag
 
 # Configure logging
 logging.basicConfig(
@@ -772,6 +773,7 @@ async def check_cache(shortcode: str, token: str = Depends(verify_token)):
 async def get_recent_analyses(
     limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    sort: str = Query(default="recent", pattern="^(recent|importance)$"),
     token: str = Depends(verify_token),
 ):
     """
@@ -779,12 +781,15 @@ async def get_recent_analyses(
 
     - Returns most recently analyzed content with UI-essential fields only
     - Supports pagination via offset
+    - sort=recent (default): most recently analyzed first
+    - sort=importance: highest importance score first (unscored posts last),
+      analyzed_at as tie-breaker — see core/importance.py
     - Default limit: 50, max: 1000
     - Requires API authentication
     """
     try:
         db = get_db()
-        results = db.get_recent_light(limit=limit, offset=offset)
+        results = db.get_recent_light(limit=limit, offset=offset, sort=sort)
         total = db.get_total_count()
 
         return {
@@ -896,9 +901,14 @@ async def get_all_categories(token: str = Depends(verify_token)):
         return {
             "success": True,
             "categories": categories,
+            # The full canonical taxonomy (core/categories.py), independent of
+            # which categories currently have posts — lets clients offer every
+            # valid label (e.g. in a category-editing dropdown) instead of
+            # only ones already in use.
+            "canonical": CATEGORIES,
             "total": sum(c['count'] for c in categories)
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1018,19 +1028,7 @@ async def search_semantic(
         if not stored:
             return {"success": True, "query": q, "count": 0, "data": []}
 
-        query_vec = np.array(query_embedding, dtype=np.float32)
-        query_norm = np.linalg.norm(query_vec)
-
-        scored = []
-        for row in stored:
-            vec = np.array(row["embedding"], dtype=np.float32)
-            denom = query_norm * np.linalg.norm(vec)
-            similarity = float(np.dot(query_vec, vec) / denom) if denom else 0.0
-            if similarity >= min_similarity:
-                scored.append((similarity, row["shortcode"]))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top = scored[:limit]
+        top = rag.rank_by_embedding(query_embedding, stored, limit=limit, min_similarity=min_similarity)
 
         results = []
         for similarity, shortcode in top:
@@ -1051,6 +1049,124 @@ async def search_semantic(
 
         return {"success": True, "query": q, "count": len(results), "data": results}
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChatThreadCreate(BaseModel):
+    title: Optional[str] = None
+
+
+class ChatMessageCreate(BaseModel):
+    message: str
+
+
+@app.post("/chat/threads")
+async def create_chat_thread(req: ChatThreadCreate = Body(default=ChatThreadCreate()), token: str = Depends(verify_token)):
+    """
+    Create a new RAG chatbot conversation thread.
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        thread = db.create_chat_thread(title=req.title)
+        if not thread:
+            raise HTTPException(status_code=500, detail="Could not create chat thread.")
+        return {"success": True, "data": thread}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chat/threads")
+async def list_chat_threads(token: str = Depends(verify_token)):
+    """
+    List all RAG chatbot conversation threads, most-recently-updated first.
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        threads = db.list_chat_threads()
+        return {"success": True, "count": len(threads), "data": threads}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chat/threads/{thread_id}")
+async def get_chat_thread(thread_id: str, token: str = Depends(verify_token)):
+    """
+    Return a chat thread and its full message history.
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        thread = db.get_chat_thread(thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Chat thread not found.")
+        messages = db.get_chat_messages(thread_id)
+        return {"success": True, "data": {**thread, "messages": messages}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chat/threads/{thread_id}/messages")
+async def send_chat_message(thread_id: str, req: ChatMessageCreate, token: str = Depends(verify_token)):
+    """
+    Ask the RAG chatbot a question within a thread.
+
+    Retrieves the saved posts most relevant to the question (same embeddings
+    used by GET /search/semantic), asks the chat-task LLM (core/model_router.py's
+    generate_chat_text — Gemini -> OpenAI[dedicated OPENAI_CHAT_API_KEY] ->
+    local Ollama) to answer from that content plus recent thread history,
+    persists both the user message and the assistant reply, and returns both.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        thread = db.get_chat_thread(thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="Chat thread not found.")
+
+        question = req.message.strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="message must not be empty.")
+
+        router = get_router()
+
+        try:
+            answer, sources = await asyncio.to_thread(rag.answer_question, router, db, thread_id, question)
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+        user_message = db.add_chat_message(thread_id, "user", question)
+        assistant_message = db.add_chat_message(thread_id, "assistant", answer, sources=sources)
+        db.touch_chat_thread(thread_id, title=question[:80])
+
+        return {"success": True, "data": {"user_message": user_message, "assistant_message": assistant_message}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/chat/threads/{thread_id}")
+async def delete_chat_thread(thread_id: str, token: str = Depends(verify_token)):
+    """
+    Delete a chat thread and its messages.
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        deleted = db.delete_chat_thread(thread_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Chat thread not found.")
+        return {"success": True}
     except HTTPException:
         raise
     except Exception as e:

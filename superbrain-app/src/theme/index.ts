@@ -71,6 +71,13 @@ export const colors = {
     music: '#ec4899',      // Pink
     news: '#0ea5e9',       // Sky
     travel: '#14b8a6',     // Teal
+    'fashion & style': '#ec4899',        // Pink
+    'beauty & skincare': '#f472b6',      // Pink-400
+    'money & finance': '#22c55e',        // Green
+    'home & interior design': '#a16207', // Amber-700
+    'relationships & dating': '#fb7185', // Rose-400
+    'pets & animals': '#06b6d4',         // Cyan
+    'career & productivity': '#6366f1',  // Indigo
     uncategorized: '#6b7280', // Gray
     other: '#6b7280',      // Gray
   } as Record<string, string>,

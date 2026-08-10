@@ -1,5 +1,13 @@
 import { getConfig } from "./config";
-import type { ChangelogResponse, ExportPayload, SearchSemanticResponse } from "@/types/domain";
+import type {
+  CategoriesResponse,
+  ChangelogResponse,
+  ChatMessageExchange,
+  ChatThread,
+  ChatThreadDetail,
+  ExportPayload,
+  SearchSemanticResponse,
+} from "@/types/domain";
 
 export class SuperBrainApiError extends Error {
   status?: number;
@@ -97,6 +105,10 @@ export async function fetchChangelog(): Promise<ChangelogResponse> {
   return request<ChangelogResponse>("/changelog");
 }
 
+export async function fetchCategories(): Promise<CategoriesResponse> {
+  return request<CategoriesResponse>("/categories");
+}
+
 export async function fetchSemanticSearch(
   q: string,
   limit = 20,
@@ -160,5 +172,58 @@ export async function updatePost(shortcode: string, edits: PostEdits): Promise<U
   return request<UpdatePostResponse>(`/post/${shortcode}`, {
     method: "PUT",
     body: edits,
+  });
+}
+
+interface ChatThreadsResponse {
+  success: boolean;
+  count: number;
+  data: ChatThread[];
+}
+
+interface ChatThreadResponse {
+  success: boolean;
+  data: ChatThread;
+}
+
+interface ChatThreadDetailResponse {
+  success: boolean;
+  data: ChatThreadDetail;
+}
+
+interface ChatMessageResponse {
+  success: boolean;
+  data: ChatMessageExchange;
+}
+
+export async function fetchChatThreads(): Promise<ChatThreadsResponse> {
+  return request<ChatThreadsResponse>("/chat/threads");
+}
+
+export async function createChatThread(): Promise<ChatThreadResponse> {
+  return request<ChatThreadResponse>("/chat/threads", { method: "POST", body: {} });
+}
+
+export async function fetchChatThread(threadId: string): Promise<ChatThreadDetailResponse> {
+  return request<ChatThreadDetailResponse>(`/chat/threads/${threadId}`);
+}
+
+export async function deleteChatThread(threadId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/chat/threads/${threadId}`, { method: "DELETE" });
+}
+
+// Retrieval + LLM generation can take a while, especially if the primary
+// chat provider fails over to a slower fallback — well past the default
+// request timeout used for quick reads elsewhere in this file.
+const CHAT_MESSAGE_TIMEOUT_MS = 2 * 60 * 1000;
+
+export async function sendChatMessage(threadId: string, message: string): Promise<ChatMessageResponse> {
+  return request<ChatMessageResponse>(`/chat/threads/${threadId}/messages`, {
+    method: "POST",
+    body: { message },
+    timeoutMs: CHAT_MESSAGE_TIMEOUT_MS,
+    statusMessages: {
+      503: "The chatbot couldn't reach any AI provider right now — check the backend's chat provider keys (Gemini/OpenAI) or try again shortly.",
+    },
   });
 }
