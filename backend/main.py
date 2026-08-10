@@ -134,10 +134,18 @@ INSTAGRAM POST: {instagram_url}
 
 {combined_info}
 
+BEFORE YOU WRITE ANYTHING: compare the ORIGINAL POST CAPTION/HASHTAGS above to the VISUAL ANALYSIS / AUDIO TRANSCRIPTION / TEXT ANALYSIS above, and classify the relationship into exactly one of these three cases:
+
+1. CONSISTENT — the caption describes, adds detail to, or is simply narrower/broader than what the media shows (e.g. a 10-second clip of a finished dish while the caption gives the full recipe; a short personal clip with a caption telling the actual story; generic/ambient b-roll — walking, a talking-head, a plain product shot, a static single image — paired with a caption that supplies the real substance). This is extremely common and completely legitimate: plenty of real posts put the actual information in the text and use the video only as illustration or a hook, especially on short clips. Thin, generic, or non-specific media is NOT a sign of mismatch — it's normal, and the caption should be trusted and used normally.
+2. GENUINE MISMATCH — the media itself shows a different, specific, self-contained subject that competes with and contradicts the caption: e.g. a screenshot of a different, identifiable social media post/account, a named person/place/event/object visibly different from what the caption claims, or on-screen text/speech that is clearly about an unrelated topic. The key test is not "does the media lack detail the caption has" — it's "does the media affirmatively show something else specific." This is a known spam pattern (pairing a caption about a trending topic with an unrelated 'hook' video to farm reach) but it is the exception, not the default assumption.
+3. UNCLEAR — the media analysis is too thin/generic to tell either way. Treat this the same as CONSISTENT (trust the caption) — do not treat ambiguity as evidence of a mismatch.
+
+Only for case 2 (GENUINE MISMATCH): build the TITLE, SUMMARY, and TAGS from what the visual/audio/text analysis actually shows, not from the caption, and add one short line at the end of the SUMMARY noting the mismatch plainly, e.g. "Note: this post's caption describes [caption topic], but the video/image itself actually shows [actual content] — caption and media do not match, likely mismatched/bait content." For cases 1 and 3, use the caption normally as you would for any post — do not add a mismatch note or second-guess a caption just because the video accompanying it is short, generic, or low on independently-verifiable detail.
+
 Generate a report in this EXACT format:
 
 📌 TITLE:
-[Create a clear, descriptive title]
+[Create a clear, descriptive title. Use the caption normally unless the classification above is GENUINE MISMATCH, in which case title this from what the media actually shows instead.]
 
 📝 SUMMARY:
 [A detailed summary — as long as it needs to be to capture the real content, not capped at a fixed sentence count. Include:
@@ -149,10 +157,10 @@ Generate a report in this EXACT format:
 Only include details that are actually present in the analysis above — do not invent or guess specifics that weren't captured by the visual/audio analysis. If the analysis above is thin (e.g. no clear speech was transcribed and no on-screen text was found), say so plainly rather than padding the summary with generic filler.
 Do not mention the absence of structural elements that were never expected in the first place — e.g. don't say "no instructions were given" or "no steps are provided" for a meme, joke, photo, quote, or other content that isn't a tutorial/recipe/how-to. Only note what's missing when its absence is actually notable (e.g. a recipe video with no visible ingredient list). Never write a sentence whose only purpose is to point out that something isn't present.
 
-The ORIGINAL POST CAPTION and HASHTAGS above (if present) come directly from the source platform, not from your own analysis — treat them as a potentially-useful hint, not a fact. Use judgment: if the caption genuinely describes or adds relevant detail about this specific content (e.g. it names ingredients, gives a location, explains context visible in the visual/audio analysis), incorporate that detail into the summary. If the caption looks unrelated to the actual visual/audio content — generic engagement bait, unrelated trivia, spam, or a caption that has nothing to do with what's actually shown — ignore it entirely and do not mention it or let it influence the summary, title, or tags.]
+Apply the classification from above: for CONSISTENT or UNCLEAR, use the caption normally, including as the primary source of detail when the media itself is thin (a short clip, a single generic shot) — that's a normal post, not a gap to flag. Only for GENUINE MISMATCH, describe what the visual/audio/text analysis actually shows and include the one-line mismatch note described above instead of the caption's claims.]
 
 🏷️ TAGS:
-[Generate 8-12 relevant hashtags/keywords]
+[Generate 8-12 relevant hashtags/keywords. Use the caption's topic normally unless the classification above is GENUINE MISMATCH, in which case tag what the media actually shows instead.]
 
 🎵 MUSIC:
 [Music/song name if found, or "No background music" or "Voiceover only"]

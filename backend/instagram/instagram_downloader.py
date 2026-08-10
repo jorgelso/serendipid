@@ -65,12 +65,19 @@ def _load_credentials() -> tuple[str, str]:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def sanitize_folder_name(text: str, max_length: int = 50) -> str:
-    """Strip non-ASCII and filesystem-unsafe characters; trim to max_length."""
+def sanitize_folder_name(text: str, max_length: int = 50, fallback: str = "instagram_post") -> str:
+    """Strip non-ASCII and filesystem-unsafe characters; trim to max_length.
+
+    `fallback` is returned when stripping leaves nothing (e.g. a caption
+    that's entirely non-ASCII, like Japanese/Korean/Arabic text) — callers
+    should pass a per-post-unique fallback (e.g. including the shortcode)
+    so distinct posts with non-ASCII-only captions don't all collapse to
+    the same generic folder name.
+    """
     text = text.encode("ascii", "ignore").decode("ascii")
     text = re.sub(r'[<>:"/\\|?*\n\r]', "", text)
     text = re.sub(r"\s+", " ", text).strip()[:max_length]
-    return text or "instagram_post"
+    return text or fallback
 
 
 def _unique_folder(base: pathlib.Path, name: str) -> pathlib.Path:
@@ -167,7 +174,7 @@ def _download_via_instaloader(url: str) -> str | None:
 
         caption           = post.caption if post.caption else f"post_{shortcode}"
         caption_first_line = caption.split("\n")[0]
-        folder_name       = sanitize_folder_name(caption_first_line)
+        folder_name       = sanitize_folder_name(caption_first_line, fallback=f"post_{shortcode}")
         folder            = _unique_folder(TEMP_DIR, folder_name)
 
         print(f"  User   : @{post.owner_username}")

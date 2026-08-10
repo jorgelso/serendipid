@@ -44,9 +44,25 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.pa
 #       can be sorted by "worth revisiting" instead of only by recency.
 #       Posts stamped below this version have no importance score yet; run
 #       scripts/score_importance.py to backfill them without a full re-analysis.
+#   7 — 2026-08-09: fixed caption/media mismatch handling in the summary
+#       prompt (main.py generate_final_summary). Some accounts pair a caption
+#       about one topic with an unrelated "hook" video purely to farm reach;
+#       the model now explicitly classifies the caption against the visual/
+#       audio/text analysis as CONSISTENT, GENUINE MISMATCH, or UNCLEAR
+#       before writing the title/summary/tags, instead of a single buried
+#       instruction the model was prone to ignore in favor of the caption.
+#       Thin/generic media (a short clip, a single ambient shot) is treated
+#       as UNCLEAR and still trusts the caption normally — only media that
+#       affirmatively shows a different, specific, self-contained subject
+#       counts as a mismatch. On a genuine mismatch, the summary now states
+#       the discrepancy instead of silently building the title/tags from an
+#       unrelated caption. Posts stamped below this version may have a
+#       title/summary built from a mismatched caption without any indication
+#       of the mismatch; re-flagged for review, but fixing requires a full
+#       re-analysis (re-download + re-run the pipeline), not a cheap backfill.
 # This history is also kept queryable in the analysis_changelog table (see
 # _seed_changelog() below) rather than only living as a comment.
-CURRENT_ANALYSIS_VERSION = 6
+CURRENT_ANALYSIS_VERSION = 7
 
 
 class Database:
@@ -353,6 +369,23 @@ class Database:
              "only shows off or namedrops. Posts stamped below this version "
              "have no score yet; run scripts/score_importance.py to backfill "
              "them from already-stored data without a full re-analysis."),
+            (7, "2026-08-09", "Caption/media mismatch detection",
+             "Some accounts pair a caption about one topic with an unrelated "
+             "\"hook\" video purely to farm reach (e.g. a caption about a "
+             "celebrity event on a video that actually shows an unrelated "
+             "screenshot). The summary prompt now explicitly classifies the "
+             "caption against the visual/audio/text analysis as CONSISTENT, "
+             "GENUINE MISMATCH, or UNCLEAR before writing anything — a short "
+             "or generic clip with the real info in the caption (very common "
+             "and legitimate) is UNCLEAR/CONSISTENT and still trusts the "
+             "caption normally; only media that affirmatively shows a "
+             "different, specific, self-contained subject counts as a "
+             "mismatch. On a genuine mismatch the summary now states the "
+             "discrepancy instead of silently building the title/tags from "
+             "an unrelated caption. Posts stamped below this version may "
+             "have a title/summary built from a mismatched caption with no "
+             "indication of the mismatch; fixing them needs a full "
+             "re-analysis (re-download + re-run), not a cheap backfill."),
         ]
         for version, released_at, title, description in entries:
             try:
