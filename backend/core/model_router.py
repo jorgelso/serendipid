@@ -1224,6 +1224,30 @@ class ModelRouter:
 
         raise RuntimeError("All text models failed.")
 
+    def generate_importance_text(self, prompt: str) -> str:
+        """
+        Score a post's importance using OpenAI GPT-4.1 specifically, bypassing
+        the latency-ranked fallback order that generate_text() uses. Importance
+        needs *consistent* judgment across posts more than it needs speed —
+        letting the provider drift to whichever model answers fastest at that
+        moment (as happens for every other field in the combined summary
+        prompt) produced visibly inconsistent scores between posts of
+        comparable depth. Falls back to the standard ranked text order only if
+        OpenAI is unavailable or fails, so scoring doesn't hard-break for
+        setups without an OpenAI key.
+        """
+        if self._is_available("openai_gpt41"):
+            t0 = time.time()
+            try:
+                result = self._openai_text("gpt-4.1", prompt)
+                self._record_success("openai_gpt41", time.time() - t0)
+                return result
+            except Exception as e:
+                status = 429 if "429" in str(e) else 0
+                self._record_failure("openai_gpt41", str(e), status_code=status)
+                print("  ✗ [openai_gpt41] importance scoring failed, falling back to ranked order …", flush=True)
+        return self.generate_text(prompt)
+
     def generate_chat_text(self, prompt: str) -> str:
         """
         Generate a RAG chatbot answer using the "chat" task's own provider

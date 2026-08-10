@@ -6,40 +6,63 @@ Lets reels/posts be sorted by how worth-revisiting they actually are, rather
 than just by recency or category — a meme is not automatically low value and
 a "serious" topic is not automatically high value; see IMPORTANCE_PROMPT.
 
-Same pattern as core/categories.py / core/languages.py: a prompt fragment
-(IMPORTANCE_PROMPT) is spliced into main.py's structured summary prompt, and
-the model's raw output is parsed back into a validated value with
+Unlike category/language, importance is scored in its own dedicated LLM call
+(build_importance_prompt() + ModelRouter.generate_importance_text(), called
+from main.py's score_importance()) rather than as one field spliced into the
+combined title/summary/tags/... prompt — a single-purpose prompt follows the
+rubric more consistently, and generate_importance_text() pins the model to
+OpenAI specifically instead of whatever the latency-ranked router picks.
+The model's raw output is parsed back into a validated value with
 parse_importance().
 """
 
 import re
 
-# Spliced into generate_final_summary()'s prompt (main.py) as the
-# ⭐ IMPORTANCE field, alongside 📂 CATEGORY and 🌐 LANGUAGE.
+# Sent as part of the prompt built by build_importance_prompt(), called from
+# main.py's score_importance() (live pipeline) and scripts/score_importance.py
+# (backfill for posts saved before this feature, or before a rubric change).
 #
 # Calibrated against real saved posts, not written in the abstract — e.g. two
 # reels from the same creator on similar self-improvement topics: one that
 # names and explains the Pratfall Effect with a concrete mechanism scores far
 # higher than one that says "there's a principle for this, follow along to
 # learn more" without ever explaining it. Same topic, same creator, very
-# different payload — that gap is what this rubric scores on.
+# different payload — that gap is what this rubric scores on. The
+# "charged/serious subject matter" clause below was added after a real
+# scoring miss: a meme naming U.S. foreign-policy hypocrisy over a "LOVE"
+# halftime show scored a 4 (no explained mechanism, just an irony), while a
+# talking-head video explaining the EU's specific "Chat Control" legislative
+# mechanism scored only a 3 — backwards, since the second post is the one
+# doing real explanatory work.
 IMPORTANCE_PROMPT = """[Rate how much lasting value this content has, 1-5 — value can come from
 two different directions, weigh whichever is actually present:
   - Practical: a specific technique, method, fact, tool, or recommendation
-    explained clearly enough to apply or look up again.
+    explained clearly enough to apply or look up again. "Fact" here means a
+    generalizable one — a statistic, a mechanism, a data point useful beyond
+    this one story — not an incidental/biographical detail about a specific
+    person or event whose only interest is that it happened (see the
+    "informational density" trap below).
   - Conceptual: an idea, argument, or framing substantial enough to genuinely
-    change how you think about something — a philosophical point, a book's
-    core idea, a way of seeing a problem — even with no actionable "method"
-    attached.
+    change how you think about something, OR substantial enough to spark real
+    intellectual engagement — a train of thought worth continuing, a question
+    worth sitting with or debating — even if it never resolves into a settled
+    new opinion. Prompting genuine further thought counts as much as changing
+    someone's mind; it doesn't have to end in persuasion to have value — a
+    philosophical point, a book's core idea, a way of seeing a problem — even
+    with no actionable "method" attached.
 
 5 = Either form of value, fully delivered: a technique/method explained well
     enough to actually use, or an idea/argument developed with real
-    reasoning behind it (not just stated) — the kind of content worth
-    revisiting or sitting with again.
+    reasoning behind it (not just stated) — whether it changes your view or
+    hands you a fully-formed train of thought or question substantial
+    enough to sit with and argue over — the kind of content worth
+    revisiting again.
 4 = Real value present but partial: a technique mentioned with some of the
     reasoning but not fully explained, a recommendation (book/talk/resource)
     with enough framing to know specifically why it's worth following up on,
-    or an idea that's interesting but only partially developed.
+    an idea that's interesting but only partially developed, or a genuine
+    question/reframe raised with enough framing to see why it matters but
+    without the reasoning fully worked through.
 3 = A claim, concept, or theme is named or gestured at with little
     development — mildly interesting in the moment, but nothing you'd come
     back to; a teaser rather than a payload.
@@ -63,8 +86,69 @@ subject matter, and not by format:
   reel itself never states it outright — score it on that content. Only
   score a meme/joke at 1 if nothing of substance can plausibly be drawn from
   it even on reflection.
+- Charged or "serious" subject matter (politics, injustice, world events) is
+  the topic-is-not-a-proxy trap in its most common disguise: naming an
+  emotionally loaded concept — hypocrisy, corruption, oppression, "soft
+  power" — is not the same as explaining it. A post that only points at the
+  irony/injustice without showing the mechanism behind it is a 2-3 at most,
+  no matter how weighty the subject sounds. Do not let vocabulary like
+  "hypocrisy," "systemic," or charged political language signal depth by
+  itself — check whether the post actually shows HOW or WHY, or just names
+  the feeling.
+  Worked contrast: a meme captioned "they preach peace on TV while doing X"
+  names a real irony but explains no mechanism for why X happens or how the
+  two connect beyond juxtaposition — 2-3, even though the topic is serious.
+  A separate post that explains the specific mechanism by which a law or
+  policy achieves its effect — e.g. "the rule requires an absolute majority
+  to reject it, so abstentions function as a yes vote" or "it scans content
+  before encryption rather than after, which is legally how it avoids the
+  ban on reading encrypted messages" — is doing real explanatory work and
+  should score 4-5, even delivered as a casual talking-head video rather
+  than a formal analysis. For THIS specific trap — a claim wrapped in
+  emotionally loaded language — the deciding factor is whether a mechanism/
+  reasoning chain is present, not the vocabulary or delivery format. This is
+  a check on that one failure mode, not a rule for the rubric as a whole:
+  plenty of high-value content earns a high score without walking through a
+  mechanism — a clearly stated important fact or recommendation (see
+  Practical above), or a short but genuinely thought-provoking reframe that
+  sparks a real train of thought (see Conceptual above) — so don't apply
+  "no mechanism = low score" outside of the charged-vocabulary case this
+  paragraph is about.
+- Informational density is not a proxy for value either: a post can be
+  packed with concrete, verifiable specifics — names, dollar figures, dates,
+  precise numbers — and still be a 2-3 if those specifics don't generalize
+  beyond the one story they're reporting. A fact only counts as Practical
+  value (see definition above) if it's something worth referencing again for
+  a reason beyond curiosity about that particular person or event.
+  Worked contrast: a post reporting "X is set to inherit $100M from Y, is
+  37, and was never interviewed by investigators" is specific and
+  verifiable, but has no further utility once read — it's a teaser for a
+  fuller (often paywalled) story, tier 3 at most, even though it's dense
+  with detail. A post citing a statistic that reveals a real pattern (a
+  rate, a trend), or explaining a mechanism using specific numbers, is doing
+  something different — the numbers are in service of a reusable insight,
+  not just reporting on one situation — and should be scored on that
+  insight per the criteria above.
 
 Output just the number, optionally with a short justification.]"""
+
+
+def build_importance_prompt(title: str, summary: str, tags, category) -> str:
+    """Build the minimal prompt used to score one post's importance — shared
+    by main.py's live pipeline and scripts/score_importance.py's backfill so
+    both ask the model the exact same thing.
+    """
+    tags_str = ', '.join(tags) if tags else ''
+    category_str = ', '.join(category) if category else ''
+    return f"""TITLE: {title or ''}
+
+SUMMARY: {summary or ''}
+
+TAGS: {tags_str}
+
+CATEGORY: {category_str}
+
+{IMPORTANCE_PROMPT}"""
 
 
 def parse_importance(raw: str):

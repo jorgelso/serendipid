@@ -60,9 +60,23 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.pa
 #       title/summary built from a mismatched caption without any indication
 #       of the mismatch; re-flagged for review, but fixing requires a full
 #       re-analysis (re-download + re-run the pipeline), not a cheap backfill.
+#   8 — 2026-08-10: fixed importance scoring going out on its own. Importance
+#       is now scored in a dedicated LLM call (core/importance.py's
+#       build_importance_prompt() + ModelRouter.generate_importance_text())
+#       instead of being one field in the combined title/summary/tags/...
+#       prompt, and that call is pinned to OpenAI GPT-4.1 specifically rather
+#       than whichever provider the latency-ranked router happened to answer
+#       fastest. The rubric also gained an explicit guard against charged
+#       political/emotional vocabulary reading as depth — a real miss where
+#       a meme that only named a political irony scored higher than a video
+#       that actually explained a law's mechanism prompted this. Posts
+#       stamped below this version have importance scores from the old,
+#       demonstrably inconsistent method; run
+#       `python scripts/score_importance.py --force` to re-score every post
+#       (not just unscored ones) without a full re-analysis.
 # This history is also kept queryable in the analysis_changelog table (see
 # _seed_changelog() below) rather than only living as a comment.
-CURRENT_ANALYSIS_VERSION = 7
+CURRENT_ANALYSIS_VERSION = 8
 
 
 class Database:
@@ -386,6 +400,21 @@ class Database:
              "have a title/summary built from a mismatched caption with no "
              "indication of the mismatch; fixing them needs a full "
              "re-analysis (re-download + re-run), not a cheap backfill."),
+            (8, "2026-08-10", "Importance scoring fix",
+             "Importance is now scored in its own dedicated LLM call (see "
+             "core/importance.py) instead of being one field in the combined "
+             "title/summary/tags/... prompt, and that call is pinned to "
+             "OpenAI GPT-4.1 specifically instead of whichever provider the "
+             "latency-ranked router happened to answer fastest. The rubric "
+             "also gained an explicit guard against charged political/"
+             "emotional vocabulary reading as depth — a real miss where a "
+             "meme that only named a political irony scored higher than a "
+             "video that actually explained a law's mechanism prompted this "
+             "change. Posts stamped below this version have importance "
+             "scores from the old, demonstrably inconsistent method; run "
+             "`python scripts/score_importance.py --force` to re-score "
+             "every post (not just unscored ones) without a full "
+             "re-analysis."),
         ]
         for version, released_at, title, description in entries:
             try:
@@ -644,17 +673,22 @@ class Database:
             print(f"[WARNING]  Error updating importance: {e}")
             return False
 
-    def get_posts_missing_importance(self):
+    def get_posts_missing_importance(self, include_scored: bool = False):
         """Return [{shortcode, username, title, summary, tags, category}, ...]
-        for every post that doesn't have an importance score yet — used by
-        the backfill script."""
+        for posts to (re-)score — used by the backfill script.
+
+        By default only posts with no score yet (importance IS NULL).
+        Pass include_scored=True to return every post, e.g. to re-score the
+        whole library after a rubric/prompt change (see CURRENT_ANALYSIS_VERSION
+        history) rather than only filling in gaps.
+        """
         if not self.is_connected():
             return []
         try:
-            cur = self._conn.execute(
-                "SELECT shortcode, username, title, summary, tags, category FROM analyses "
-                "WHERE importance IS NULL"
-            )
+            query = "SELECT shortcode, username, title, summary, tags, category FROM analyses"
+            if not include_scored:
+                query += " WHERE importance IS NULL"
+            cur = self._conn.execute(query)
             out = []
             for shortcode, username, title, summary, tags_json, category_json in cur.fetchall():
                 try:

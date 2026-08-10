@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-One-off backfill: score importance (1-5) for posts that were analyzed before
-importance scoring was wired into main.py's save step — see
-core/importance.py and CURRENT_ANALYSIS_VERSION == 6 in core/database.py.
+Backfill/re-score importance (1-5) for existing posts — see core/importance.py
+and the CURRENT_ANALYSIS_VERSION history in core/database.py.
 
 Does NOT re-download or re-run the full analysis pipeline — it only reads
 each post's already-stored title/summary/tags/category and asks the model to
@@ -11,7 +10,9 @@ analysis_version so the post drops out of the 'needs_review' queue).
 
 Usage:
     cd backend
-    .venv/bin/python scripts/score_importance.py
+    .venv/bin/python scripts/score_importance.py            # only unscored posts
+    .venv/bin/python scripts/score_importance.py --force     # re-score every post
+                                                               # (e.g. after a rubric change)
 """
 
 import sys
@@ -21,10 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.database import get_db
 from core.model_router import get_router
-from core.importance import IMPORTANCE_PROMPT, parse_importance, apply_trusted_creator_boost
+from core.importance import parse_importance, apply_trusted_creator_boost, build_importance_prompt
 
 
 def main() -> None:
+    force = "--force" in sys.argv
+
     db = get_db()
     router = get_router()
 
@@ -32,30 +35,23 @@ def main() -> None:
         print("[ERROR] Could not connect to database.")
         sys.exit(1)
 
-    rows = db.get_posts_missing_importance()
+    rows = db.get_posts_missing_importance(include_scored=force)
 
     if not rows:
         print("Nothing to backfill — every post already has an importance score.")
         return
 
-    print(f"Backfilling importance scores for {len(rows)} post(s)...")
+    verb = "Re-scoring" if force else "Backfilling"
+    print(f"{verb} importance scores for {len(rows)} post(s)...")
 
     ok = fail = 0
     for i, row in enumerate(rows, start=1):
         shortcode = row["shortcode"]
         print(f"[{i}/{len(rows)}] {shortcode} ...", end=" ", flush=True)
 
-        prompt = f"""TITLE: {row['title'] or ''}
+        prompt = build_importance_prompt(row['title'], row['summary'], row['tags'], row['category'])
 
-SUMMARY: {row['summary'] or ''}
-
-TAGS: {', '.join(row['tags'])}
-
-CATEGORY: {', '.join(row['category'])}
-
-{IMPORTANCE_PROMPT}"""
-
-        response = router.generate_text(prompt)
+        response = router.generate_importance_text(prompt)
         importance = parse_importance(response) if response else None
 
         if importance is None:
