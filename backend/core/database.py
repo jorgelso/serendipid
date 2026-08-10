@@ -254,6 +254,26 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: add model_used — the AI Model Router key (e.g.
+        # "openai_gpt41", "groq_llama33_70b") that generated this post's
+        # title/summary/tags. Empty for posts saved before this was tracked,
+        # and for YouTube/webpage posts (not yet wired up to pass it).
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN model_used TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: add transcription_backend — which Whisper backend
+        # produced audio_transcription ("Groq Whisper API" or "Local Whisper
+        # (<model>)"). Empty for posts with no audio track or saved before
+        # this was tracked.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN transcription_backend TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Collections table
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
@@ -520,7 +540,8 @@ class Database:
                       visual_analysis="", audio_transcription="", text_analysis="",
                       likes=0, post_date=None, content_type="instagram", thumbnail="",
                       source_hashtags=None, embedding=None, analysis_version=None,
-                      language=None, media_files=None, importance=None):
+                      language=None, media_files=None, importance=None,
+                      model_used=None, transcription_backend=None):
         """Insert or update an analysis record. Returns True on success.
 
         source_hashtags: original hashtags from the source platform (e.g. an
@@ -547,6 +568,13 @@ class Database:
         importance: 1-5 rating of lasting/reusable value (see
         core/importance.py), or None if unscored/unparseable — left NULL
         rather than guessed, same reasoning as language.
+
+        model_used: AI Model Router key that generated this post's summary
+        (e.g. "openai_gpt41"), or None/"" if not tracked for this call site.
+
+        transcription_backend: which Whisper backend produced
+        audio_transcription ("Groq Whisper API" / "Local Whisper (base)"),
+        or None/"" if there was no audio track.
         """
         if not self.is_connected():
             print("[WARNING] Database not connected. Analysis not saved.")
@@ -601,34 +629,37 @@ class Database:
                     (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
                      thumbnail, title, summary, tags, music, category,
                      visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
-                     analysis_version, language, media_files, importance)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     analysis_version, language, media_files, importance, model_used, transcription_backend)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
-                    url                 = excluded.url,
-                    username            = excluded.username,
-                    content_type        = excluded.content_type,
-                    updated_at          = excluded.updated_at,
-                    post_date           = excluded.post_date,
-                    likes               = excluded.likes,
-                    thumbnail           = excluded.thumbnail,
-                    title               = excluded.title,
-                    summary             = excluded.summary,
-                    tags                = excluded.tags,
-                    music               = excluded.music,
-                    category            = excluded.category,
-                    visual_analysis     = excluded.visual_analysis,
-                    audio_transcription = excluded.audio_transcription,
-                    text_analysis       = excluded.text_analysis,
-                    source_hashtags     = excluded.source_hashtags,
-                    embedding           = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END,
-                    analysis_version    = excluded.analysis_version,
-                    language            = excluded.language,
-                    media_files         = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END,
-                    importance          = CASE WHEN excluded.importance IS NOT NULL THEN excluded.importance ELSE analyses.importance END
+                    url                   = excluded.url,
+                    username              = excluded.username,
+                    content_type          = excluded.content_type,
+                    updated_at            = excluded.updated_at,
+                    post_date             = excluded.post_date,
+                    likes                 = excluded.likes,
+                    thumbnail             = excluded.thumbnail,
+                    title                 = excluded.title,
+                    summary               = excluded.summary,
+                    tags                  = excluded.tags,
+                    music                 = excluded.music,
+                    category              = excluded.category,
+                    visual_analysis       = excluded.visual_analysis,
+                    audio_transcription   = excluded.audio_transcription,
+                    text_analysis         = excluded.text_analysis,
+                    source_hashtags       = excluded.source_hashtags,
+                    embedding             = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END,
+                    analysis_version      = excluded.analysis_version,
+                    language              = excluded.language,
+                    media_files           = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END,
+                    importance            = CASE WHEN excluded.importance IS NOT NULL THEN excluded.importance ELSE analyses.importance END,
+                    model_used            = excluded.model_used,
+                    transcription_backend = excluded.transcription_backend
             """, (shortcode, url, username, content_type, now, now, post_date, likes,
                   thumbnail, title, summary, tags_json, music, category_json,
                   visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
-                  version, language_json, media_files_json, importance))
+                  version, language_json, media_files_json, importance,
+                  model_used or "", transcription_backend or ""))
             self._conn.commit()
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True

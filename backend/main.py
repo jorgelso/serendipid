@@ -181,10 +181,10 @@ Be specific and thorough — prioritize capturing concrete, actionable detail ov
         if not summary:
             summary = "Unable to generate comprehensive summary."
 
-        return summary
+        return summary, router.last_model_used
 
     except Exception as e:
-        return f"Error generating summary: {e}\n\nRaw data available in individual analysis sections above."
+        return f"Error generating summary: {e}\n\nRaw data available in individual analysis sections above.", None
 
 def _parse_field(text: str, emoji: str, label: str) -> str:
     """
@@ -408,6 +408,14 @@ def _clean_visual(output: str) -> str:
 
 def _clean_audio(output: str) -> str:
     return _extract_section(output, "📝 TRANSCRIBED TEXT:")
+
+
+def _audio_backend(output: str) -> str:
+    """Extract which backend actually produced the transcript, e.g. 'Groq
+    Whisper API' or 'Local Whisper (base)' — printed by
+    analyzers/audio_transcribe.py on success."""
+    m = re.search(r'🔧 Backend:\s*(.+)', output)
+    return m.group(1).strip() if m else ""
 
 
 def _clean_text(output: str) -> str:
@@ -810,9 +818,10 @@ def main():
                     print(_clean_visual(result['output'])[:600] + "\n")
     
         # === PHASE 2: Audio Transcription (HEAVY) - Run alone ===
+        audio_transcription_failed = False
         if mp3_files:
             print(f"\n🎙️ Phase 2: Audio Transcription (Heavy Task)")
-        
+
             for audio in mp3_files:
                 result = run_analysis_task("Audio", 'analyzers/audio_transcribe.py', str(audio), "heavy")
                 if result['success']:
@@ -821,7 +830,20 @@ def main():
                         'output': result['output']
                     })
                     print(_clean_audio(result['output'])[:600] + "\n")
-    
+                else:
+                    # Both Groq and local Whisper failed for this file — don't
+                    # save a post with a missing/garbled transcript, queue the
+                    # whole item for retry instead (same pattern as the
+                    # YouTube/webpage quota-error paths below).
+                    audio_transcription_failed = True
+                    print(f"  ✗ Audio transcription failed for {result['file']}: {result['error'][:300]}\n")
+
+        if audio_transcription_failed:
+            print("⏰ Audio transcription failed (Groq + local Whisper both unavailable) — queuing for retry.")
+            relocate_to_media_store(download_folder, shortcode)
+            db.queue_for_retry(shortcode, instagram_url, 'instagram', 'audio_transcription_failed', retry_hours=6)
+            sys.exit(2)
+
         # === PHASE 3: Light tasks in PARALLEL ===
         print(f"\n⚡ Phase 3: Light Tasks (Parallel Execution)")
     
@@ -873,7 +895,7 @@ def main():
         # Final comprehensive summary
         print_header("✅ GENERATING COMPREHENSIVE SUMMARY")
     
-        final_summary = generate_final_summary(results, instagram_url, source_caption, source_hashtags)
+        final_summary, model_used = generate_final_summary(results, instagram_url, source_caption, source_hashtags)
     
         print_section("📋 FINAL REPORT")
         print(final_summary)
@@ -936,6 +958,10 @@ def main():
         visual_text = "\n\n".join([_clean_visual(r['output']) for r in results['visual']])
         audio_text = "\n\n".join([_clean_audio(r['output']) for r in results['audio_transcription']])
         text_text = "\n\n".join([_clean_text(r['output']) for r in results['text']])
+        transcription_backend = (
+            _audio_backend(results['audio_transcription'][0]['output'])
+            if results['audio_transcription'] else ""
+        )
 
         # — Instagram thumbnail: first downloaded jpg (converted to base64) —
         instagram_thumbnail = ""
@@ -1019,6 +1045,8 @@ def main():
         thumbnail=instagram_thumbnail,
         source_hashtags=source_hashtags,
         embedding=embedding,
+        model_used=model_used,
+        transcription_backend=transcription_backend,
     )
 
     if not saved:

@@ -557,6 +557,11 @@ class ModelRouter:
         self._lock = threading.Lock()
         self._api_keys: Dict[str, str] = {}
         self._state: Dict[str, Dict] = {}
+        # Model key of the most recent successful generate_*/analyze_images
+        # call on this instance — callers that need to know which model
+        # actually produced a given result (e.g. main.py stamping
+        # analyses.model_used) read this right after the call returns.
+        self.last_model_used: Optional[str] = None
         # Dynamically discovered free OpenRouter models (FreeRide approach)
         self._dynamic_models: Dict[str, Dict] = {}
         self._dynamic_models_lock = threading.Lock()
@@ -952,6 +957,7 @@ class ModelRouter:
         # Ensure state exists (dynamic models may not be pre-seeded)
         if model_key not in self._state:
             self._state[model_key] = self._default_model_state_dynamic(model_key)
+        self.last_model_used = model_key
         with self._lock:
             s = self._state[model_key]
             prev = s["avg_response_s"]

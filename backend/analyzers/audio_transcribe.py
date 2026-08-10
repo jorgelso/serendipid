@@ -136,12 +136,12 @@ def transcribe_audio(audio_path):
     path = Path(audio_path)
     if not path.exists():
         print(f"❌ File not found: {audio_path}")
-        return
+        return False
 
     if path.suffix.lower() not in VALID_EXTENSIONS:
         print(f"❌ Unsupported file type: {path.suffix}")
         print(f"   Supported: {', '.join(sorted(VALID_EXTENSIONS))}")
-        return
+        return False
 
     print(f"🎧 File: {path.name}  ({path.stat().st_size / 1024:.1f} KB)")
     print()
@@ -173,7 +173,7 @@ def transcribe_audio(audio_path):
             print(f"❌ Local Whisper also failed: {e}")
             import traceback
             traceback.print_exc()
-            return
+            return False
 
     # ── Print results ─────────────────────────────────────────────────────────
     lang_name = LANGUAGE_NAMES.get(lang_code, lang_code.title())
@@ -196,6 +196,7 @@ def transcribe_audio(audio_path):
     print("=" * 70)
     print("✅ Transcription complete!")
     print("=" * 70)
+    return True
 
 
 def main():
@@ -216,9 +217,10 @@ def main():
     audio_path = audio_path.strip('"').strip("'").strip()
     if not audio_path:
         print("❌ No path provided!")
-        return
+        sys.exit(1)
 
-    transcribe_audio(audio_path)
+    if not transcribe_audio(audio_path):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
