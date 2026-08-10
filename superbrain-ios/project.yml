@@ -1,0 +1,115 @@
+name: SuperBrain
+options:
+  bundleIdPrefix: com.superbrain.ios
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_PREVIEWS: YES
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1,2"
+
+packages:
+  SuperBrainCore:
+    path: SuperBrainCore
+
+targets:
+  SuperBrain:
+    type: application
+    platform: iOS
+    sources:
+      - path: SuperBrain
+        excludes:
+          - "Info.plist"
+          - "SuperBrain.entitlements"
+    info:
+      path: SuperBrain/Info.plist
+      properties:
+        CFBundleDisplayName: SuperBrain
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSCameraUsageDescription: "SuperBrain uses your camera to scan a QR code from your backend so you can connect without typing the server address and access token by hand."
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    entitlements:
+      path: SuperBrain/SuperBrain.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.superbrain.ios.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.superbrain.ios.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.superbrain.ios
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    dependencies:
+      - package: SuperBrainCore
+        product: SuperBrainCore
+      - target: SuperBrainShareExtension
+        embed: true
+
+  SuperBrainShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: SuperBrainShareExtension
+        excludes:
+          - "Info.plist"
+          - "SuperBrainShareExtension.entitlements"
+    info:
+      path: SuperBrainShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: SuperBrain
+        NSExtension:
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionPointIdentifier: com.apple.share-services
+    entitlements:
+      path: SuperBrainShareExtension/SuperBrainShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.superbrain.ios.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.superbrain.ios.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.superbrain.ios.ShareExtension
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: SuperBrainCore
+        product: SuperBrainCore
+
+schemes:
+  SuperBrain:
+    build:
+      targets:
+        SuperBrain: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+  SuperBrainShareExtension:
+    build:
+      targets:
+        SuperBrainShareExtension: all
+    run:
+      config: Debug
+      executable: SuperBrain.app
