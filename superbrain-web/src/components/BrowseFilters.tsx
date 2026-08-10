@@ -9,6 +9,7 @@ interface BrowseFiltersProps {
   category: string;
   language: string;
   collection: string;
+  sort: string;
 }
 
 export default function BrowseFilters({
@@ -18,17 +19,20 @@ export default function BrowseFilters({
   category,
   language,
   collection,
+  sort,
 }: BrowseFiltersProps) {
   const router = useRouter();
 
-  function update(next: { category?: string; language?: string; collection?: string }) {
+  function update(next: { category?: string; language?: string; collection?: string; sort?: string }) {
     const params = new URLSearchParams();
     const nextCategory = next.category ?? category;
     const nextLanguage = next.language ?? language;
     const nextCollection = next.collection ?? collection;
+    const nextSort = next.sort ?? sort;
     if (nextCategory) params.set("category", nextCategory);
     if (nextLanguage) params.set("language", nextLanguage);
     if (nextCollection) params.set("collection", nextCollection);
+    if (nextSort && nextSort !== "recent") params.set("sort", nextSort);
     router.push(`/browse${params.toString() ? `?${params.toString()}` : ""}`);
   }
 
@@ -76,7 +80,16 @@ export default function BrowseFilters({
         ))}
       </select>
 
-      {(category || language || collection) && (
+      <select
+        value={sort}
+        onChange={(e) => update({ sort: e.target.value })}
+        className={selectClass}
+      >
+        <option value="recent">Sort: Recent</option>
+        <option value="importance">Sort: Most important</option>
+      </select>
+
+      {(category || language || collection || (sort && sort !== "recent")) && (
         <button
           onClick={() => router.push("/browse")}
           className="rounded-full px-4 py-2 text-sm font-bold text-ink-muted hover:text-coral-ink transition-colors"

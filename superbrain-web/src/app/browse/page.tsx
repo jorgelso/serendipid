@@ -16,7 +16,12 @@ interface BrowseData {
   collections: { id: string; name: string }[];
 }
 
-async function loadBrowseData(category: string, language: string, collectionId: string): Promise<BrowseData> {
+async function loadBrowseData(
+  category: string,
+  language: string,
+  collectionId: string,
+  sort: string
+): Promise<BrowseData> {
   const config = getConfig();
   const { posts, collections } = await getExport();
 
@@ -24,6 +29,7 @@ async function loadBrowseData(category: string, language: string, collectionId: 
     category: category || undefined,
     language: language || undefined,
     collectionId: collectionId || undefined,
+    sort: sort === "importance" ? "importance" : "recent",
   });
 
   return {
@@ -40,12 +46,13 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
   const category = typeof searchParams.category === "string" ? searchParams.category : "";
   const language = typeof searchParams.language === "string" ? searchParams.language : "";
   const collection = typeof searchParams.collection === "string" ? searchParams.collection : "";
+  const sort = typeof searchParams.sort === "string" ? searchParams.sort : "recent";
 
   let data: BrowseData | null = null;
   let errorMessage: string | null = null;
 
   try {
-    data = await loadBrowseData(category, language, collection);
+    data = await loadBrowseData(category, language, collection, sort);
   } catch (err) {
     errorMessage =
       err instanceof SuperBrainApiError ? err.message : "Something went wrong loading your library.";
@@ -67,6 +74,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
             category={category}
             language={language}
             collection={collection}
+            sort={sort}
           />
         </div>
       )}
@@ -86,7 +94,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
           // picking up the new initialPosts prop, which is exactly the
           // "filter changes the URL but not what's shown" bug. The key
           // forces a remount whenever the filter combination changes.
-          key={`${category}|${language}|${collection}`}
+          key={`${category}|${language}|${collection}|${sort}`}
           initialPosts={data.posts}
           total={data.total}
           pageSize={PAGE_SIZE}
@@ -94,6 +102,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
             ...(category ? { category } : {}),
             ...(language ? { language } : {}),
             ...(collection ? { collection } : {}),
+            ...(sort === "importance" ? { sort } : {}),
           }}
         />
       )}

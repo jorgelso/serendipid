@@ -19,12 +19,13 @@ export async function GET(request: NextRequest) {
   const category = searchParams.get("category") || undefined;
   const language = searchParams.get("language") || undefined;
   const collectionId = searchParams.get("collection") || undefined;
+  const sort = searchParams.get("sort") === "importance" ? "importance" : "recent";
 
   try {
     const config = getConfig();
     const { posts, collections } = await getExport();
 
-    const filtered = filterPosts(posts, collections, { category, language, collectionId });
+    const filtered = filterPosts(posts, collections, { category, language, collectionId, sort });
     const total = filtered.length;
     const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p, config.apiUrl));
 

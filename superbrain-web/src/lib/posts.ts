@@ -55,14 +55,27 @@ export function sortPostsByRecency(posts: Post[]): Post[] {
   });
 }
 
+/** Highest importance (1-5) first — unscored posts (null) sink to the
+ * bottom rather than being treated as 0, since "not scored yet" isn't the
+ * same claim as "scored low". Recency breaks ties, including among the
+ * unscored group. */
+export function sortPostsByImportance(posts: Post[]): Post[] {
+  return sortPostsByRecency(posts).sort((a, b) => {
+    if (a.importance == null && b.importance == null) return 0;
+    if (a.importance == null) return 1;
+    if (b.importance == null) return -1;
+    return b.importance - a.importance;
+  });
+}
+
 /** Shared by /api/feed and the Browse page's initial server render, so both
- * apply category/collection filtering identically. */
+ * apply category/collection filtering and sorting identically. */
 export function filterPosts(
   posts: Post[],
   collections: Collection[],
-  options: { category?: string; language?: string; collectionId?: string }
+  options: { category?: string; language?: string; collectionId?: string; sort?: "recent" | "importance" }
 ): Post[] {
-  let filtered = sortPostsByRecency(posts);
+  let filtered = options.sort === "importance" ? sortPostsByImportance(posts) : sortPostsByRecency(posts);
   if (options.category) {
     filtered = filtered.filter((p) => p.category.includes(options.category!));
   }
@@ -174,6 +187,7 @@ export function mergeSearchHitsWithPosts(
           updated_at: null,
           post_date: null,
           likes: null,
+          importance: null,
           thumbnail: hit.thumbnail,
           title: hit.title,
           summary: hit.summary,

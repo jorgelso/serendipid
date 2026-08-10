@@ -12,6 +12,7 @@ export default function AnalysisDetails({ post }: { post: ClientPost }) {
     { label: "Music", value: post.music },
     { label: "Posted", value: post.post_date },
     { label: "Likes", value: post.likes },
+    { label: "Importance", value: post.importance ? `${post.importance}/5` : null },
   ].filter((f) => f.value !== null && f.value !== "");
 
   if (markdownFields.length === 0 && metaFields.length === 0) return null;

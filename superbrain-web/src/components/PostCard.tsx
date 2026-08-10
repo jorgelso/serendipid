@@ -7,6 +7,7 @@ import { useChangelog } from "@/lib/useChangelog";
 import {
   CategoryBadge,
   CategoryBadges,
+  ImportanceBadge,
   LanguageBadges,
   MissingVideoBadge,
   TagChips,
@@ -55,6 +56,11 @@ export default function PostCard({ post }: PostCardProps) {
           <div className="absolute top-3 left-3 pointer-events-none">
             <CategoryBadge category={post.category} />
           </div>
+          {post.importance != null && (
+            <div className="absolute bottom-3 left-3 pointer-events-none">
+              <ImportanceBadge importance={post.importance} />
+            </div>
+          )}
           <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5 pointer-events-none">
             {typeof post.similarity === "number" && (
               <span className="bg-ink/70 text-bg text-[11px] font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">

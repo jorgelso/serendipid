@@ -10,6 +10,9 @@ export interface Post {
   updated_at: string | null;
   post_date: string | null;
   likes: number | null;
+  // 1-5 rating of lasting/reusable value (backend/core/importance.py) — null
+  // for posts saved before this feature existed or unscored so far.
+  importance: number | null;
   thumbnail: string | null;
   title: string | null;
   summary: string | null;

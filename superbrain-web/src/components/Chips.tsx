@@ -117,6 +117,29 @@ export function VersionBehindBadge({
   );
 }
 
+/** Thumbnail-overlay badge for a post's 1-5 importance score (backend/core/
+ * importance.py) — renders nothing for unscored posts (null), same "don't
+ * claim a score that isn't there" reasoning as the rest of this field.
+ * Intensity scales continuously from neutral (1) to a saturated yellow (5)
+ * via CSS color-mix(), same technique as VersionBehindBadge's red→green
+ * gradient, so it tracks light/dark theme automatically. */
+export function ImportanceBadge({ importance }: { importance: number | null }) {
+  if (importance == null) return null;
+  const percent = ((importance - 1) / 4) * 100;
+  const bg = `color-mix(in srgb, var(--color-surface-2) ${100 - percent}%, var(--color-yellow-soft) ${percent}%)`;
+  const fg = `color-mix(in srgb, var(--color-ink-muted) ${100 - percent}%, var(--color-yellow-ink) ${percent}%)`;
+
+  return (
+    <span
+      title={`Importance: ${importance}/5`}
+      className="shrink-0 font-display text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap"
+      style={{ backgroundColor: bg, color: fg }}
+    >
+      ⭐ {importance}
+    </span>
+  );
+}
+
 export function TagChips({ tags, limit }: { tags: string[]; limit?: number }) {
   if (!tags || tags.length === 0) return null;
   const uniqueTags = Array.from(new Set(tags));
