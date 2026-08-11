@@ -1,32 +1,32 @@
 {
   "openai_gpt41": {
     "key": "openai_gpt41",
-    "avg_response_s": 2.9438811345104456,
-    "success_count": 2445,
+    "avg_response_s": 6.372719067886606,
+    "success_count": 2453,
     "fail_count": 2,
     "down_until": null,
-    "last_used": "2026-08-11T04:27:30.718373",
+    "last_used": "2026-08-11T16:40:46.135795",
     "last_error": null,
     "base_priority": 0
   },
   "groq_gpt_oss_20b": {
     "key": "groq_gpt_oss_20b",
-    "avg_response_s": 1.4820376489466598,
-    "success_count": 164,
+    "avg_response_s": 8.04345758799851,
+    "success_count": 166,
     "fail_count": 27,
-    "down_until": "2026-08-11T04:33:12.110345",
-    "last_used": "2026-08-11T04:03:07.373801",
-    "last_error": "Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kzh8ataten68294v8vsw2nsh` service tier `on_demand` on tokens per day (TPD): Limit 2000",
+    "down_until": null,
+    "last_used": "2026-08-11T16:35:30.949614",
+    "last_error": null,
     "base_priority": 0.5
   },
   "groq_llama33_70b": {
     "key": "groq_llama33_70b",
-    "avg_response_s": 1.8455207014312027,
-    "success_count": 113,
+    "avg_response_s": 2.879031570302699,
+    "success_count": 115,
     "fail_count": 29,
-    "down_until": "2026-08-11T04:54:15.170695",
-    "last_used": "2026-08-11T03:40:29.027973",
-    "last_error": "Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kzh8ataten68294v8vsw2nsh` service tier `on_demand` on tokens per day (TPD): Limit",
+    "down_until": null,
+    "last_used": "2026-08-11T16:40:40.458424",
+    "last_error": null,
     "base_priority": 1
   },
   "groq_llama4_scout": {
@@ -321,11 +321,11 @@
   },
   "openai_gpt41_vision": {
     "key": "openai_gpt41_vision",
-    "avg_response_s": 9.099118908699035,
-    "success_count": 2338,
+    "avg_response_s": 17.710980823538456,
+    "success_count": 2346,
     "fail_count": 8,
     "down_until": null,
-    "last_used": "2026-08-11T04:27:17.138779",
+    "last_used": "2026-08-11T16:40:17.989290",
     "last_error": null,
     "base_priority": 0
   },
@@ -333,8 +333,8 @@
     "key": "gemini_25_flash_vision",
     "avg_response_s": 15.284299373626709,
     "success_count": 1,
-    "fail_count": 30,
-    "down_until": "2026-08-11T03:37:00.129294",
+    "fail_count": 32,
+    "down_until": "2026-08-11T16:45:04.426624",
     "last_used": "2026-02-24T06:25:56.490384",
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 1
@@ -343,8 +343,8 @@
     "key": "gemini_25_flash_lite_vision",
     "avg_response_s": 6.709401964075168,
     "success_count": 14,
-    "fail_count": 159,
-    "down_until": "2026-08-11T04:26:55.537925",
+    "fail_count": 161,
+    "down_until": "2026-08-11T16:44:18.866332",
     "last_used": "2026-02-24T09:45:09.831171",
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 1.5
@@ -353,8 +353,8 @@
     "key": "gemini_25_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 220,
-    "down_until": "2026-08-11T04:30:25.552746",
+    "fail_count": 222,
+    "down_until": "2026-08-11T16:44:05.163731",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 2
@@ -373,8 +373,8 @@
     "key": "gemini_3_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 166,
-    "down_until": "2026-08-11T04:26:53.931140",
+    "fail_count": 168,
+    "down_until": "2026-08-11T16:44:10.525901",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3
@@ -383,8 +383,8 @@
     "key": "gemini_31_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 133,
-    "down_until": "2026-08-11T04:28:48.832692",
+    "fail_count": 135,
+    "down_until": "2026-08-11T16:44:23.964809",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3.5
@@ -393,8 +393,8 @@
     "key": "gemini_20_flash_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 96,
-    "down_until": "2026-08-11T04:26:57.754777",
+    "fail_count": 98,
+    "down_until": "2026-08-11T16:44:28.450579",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 4
@@ -403,8 +403,8 @@
     "key": "gemini_20_flash_lite_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 73,
-    "down_until": "2026-08-11T04:26:59.907098",
+    "fail_count": 75,
+    "down_until": "2026-08-11T16:44:32.804716",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 4.5
@@ -413,8 +413,8 @@
     "key": "gemini_15_flash_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 62,
-    "down_until": "2026-08-11T03:36:59.025585",
+    "fail_count": 64,
+    "down_until": "2026-08-11T16:44:37.408371",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 4.8
@@ -423,8 +423,8 @@
     "key": "groq_llama4_scout_vision",
     "avg_response_s": 1.528297446591561,
     "success_count": 56,
-    "fail_count": 39,
-    "down_until": "2026-08-11T03:36:59.592759",
+    "fail_count": 41,
+    "down_until": "2026-08-11T16:44:39.039375",
     "last_used": "2026-04-09T18:25:54.184988",
     "last_error": "Error code: 404 - {'error': {'message': 'The model `meta-llama/llama-4-scout-17b-16e-instruct` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_fou",
     "base_priority": 5
@@ -433,8 +433,8 @@
     "key": "groq_vision_11b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 27,
-    "down_until": "2026-08-11T03:37:00.910776",
+    "fail_count": 29,
+    "down_until": "2026-08-11T16:45:06.473098",
     "last_used": null,
     "last_error": "Error code: 400 - {'error': {'message': 'The model `llama-3.2-11b-vision-preview` has been decommissioned and is no longer supported. Please refer to https://console.groq.com/docs/deprecations for a r",
     "base_priority": 5.5
@@ -443,8 +443,8 @@
     "key": "groq_vision_90b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 20,
-    "down_until": "2026-08-11T03:37:01.383682",
+    "fail_count": 21,
+    "down_until": "2026-08-11T16:44:40.613068",
     "last_used": null,
     "last_error": "Error code: 400 - {'error': {'message': 'The model `llama-3.2-90b-vision-preview` has been decommissioned and is no longer supported. Please refer to https://console.groq.com/docs/deprecations for a r",
     "base_priority": 6
@@ -539,6 +539,16 @@
     "last_error": "No module named 'ollama'",
     "base_priority": 2
   },
+  "dyn_nvidia_nemotron-3_5-lightning_free": {
+    "key": "dyn_nvidia_nemotron-3_5-lightning_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 20
+  },
   "dyn_nvidia_nemotron-3-ultra-550b-a55b_free": {
     "key": "dyn_nvidia_nemotron-3-ultra-550b-a55b_free",
     "avg_response_s": null,
@@ -547,7 +557,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 20
+    "base_priority": 21
   },
   "dyn_google_lyria-3-pro-preview": {
     "key": "dyn_google_lyria-3-pro-preview",
@@ -557,7 +567,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 21
+    "base_priority": 22
   },
   "dyn_v_google_lyria-3-pro-preview": {
     "key": "dyn_v_google_lyria-3-pro-preview",
@@ -567,7 +577,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 21
+    "base_priority": 22
   },
   "dyn_google_lyria-3-clip-preview": {
     "key": "dyn_google_lyria-3-clip-preview",
@@ -577,7 +587,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 22
+    "base_priority": 23
   },
   "dyn_v_google_lyria-3-clip-preview": {
     "key": "dyn_v_google_lyria-3-clip-preview",
@@ -587,7 +597,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 22
+    "base_priority": 23
   },
   "dyn_google_gemma-4-26b-a4b-it_free": {
     "key": "dyn_google_gemma-4-26b-a4b-it_free",
@@ -597,7 +607,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 23
+    "base_priority": 24
   },
   "dyn_v_google_gemma-4-26b-a4b-it_free": {
     "key": "dyn_v_google_gemma-4-26b-a4b-it_free",
@@ -607,7 +617,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 23
+    "base_priority": 24
   },
   "dyn_google_gemma-4-31b-it_free": {
     "key": "dyn_google_gemma-4-31b-it_free",
@@ -617,7 +627,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 25
   },
   "dyn_v_google_gemma-4-31b-it_free": {
     "key": "dyn_v_google_gemma-4-31b-it_free",
@@ -627,7 +637,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 25
   },
   "dyn_inclusionai_ling-3_0-tiny_free": {
     "key": "dyn_inclusionai_ling-3_0-tiny_free",
@@ -637,7 +647,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 25
+    "base_priority": 26
   },
   "dyn_nvidia_nemotron-3-super-120b-a12b_free": {
     "key": "dyn_nvidia_nemotron-3-super-120b-a12b_free",
@@ -647,7 +657,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 26
+    "base_priority": 27
   },
   "dyn_cohere_north-mini-code_free": {
     "key": "dyn_cohere_north-mini-code_free",
@@ -657,7 +667,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 27
+    "base_priority": 28
   },
   "dyn_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free": {
     "key": "dyn_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free",
@@ -667,7 +677,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 28
+    "base_priority": 29
   },
   "dyn_v_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free": {
     "key": "dyn_v_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free",
@@ -677,7 +687,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 28
+    "base_priority": 29
   },
   "dyn_openrouter_free": {
     "key": "dyn_openrouter_free",
@@ -687,7 +697,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 29
+    "base_priority": 30
   },
   "dyn_v_openrouter_free": {
     "key": "dyn_v_openrouter_free",
@@ -697,7 +707,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 29
+    "base_priority": 30
   },
   "dyn_poolside_laguna-s-2_1_free": {
     "key": "dyn_poolside_laguna-s-2_1_free",
@@ -707,7 +717,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 30
+    "base_priority": 31
   },
   "dyn_poolside_laguna-xs-2_1_free": {
     "key": "dyn_poolside_laguna-xs-2_1_free",
@@ -717,7 +727,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 32
+    "base_priority": 33
   },
   "dyn_nvidia_nemotron-3_5-content-safety_free": {
     "key": "dyn_nvidia_nemotron-3_5-content-safety_free",
@@ -727,7 +737,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 33
+    "base_priority": 34
   },
   "dyn_v_nvidia_nemotron-3_5-content-safety_free": {
     "key": "dyn_v_nvidia_nemotron-3_5-content-safety_free",
@@ -737,7 +747,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 33
+    "base_priority": 34
   },
   "dyn_nvidia_nemotron-nano-9b-v2_free": {
     "key": "dyn_nvidia_nemotron-nano-9b-v2_free",
@@ -747,6 +757,6 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 34
+    "base_priority": 35
   }
 }

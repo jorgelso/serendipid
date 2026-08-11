@@ -1,6 +1,56 @@
 {
-  "cached_at": "2026-08-11T00:52:28.196236",
+  "cached_at": "2026-08-11T16:11:18.542409",
   "models": [
+    {
+      "id": "nvidia/nemotron-3.5-lightning:free",
+      "canonical_slug": "nvidia/nemotron-3.5-lightning-20260807",
+      "hugging_face_id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      "name": "NVIDIA: Nemotron 3.5 Lightning (free)",
+      "created": 1786452751,
+      "description": "NVIDIA Nemotron 3.5 Lightning is an open mixture-of-experts model from NVIDIA, with 3B active parameters out of 30B total. It is suited for high-throughput agentic workloads and specialized tasks that...",
+      "context_length": 1000000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "top_provider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 65536,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "seed",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "default_parameters": {},
+      "supported_voices": null,
+      "knowledge_cutoff": null,
+      "expiration_date": null,
+      "links": {
+        "details": "/api/v1/models/nvidia/nemotron-3.5-lightning-20260807/endpoints"
+      },
+      "reasoning": {
+        "mandatory": false
+      }
+    },
     {
       "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
       "canonical_slug": "nvidia/nemotron-3-ultra-550b-a55b-20260604",
@@ -62,7 +112,7 @@
             "category": "3d",
             "elo": 1187,
             "win_rate": 41.4,
-            "rank": 52
+            "rank": 53
           },
           {
             "arena": "models",
@@ -75,21 +125,21 @@
             "arena": "models",
             "category": "codecategories",
             "elo": 1156,
-            "win_rate": 36,
+            "win_rate": 36.1,
             "rank": 72
           },
           {
             "arena": "models",
             "category": "dataviz",
             "elo": 1150,
-            "win_rate": 37.3,
+            "win_rate": 37.2,
             "rank": 73
           },
           {
             "arena": "models",
             "category": "gamedev",
-            "elo": 1167,
-            "win_rate": 38,
+            "elo": 1166,
+            "win_rate": 37.8,
             "rank": 64
           },
           {
@@ -102,16 +152,16 @@
           {
             "arena": "models",
             "category": "uicomponent",
-            "elo": 1171,
-            "win_rate": 38.3,
-            "rank": 63
+            "elo": 1172,
+            "win_rate": 38.4,
+            "rank": 62
           },
           {
             "arena": "models",
             "category": "website",
-            "elo": 1135,
-            "win_rate": 33.2,
-            "rank": 83
+            "elo": 1136,
+            "win_rate": 33.3,
+            "rank": 82
           }
         ],
         "artificial_analysis": {

@@ -8,6 +8,8 @@
 //
 // Pure functions, no I/O — computeThemes() is the entrypoint used by cache.ts.
 
+import { UndirectedGraph } from "graphology";
+import louvain from "graphology-communities-louvain";
 import type { MicroCluster, Post, Theme } from "@/types/domain";
 
 export interface EmbeddedPost {
@@ -99,18 +101,39 @@ export function connectedComponents(vectors: Float32Array[], threshold: number):
   return Array.from(groups.values());
 }
 
-/** Average-linkage hierarchical agglomerative merge over a set of vectors
- * (here, micro-cluster centroids). Unlike connectedComponents() (single-
- * linkage via union-find), a merge here requires the *aggregate* similarity
- * between two clusters' members to clear the threshold, not just one
- * bridging pair — which is what stops a chain of loosely-related
- * micro-clusters (e.g. catholic content -> self-improvement -> philosophy)
- * from all collapsing into one theme just because each neighbor in the
- * chain is individually similar enough. Repeatedly merges the closest pair
- * of clusters until no remaining pair clears the threshold. */
-export function agglomerativeMerge(vectors: Float32Array[], threshold: number): number[][] {
+export interface MergedCluster {
+  members: number[];
+  centroid: Float32Array;
+}
+
+/** Graph-based community detection over a set of vectors (here, micro-cluster
+ * centroids, weighted by each micro-cluster's post count) — replaces the
+ * earlier threshold-based linkage approaches (single-link connectedComponents,
+ * average-/centroid-link agglomerativeMerge). Those all shared a structural
+ * flaw: a single global similarity threshold can't simultaneously be right
+ * for a tight, dense topic and a diffuse, broad one, and any threshold-based
+ * merge can be dragged along by a "hub" topic (e.g. self-improvement) that's
+ * weakly similar to a lot of unrelated content — nothing stops it from
+ * absorbing anything above the cutoff.
+ *
+ * Instead: build a mutual k-nearest-neighbor graph (an edge between two
+ * micro-clusters only if each is among the other's own top-k most similar —
+ * this is what prunes the one-sided "weakly similar to everything" edges a
+ * hub topic accumulates, which a plain/one-sided k-NN graph would keep), then
+ * run Louvain modularity optimization to find communities. This is locally
+ * adaptive to density (no single global cutoff) and modularity is resistant
+ * to a hub absorbing everything, since that requires genuinely dense mutual
+ * connectivity, not just many weak one-directional similarities. */
+export function louvainMerge(
+  vectors: Float32Array[],
+  weights: number[],
+  options: { k: number; resolution: number; minSimilarity: number }
+): MergedCluster[] {
   const n = vectors.length;
   if (n === 0) return [];
+  if (n === 1) return [{ members: [0], centroid: vectors[0] }];
+
+  const k = Math.min(options.k, n - 1);
 
   const sim: number[][] = Array.from({ length: n }, () => new Array<number>(n).fill(0));
   for (let i = 0; i < n; i++) {
@@ -121,36 +144,51 @@ export function agglomerativeMerge(vectors: Float32Array[], threshold: number): 
     }
   }
 
-  function averageLinkage(a: number[], b: number[]): number {
-    let sum = 0;
-    for (const i of a) {
-      for (const j of b) sum += sim[i][j];
+  const topK: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const ranked = Array.from({ length: n }, (_, j) => j)
+      .filter((j) => j !== i)
+      .sort((a, b) => sim[i][b] - sim[i][a])
+      .slice(0, k);
+    topK.push(ranked);
+  }
+  const topKSets = topK.map((neighbors) => new Set(neighbors));
+
+  const graph = new UndirectedGraph();
+  for (let i = 0; i < n; i++) graph.addNode(i);
+
+  for (let i = 0; i < n; i++) {
+    for (const j of topK[i]) {
+      if (j <= i) continue;
+      if (!topKSets[j].has(i)) continue; // mutual only
+      const s = sim[i][j];
+      if (s < options.minSimilarity) continue;
+      graph.addEdge(i, j, { weight: s });
     }
-    return sum / (a.length * b.length);
   }
 
-  const clusters: number[][] = vectors.map((_, i) => [i]);
+  const communities = louvain(graph, { resolution: options.resolution, getEdgeWeight: "weight" });
 
-  for (;;) {
-    let bestI = -1;
-    let bestJ = -1;
-    let bestSim = -Infinity;
-    for (let i = 0; i < clusters.length; i++) {
-      for (let j = i + 1; j < clusters.length; j++) {
-        const s = averageLinkage(clusters[i], clusters[j]);
-        if (s > bestSim) {
-          bestSim = s;
-          bestI = i;
-          bestJ = j;
-        }
-      }
-    }
-    if (bestI === -1 || bestSim < threshold) break;
-    clusters[bestI] = clusters[bestI].concat(clusters[bestJ]);
-    clusters.splice(bestJ, 1);
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const communityId = communities[String(i)];
+    const members = groups.get(communityId);
+    if (members) members.push(i);
+    else groups.set(communityId, [i]);
   }
 
-  return clusters;
+  return Array.from(groups.values()).map((members) => {
+    if (members.length === 1) return { members, centroid: vectors[members[0]] };
+    const totalWeight = members.reduce((sum, idx) => sum + weights[idx], 0);
+    const dim = vectors[0].length;
+    const merged = new Float32Array(dim);
+    for (const idx of members) {
+      const w = weights[idx];
+      for (let d = 0; d < dim; d++) merged[d] += vectors[idx][d] * w;
+    }
+    for (let d = 0; d < dim; d++) merged[d] /= totalWeight;
+    return { members, centroid: normalize(merged) };
+  });
 }
 
 export function centroid(vectors: Float32Array[]): Float32Array {
@@ -241,14 +279,35 @@ export function labelFromPosts(posts: PostLike[]): { label: string; subLabels: s
 
 export interface ClusteringOptions {
   fineThreshold?: number;
-  coarseThreshold?: number;
+  // Coarse-pass graph params (see louvainMerge()): how many nearest
+  // neighbors each micro-cluster connects to before mutual-kNN pruning,
+  // Louvain's modularity resolution (higher = more, smaller communities),
+  // and a sanity floor so even a mutual top-k edge can't be near-meaningless.
+  kNeighbors?: number;
+  louvainResolution?: number;
+  graphMinSimilarity?: number;
   minThemeSize?: number;
+  // Bar for folding a sub-minThemeSize leftover group into an existing
+  // theme (see buildThemes()) instead of leaving it unclustered. Lower than
+  // graphMinSimilarity on purpose — leftovers are disproportionately small/
+  // singleton micro-clusters with noisier, less-averaged centroids, so
+  // holding them to the coarse-pass bar would absorb almost nothing.
+  absorptionThreshold?: number;
+  // Required gap between a leftover's best- and second-best-matching theme
+  // for absorption to happen — keeps genuinely ambiguous leftovers (sitting
+  // between two themes) unclustered rather than force-fit into whichever
+  // theme happens to be marginally closer.
+  absorptionMargin?: number;
 }
 
 const DEFAULT_OPTIONS: Required<ClusteringOptions> = {
   fineThreshold: 0.72,
-  coarseThreshold: 0.7,
+  kNeighbors: 15,
+  louvainResolution: 1,
+  graphMinSimilarity: 0.5,
   minThemeSize: 3,
+  absorptionThreshold: 0.65,
+  absorptionMargin: 0.03,
 };
 
 function buildMicroClusters(
@@ -278,14 +337,57 @@ function buildMicroClusters(
 function buildThemes(
   microClusters: MicroCluster[],
   centroids: Float32Array[],
-  coarseThreshold: number,
+  graphOptions: { k: number; resolution: number; minSimilarity: number },
+  minThemeSize: number,
+  absorptionThreshold: number,
+  absorptionMargin: number,
   postsByShortcode: Map<string, PostLike>
 ): Theme[] {
-  const groups = agglomerativeMerge(centroids, coarseThreshold);
+  const weights = microClusters.map((mc) => mc.postShortcodes.length);
+  const groups = louvainMerge(centroids, weights, graphOptions);
 
-  return groups.map((indices, i) => {
-    const themeMicroClusters = indices.map((idx) => microClusters[idx]);
-    const allShortcodes = themeMicroClusters.flatMap((mc) => mc.postShortcodes);
+  interface ThemeGroup {
+    microClusters: MicroCluster[];
+    centroid: Float32Array;
+  }
+
+  const themeGroups: ThemeGroup[] = [];
+  const leftovers: ThemeGroup[] = [];
+  for (const group of groups) {
+    const themeMicroClusters = group.members.map((idx) => microClusters[idx]);
+    const postCount = themeMicroClusters.reduce((sum, mc) => sum + mc.postShortcodes.length, 0);
+    const entry: ThemeGroup = { microClusters: themeMicroClusters, centroid: group.centroid };
+    if (postCount >= minThemeSize) themeGroups.push(entry);
+    else leftovers.push(entry);
+  }
+
+  // Balanced absorption: fold a leftover into the nearest theme only when
+  // it's unambiguously closer to that one theme than to any other — a
+  // leftover genuinely between two themes stays unclustered instead of
+  // being force-fit.
+  for (const leftover of leftovers) {
+    let bestIdx = -1;
+    let bestSim = -Infinity;
+    let secondBestSim = -Infinity;
+    themeGroups.forEach((theme, idx) => {
+      const s = dot(leftover.centroid, theme.centroid);
+      if (s > bestSim) {
+        secondBestSim = bestSim;
+        bestSim = s;
+        bestIdx = idx;
+      } else if (s > secondBestSim) {
+        secondBestSim = s;
+      }
+    });
+    if (bestIdx === -1) continue;
+    const margin = secondBestSim === -Infinity ? Infinity : bestSim - secondBestSim;
+    if (bestSim >= absorptionThreshold && margin >= absorptionMargin) {
+      themeGroups[bestIdx].microClusters.push(...leftover.microClusters);
+    }
+  }
+
+  return themeGroups.map((group, i) => {
+    const allShortcodes = group.microClusters.flatMap((mc) => mc.postShortcodes);
     const themePosts = allShortcodes
       .map((sc) => postsByShortcode.get(sc))
       .filter((p): p is PostLike => Boolean(p));
@@ -295,7 +397,7 @@ function buildThemes(
       label,
       subLabels,
       postCount: allShortcodes.length,
-      microClusters: themeMicroClusters,
+      microClusters: group.microClusters,
     };
   });
 }
@@ -325,9 +427,15 @@ export function computeThemes(
     postsByShortcode,
     opts.fineThreshold
   );
-  const themes = buildThemes(microClusters, centroids, opts.coarseThreshold, postsByShortcode)
-    .filter((theme) => theme.postCount >= opts.minThemeSize)
-    .sort((a, b) => b.postCount - a.postCount);
+  const themes = buildThemes(
+    microClusters,
+    centroids,
+    { k: opts.kNeighbors, resolution: opts.louvainResolution, minSimilarity: opts.graphMinSimilarity },
+    opts.minThemeSize,
+    opts.absorptionThreshold,
+    opts.absorptionMargin,
+    postsByShortcode
+  ).sort((a, b) => b.postCount - a.postCount);
 
   const keptShortcodes = new Set(
     themes.flatMap((t) => t.microClusters.flatMap((mc) => mc.postShortcodes))
