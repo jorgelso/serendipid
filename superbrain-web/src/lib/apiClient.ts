@@ -1,11 +1,13 @@
 import { getConfig } from "./config";
 import type {
+  BulkReanalyzeResponse,
   CategoriesResponse,
   ChangelogResponse,
   ChatMessageExchange,
   ChatThread,
   ChatThreadDetail,
   ExportPayload,
+  QueueStatusResponse,
   SearchSemanticResponse,
 } from "@/types/domain";
 
@@ -141,6 +143,37 @@ export async function reanalyzePost(url: string): Promise<ReanalyzeResponse> {
       409: "This post is already being analyzed — wait a moment and try again.",
       503: "The backend is busy analyzing another post right now — try again shortly.",
     },
+  });
+}
+
+export interface DeletePostResponse {
+  success: boolean;
+  message: string;
+  shortcode: string;
+}
+
+// Soft delete — the backend sets is_hidden=1 rather than removing the row.
+// It's reversible, but only via explicit intent: POST /analyze with
+// restore=true restores it instead of re-downloading (see restore_post in
+// database.py). A bare resubmission (restore omitted/false, e.g. from an
+// automated import/sync script) is a no-op and returns 410 — this app never
+// does that today since reanalyzePost() always sets force=true.
+export async function deletePost(shortcode: string): Promise<DeletePostResponse> {
+  return request<DeletePostResponse>(`/post/${shortcode}`, { method: "DELETE" });
+}
+
+export async function fetchQueueStatus(): Promise<QueueStatusResponse> {
+  return request<QueueStatusResponse>("/queue-status");
+}
+
+// Unlike reanalyzePost(), this returns almost immediately — the backend
+// either does a cheap synchronous fix (posts stamped exactly version 7) or
+// queues a full re-analysis for the background worker to run later, so it
+// never blocks on a subprocess the way a single force-reanalyze does.
+export async function bulkReanalyze(shortcodes: string[]): Promise<BulkReanalyzeResponse> {
+  return request<BulkReanalyzeResponse>("/reanalyze/bulk", {
+    method: "POST",
+    body: { shortcodes },
   });
 }
 

@@ -68,6 +68,9 @@ struct ChatThreadView: View {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
+            .refreshable {
+                await viewModel.load()
+            }
         }
     }
 

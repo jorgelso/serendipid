@@ -1,7 +1,7 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getExport, getThemes } from "@/lib/cache";
+import { getCategories, getExport, getThemes } from "@/lib/cache";
 import {
-  computeCategoryCounts,
+  computeCategoryCountsWithCanonical,
   computeLanguageCounts,
   computeTagCounts,
   groupShortcodesByCategory,
@@ -22,9 +22,10 @@ interface InsightsData {
 }
 
 async function loadInsightsData(): Promise<InsightsData> {
-  const [{ posts }, { themes, unclusteredShortcodes }] = await Promise.all([
+  const [{ posts }, { themes, unclusteredShortcodes }, { canonical }] = await Promise.all([
     getExport(),
     getThemes(),
+    getCategories(),
   ]);
 
   const unclusteredSet = new Set(unclusteredShortcodes);
@@ -35,7 +36,7 @@ async function loadInsightsData(): Promise<InsightsData> {
   return {
     totalPosts: posts.length,
     needsReviewCount: posts.filter((p) => p.needs_review).length,
-    categoryCounts: computeCategoryCounts(posts),
+    categoryCounts: computeCategoryCountsWithCanonical(posts, canonical),
     languageCounts: computeLanguageCounts(posts),
     tagCounts: computeTagCounts(posts),
     themes,

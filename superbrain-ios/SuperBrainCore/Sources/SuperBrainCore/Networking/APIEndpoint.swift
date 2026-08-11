@@ -37,17 +37,31 @@ public enum APIEndpoint: Sendable {
     case caption(url: String)
     case ping
     case connectInfo
+    /// Counts of what's currently processing/queued/awaiting retry
+    /// (`backend/api.py`'s `/queue-status`) — used by `RetryQueueView` for
+    /// the summary header.
+    case queueStatus
+    /// Items the backend already gave up on after a quota/rate-limit
+    /// exhaustion and scheduled for automatic retry (`/queue/retry`) —
+    /// distinct from `PendingShareStore`'s *local* queue, which is for
+    /// shares that never reached the backend at all.
+    case retryQueue
+    /// Force-promotes every retry-ready item to the active processing queue
+    /// immediately, instead of waiting for its scheduled `retry_after`.
+    case retryQueueFlush
+    case queueItemDelete(shortcode: String)
 
     public var method: HTTPMethod {
         switch self {
         case .export, .recent, .categoryPosts, .tagSearch, .semanticSearch, .categories, .stats,
-             .changelog, .collections, .chatThreads, .chatThread, .caption, .ping, .connectInfo:
+             .changelog, .collections, .chatThreads, .chatThread, .caption, .ping, .connectInfo,
+             .queueStatus, .retryQueue:
             return .get
-        case .collectionUpsert, .chatThreadCreate, .chatMessages, .analyze:
+        case .collectionUpsert, .chatThreadCreate, .chatMessages, .analyze, .retryQueueFlush:
             return .post
         case .postUpdate, .collectionPosts:
             return .put
-        case .postDelete, .collectionDelete, .chatThreadDelete:
+        case .postDelete, .collectionDelete, .chatThreadDelete, .queueItemDelete:
             return .delete
         }
     }
@@ -73,6 +87,10 @@ public enum APIEndpoint: Sendable {
         case .caption: return "/caption"
         case .ping: return "/ping"
         case .connectInfo: return "/connect-info"
+        case .queueStatus: return "/queue-status"
+        case .retryQueue: return "/queue/retry"
+        case .retryQueueFlush: return "/queue/retry/flush"
+        case .queueItemDelete(let shortcode): return "/queue/\(shortcode)"
         }
     }
 

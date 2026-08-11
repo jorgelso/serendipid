@@ -131,7 +131,8 @@ class PostsCacheService {
     const remaining: PendingAnalysis[] = [];
     for (const a of this.pendingAnalysesList) {
       try {
-        await apiService.analyzeInstagramUrl(a.url);
+        // Deferred replay of an explicit user share — still counts as explicit intent.
+        await apiService.analyzeInstagramUrl(a.url, true);
         // Success: watcher will detect completion via getRecentPosts
         await this.markAnalysisComplete(a.shortcode);
       } catch (e: any) {

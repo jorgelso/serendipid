@@ -680,43 +680,52 @@
         });
 
         const analyzeOk = analyzeResp.ok || analyzeResp.status === 202 || analyzeResp.status === 503;
+        // User deleted this post via a client — respect that instead of
+        // re-submitting it (and re-flagging it as "failed") every run.
+        const wasDeleted = analyzeResp.status === 410;
 
         if (analyzeResp.status === 409) {
           // Already analyzed — that's fine
           addLog(`Already analyzed: ${post.shortcode}`, 'info');
+        } else if (wasDeleted) {
+          db.posts[post.shortcode].status = 'deleted';
+          db.posts[post.shortcode].error = null;
+          addLog(`Skipped (deleted by user): ${post.shortcode}`, 'info');
         } else if (!analyzeOk) {
           const errText = await analyzeResp.text().catch(() => '');
           throw new Error(`Analyze failed (${analyzeResp.status}): ${errText.substring(0, 100)}`);
         }
 
-        // ── Step 3: If in collection, add shortcode to collection post_ids ──
-        if (serverCollection) {
-          try {
-            // Get current post_ids from server
-            const currentIds = serverCollection.post_ids || [];
-            if (!currentIds.includes(post.shortcode)) {
-              const newIds = [...currentIds, post.shortcode];
-              const updateResp = await fetch(`${settings.serverUrl}/collections/${serverCollection.id}/posts`, {
-                method: 'PUT',
-                headers: { 'X-API-Key': settings.apiToken, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ post_ids: newIds })
-              });
-              if (updateResp.ok) {
-                serverCollection.post_ids = newIds; // update cache
+        if (!wasDeleted) {
+          // ── Step 3: If in collection, add shortcode to collection post_ids ──
+          if (serverCollection) {
+            try {
+              // Get current post_ids from server
+              const currentIds = serverCollection.post_ids || [];
+              if (!currentIds.includes(post.shortcode)) {
+                const newIds = [...currentIds, post.shortcode];
+                const updateResp = await fetch(`${settings.serverUrl}/collections/${serverCollection.id}/posts`, {
+                  method: 'PUT',
+                  headers: { 'X-API-Key': settings.apiToken, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ post_ids: newIds })
+                });
+                if (updateResp.ok) {
+                  serverCollection.post_ids = newIds; // update cache
+                }
               }
+            } catch (e) {
+              addLog(`Warning: Could not add to collection: ${e.message}`, 'error');
             }
-          } catch (e) {
-            addLog(`Warning: Could not add to collection: ${e.message}`, 'error');
           }
+
+          // ── Mark as saved ──
+          db.posts[post.shortcode].status = 'saved';
+          db.posts[post.shortcode].error = null;
+          saved++;
+
+          const colTag = post.collection ? ` → ${post.collection}` : '';
+          addLog(`Saved: ${post.shortcode}${colTag}`, 'success');
         }
-
-        // ── Mark as saved ──
-        db.posts[post.shortcode].status = 'saved';
-        db.posts[post.shortcode].error = null;
-        saved++;
-
-        const colTag = post.collection ? ` → ${post.collection}` : '';
-        addLog(`Saved: ${post.shortcode}${colTag}`, 'success');
 
       } catch (error) {
         db.posts[post.shortcode].status = 'failed';

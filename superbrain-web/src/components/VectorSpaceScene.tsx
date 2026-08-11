@@ -11,7 +11,14 @@ import HoverPreviewCard from "./HoverPreviewCard";
 
 interface VectorSpaceSceneProps {
   points: VectorSpacePoint[];
-  activeColorSlot: VectorSpaceColorSlot | null;
+  // Shortcodes to keep at full brightness; everything else dims to neutral
+  // gray. null means "no filter, show everything at full brightness" — one
+  // mechanism serves both the legend's per-theme selection (highlighting one
+  // theme's points, even themes past the 8-color cap) and the semantic
+  // search box (highlighting whatever the cosine-similarity search matched),
+  // since both are really the same operation: a set of shortcodes to light
+  // up as if they were one cluster.
+  highlightedShortcodes: Set<string> | null;
   onSelect: (shortcode: string) => void;
 }
 
@@ -45,6 +52,57 @@ function CameraController({
       }
     });
   }, [camera, controlsRef, registerReset]);
+
+  return null;
+}
+
+// OrbitControls always rotates around `controls.target`, which starts (and,
+// without this, stays forever) at the scene origin — so once you've zoomed
+// into a cluster on the far side of the point cloud, dragging to rotate
+// swings the whole view around a pivot far outside what's on screen instead
+// of around what you're actually looking at. Retargets on every rotate-drag
+// (left-button pointerdown, before OrbitControls' own drag math kicks in on
+// the following pointermoves) to whatever point is currently hovered, or —
+// if the cursor isn't over a point — to the spot straight ahead of the
+// camera at its current distance to the old target, so an empty patch of
+// space between points still gets a sensible local pivot instead of
+// snapping back to the origin. Setting `target` and calling `update()`
+// synchronously here doesn't move the camera (OrbitControls.update()
+// recomputes its internal offset from the *current* camera position each
+// call, so position is preserved — only the point it orbits around, and
+// therefore its look direction, changes).
+function FocusOrbit({
+  controlsRef,
+  hoveredPositionRef,
+}: {
+  controlsRef: React.RefObject<OrbitControlsImpl | null>;
+  hoveredPositionRef: React.RefObject<[number, number, number] | null>;
+}) {
+  const { camera, gl } = useThree();
+
+  useEffect(() => {
+    const canvasEl = gl.domElement;
+    const forward = new THREE.Vector3();
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return; // left-drag (or single-finger touch) only — not pan/dolly
+      const controls = controlsRef.current;
+      if (!controls) return;
+
+      const hovered = hoveredPositionRef.current;
+      if (hovered) {
+        controls.target.set(...hovered);
+      } else {
+        const distance = camera.position.distanceTo(controls.target);
+        camera.getWorldDirection(forward);
+        controls.target.copy(camera.position).addScaledVector(forward, distance);
+      }
+      controls.update();
+    };
+
+    canvasEl.addEventListener("pointerdown", onPointerDown);
+    return () => canvasEl.removeEventListener("pointerdown", onPointerDown);
+  }, [camera, gl, controlsRef, hoveredPositionRef]);
 
   return null;
 }
@@ -265,13 +323,13 @@ function GlowLayer({
   colored,
   radius,
   opacity,
-  activeColorSlot,
+  highlightedShortcodes,
   hoveredShortcode,
 }: {
   colored: ColoredPoint[];
   radius: number;
   opacity: number;
-  activeColorSlot: VectorSpaceColorSlot | null;
+  highlightedShortcodes: Set<string> | null;
   hoveredShortcode: string | null;
 }) {
   return (
@@ -285,7 +343,7 @@ function GlowLayer({
         toneMapped={false}
       />
       {colored.map(({ point, color }) => {
-        const isDimmed = activeColorSlot !== null && point.colorSlot !== activeColorSlot;
+        const isDimmed = highlightedShortcodes !== null && !highlightedShortcodes.has(point.shortcode);
         const isHovered = hoveredShortcode === point.shortcode;
         const neutralScale = isNeutralSlot(point.colorSlot) ? NEUTRAL_GLOW_SCALE : 1;
         return (
@@ -307,13 +365,13 @@ function GlowLayer({
 // that actually handles hover/click.
 function CoreLayer({
   colored,
-  activeColorSlot,
+  highlightedShortcodes,
   hoveredShortcode,
   onHover,
   onSelect,
 }: {
   colored: ColoredPoint[];
-  activeColorSlot: VectorSpaceColorSlot | null;
+  highlightedShortcodes: Set<string> | null;
   hoveredShortcode: string | null;
   onHover: (shortcode: string | null) => void;
   onSelect: (shortcode: string) => void;
@@ -323,7 +381,7 @@ function CoreLayer({
       <sphereGeometry args={[CORE_RADIUS, 16, 16]} />
       <meshBasicMaterial toneMapped={false} />
       {colored.map(({ point, coreColor }) => {
-        const isDimmed = activeColorSlot !== null && point.colorSlot !== activeColorSlot;
+        const isDimmed = highlightedShortcodes !== null && !highlightedShortcodes.has(point.shortcode);
         const isHovered = hoveredShortcode === point.shortcode;
         return (
           <Instance
@@ -353,7 +411,7 @@ function CoreLayer({
 }
 
 const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProps>(function VectorSpaceScene(
-  { points, activeColorSlot, onSelect },
+  { points, highlightedShortcodes, onSelect },
   ref
 ) {
   const palette = useVizPalette();
@@ -379,6 +437,15 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
     [points, hoveredShortcode]
   );
 
+  // Mirrors hoveredPoint for FocusOrbit's pointerdown handler to read
+  // imperatively — a ref instead of a dependency so that handler doesn't
+  // need to be torn down and re-registered on every hover change (which
+  // fires on nearly every mousemove over the point cloud).
+  const hoveredPositionRef = useRef<[number, number, number] | null>(null);
+  useEffect(() => {
+    hoveredPositionRef.current = hoveredPoint?.position ?? null;
+  }, [hoveredPoint]);
+
   return (
     <Canvas camera={{ position: DEFAULT_CAMERA_POSITION, fov: 50 }} dpr={[1, 1.5]}>
       <color attach="background" args={[SCENE_BACKGROUND]} />
@@ -397,6 +464,7 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
       <ContextLossHandler />
       <CameraController controlsRef={controlsRef} registerReset={(fn) => (resetFnRef.current = fn)} />
       <KeyboardFly controlsRef={controlsRef} />
+      <FocusOrbit controlsRef={controlsRef} hoveredPositionRef={hoveredPositionRef} />
       <SpaceBackdrop />
       <BoundingBox />
       <Axes />
@@ -404,19 +472,19 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
         colored={colored}
         radius={OUTER_RADIUS}
         opacity={0.07}
-        activeColorSlot={activeColorSlot}
+        highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
       />
       <GlowLayer
         colored={colored}
         radius={MID_RADIUS}
         opacity={0.28}
-        activeColorSlot={activeColorSlot}
+        highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
       />
       <CoreLayer
         colored={colored}
-        activeColorSlot={activeColorSlot}
+        highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
         onHover={setHoveredShortcode}
         onSelect={onSelect}

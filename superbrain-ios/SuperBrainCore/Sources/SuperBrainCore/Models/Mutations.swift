@@ -6,12 +6,17 @@ import Foundation
 public struct AnalyzeRequest: Encodable, Sendable {
     public let url: String
     public let force: Bool?
+    /// Explicit intent required to bring a soft-deleted post back (backend
+    /// no-ops a bare resubmission otherwise). Sharing/re-sharing a URL is a
+    /// deliberate user action, so the Share Extension passes true.
+    public let restore: Bool?
     public let caption: String?
     public let hashtags: [String]?
 
-    public init(url: String, force: Bool? = nil, caption: String? = nil, hashtags: [String]? = nil) {
+    public init(url: String, force: Bool? = nil, restore: Bool? = nil, caption: String? = nil, hashtags: [String]? = nil) {
         self.url = url
         self.force = force
+        self.restore = restore
         self.caption = caption
         self.hashtags = hashtags
     }

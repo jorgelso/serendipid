@@ -208,13 +208,19 @@ class ApiService {
     }
   }
 
-  async analyzeInstagramUrl(url: string): Promise<Post> {
+  // `restore`: pass true when this call represents a deliberate user action
+  // (sharing/re-sharing a specific URL) — the backend requires explicit
+  // intent to un-delete a soft-deleted post, so this must be true for the
+  // "share it again to bring it back" UX to work. Background/automated
+  // resubmissions should leave this false so they can't silently undo a
+  // user's delete.
+  async analyzeInstagramUrl(url: string, restore: boolean = false): Promise<Post> {
     try {
       const headers = await this.getHeaders();
       const baseUrl = await this.getBaseUrl();
       const response = await axios.post<ApiResponse>(
         `${baseUrl}/analyze`,
-        { url },
+        { url, restore },
         { headers, timeout: ANALYSIS_TIMEOUT }
       );
       

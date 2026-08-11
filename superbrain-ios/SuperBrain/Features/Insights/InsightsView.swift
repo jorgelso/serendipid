@@ -6,22 +6,21 @@ struct InsightsView: View {
     @State private var viewModel: InsightsViewModel?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let viewModel {
-                    content(viewModel: viewModel)
-                } else {
-                    ProgressView()
-                }
+        Group {
+            if let viewModel {
+                content(viewModel: viewModel)
+            } else {
+                ProgressView()
             }
-            .navigationTitle("Insights")
-            .background(BrightPulse.background)
-            .navigationDestination(for: Theme.self) { theme in
-                ThemeDetailView(theme: theme)
-            }
-            .navigationDestination(for: String.self) { shortcode in
-                PostDetailView(shortcode: shortcode)
-            }
+        }
+        .navigationTitle("Insights")
+        .navigationBarTitleDisplayMode(.inline)
+        .background(BrightPulse.background)
+        .navigationDestination(for: Theme.self) { theme in
+            ThemeDetailView(theme: theme)
+        }
+        .navigationDestination(for: String.self) { shortcode in
+            PostDetailView(shortcode: shortcode)
         }
         .task {
             if viewModel == nil {

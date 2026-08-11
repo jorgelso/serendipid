@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/search", label: "Search" },
   { href: "/chat", label: "Chat" },
   { href: "/insights", label: "Insights" },
+  { href: "/versions", label: "Versions" },
   { href: "/space", label: "Space" },
 ];
 

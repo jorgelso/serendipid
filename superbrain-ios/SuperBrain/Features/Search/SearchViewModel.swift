@@ -37,6 +37,14 @@ final class SearchViewModel {
         }
     }
 
+    /// Re-runs the current query — used by the results list's pull-to-refresh,
+    /// since a plain re-fetch (unlike `onQueryChanged`) shouldn't debounce.
+    func refresh() async {
+        let currentQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !currentQuery.isEmpty else { return }
+        await performSearch(query: currentQuery)
+    }
+
     private func performSearch(query: String) async {
         loadState = .loading
         do {

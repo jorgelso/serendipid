@@ -1,4 +1,4 @@
-import type { ClientPost, Collection, Post, SearchSemanticHit } from "@/types/domain";
+import type { ChangelogResponse, ClientPost, Collection, Post, SearchSemanticHit } from "@/types/domain";
 
 /** Thumbnails may be a full external URL, a data: URI, or a relative
  * /static/... path needing the backend's base URL prefixed (backend/api.py's
@@ -73,7 +73,15 @@ export function sortPostsByImportance(posts: Post[]): Post[] {
 export function filterPosts(
   posts: Post[],
   collections: Collection[],
-  options: { category?: string; language?: string; collectionId?: string; sort?: "recent" | "importance" }
+  options: {
+    category?: string;
+    language?: string;
+    collectionId?: string;
+    sort?: "recent" | "importance";
+    // Toggle set, not a single value — e.g. [1, 3] keeps posts scored either
+    // 1 or 3. Empty/undefined means no importance filtering at all.
+    importance?: number[];
+  }
 ): Post[] {
   let filtered = options.sort === "importance" ? sortPostsByImportance(posts) : sortPostsByRecency(posts);
   if (options.category) {
@@ -87,7 +95,71 @@ export function filterPosts(
     const idSet = new Set(collection?.post_ids ?? []);
     filtered = filtered.filter((p) => idSet.has(p.shortcode));
   }
+  if (options.importance && options.importance.length > 0) {
+    const importanceSet = new Set(options.importance);
+    filtered = filtered.filter((p) => p.importance != null && importanceSet.has(p.importance));
+  }
   return filtered;
+}
+
+export interface VersionFilters {
+  category: string;
+  language: string;
+  sort: "recent" | "importance";
+}
+
+export interface VersionSummary {
+  version: number;
+  count: number;
+  isCurrent: boolean;
+  changelogTitle: string | null;
+  changelogDescription: string | null;
+  // Every shortcode at this version, not just what's currently paginated in
+  // — "Rescan entire version" needs to target the whole cohort.
+  shortcodes: string[];
+}
+
+/** Groups posts by analysis_version, sorted oldest-first — unrelated to
+ * "collections" (a separate, user-curated Instagram-folder concept; see
+ * Collection). Only versions with at least one current post are included. */
+export function versionSummaries(posts: Post[], changelog: ChangelogResponse | null): VersionSummary[] {
+  const byVersion = new Map<number, Post[]>();
+  for (const post of posts) {
+    const group = byVersion.get(post.analysis_version);
+    if (group) {
+      group.push(post);
+    } else {
+      byVersion.set(post.analysis_version, [post]);
+    }
+  }
+
+  const currentVersion = changelog?.current_version ?? null;
+  const historyByVersion = new Map((changelog?.history ?? []).map((h) => [h.version, h]));
+
+  return Array.from(byVersion.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([version, group]) => ({
+      version,
+      count: group.length,
+      isCurrent: version === currentVersion,
+      changelogTitle: historyByVersion.get(version)?.title ?? null,
+      changelogDescription: historyByVersion.get(version)?.description ?? null,
+      shortcodes: group.map((p) => p.shortcode),
+    }));
+}
+
+/** Scopes filterPosts to a single analysis_version. No collectionId option —
+ * collections are orthogonal to version cohorts, not a valid filter here. */
+export function filterVersionPosts(
+  posts: Post[],
+  version: number,
+  options: { category?: string; language?: string; sort?: "recent" | "importance" }
+): Post[] {
+  return filterPosts(
+    posts.filter((p) => p.analysis_version === version),
+    [],
+    options
+  );
 }
 
 /** A post can carry 1-3 categories now — options are every distinct label
@@ -114,6 +186,30 @@ export function languageOptions(posts: Post[]): string[] {
  * contributes to 2 bars) — the natural reading for a multi-label taxonomy. */
 export function computeCategoryCounts(posts: Post[]): [string, number][] {
   const counts = new Map<string, number>();
+  for (const post of posts) {
+    const labels = post.category.length > 0 ? post.category : ["uncategorized"];
+    for (const label of labels) {
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+}
+
+/** categoryOptions(posts) only surfaces labels that already appear on some
+ * post — a canonical category with 0 current posts (e.g. one added by a
+ * later pipeline version, before which nothing could have been tagged with
+ * it) is otherwise invisible in the filter dropdown. Union with the full
+ * canonical list (backend GET /categories' `canonical` field) so every
+ * category is always selectable. */
+export function unionWithCanonicalCategories(posts: Post[], canonical: string[]): string[] {
+  return Array.from(new Set([...canonical, ...categoryOptions(posts)])).sort();
+}
+
+/** Same fix as unionWithCanonicalCategories, for Insights' category
+ * breakdown — every canonical label starts at 0 instead of being omitted
+ * entirely when no post currently carries it. */
+export function computeCategoryCountsWithCanonical(posts: Post[], canonical: string[]): [string, number][] {
+  const counts = new Map<string, number>(canonical.map((c) => [c, 0]));
   for (const post of posts) {
     const labels = post.category.length > 0 ? post.category : ["uncategorized"];
     for (const label of labels) {

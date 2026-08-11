@@ -17,12 +17,17 @@ import VersionChangelogBadge from "./VersionChangelogBadge";
 import AnalysisDetails from "./AnalysisDetails";
 import ReviewActions from "./ReviewActions";
 import PostModal from "./PostModal";
+import DeletePostButton from "./DeletePostButton";
 
 interface PostCardProps {
   post: ClientPost & { similarity?: number };
+  // Forwarded to ReviewActions — see its doc comment. Every caller outside
+  // the /versions page omits this and keeps the existing full-reanalysis
+  // behavior.
+  rescanMode?: "full" | "cheap";
 }
 
-export default function PostCard({ post }: PostCardProps) {
+export default function PostCard({ post, rescanMode }: PostCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const missingVideo = isMissingVideo(post);
   const changelog = useChangelog();
@@ -81,9 +86,12 @@ export default function PostCard({ post }: PostCardProps) {
       )}
 
       <div className="p-4">
-        <h3 className="font-display font-semibold text-[15px] leading-snug">
-          {post.title || "Untitled reel"}
-        </h3>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="font-display font-semibold text-[15px] leading-snug">
+            {post.title || "Untitled reel"}
+          </h3>
+          <DeletePostButton shortcode={post.shortcode} title={post.title} />
+        </div>
 
         <a
           href={post.url}
@@ -118,6 +126,7 @@ export default function PostCard({ post }: PostCardProps) {
             shortcode={post.shortcode}
             url={post.url}
             analysisVersion={post.analysis_version}
+            rescanMode={rescanMode}
           />
         )}
       </div>

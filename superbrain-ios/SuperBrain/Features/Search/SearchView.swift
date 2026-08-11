@@ -91,5 +91,8 @@ struct SearchView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
+        .refreshable {
+            await viewModel.refresh()
+        }
     }
 }

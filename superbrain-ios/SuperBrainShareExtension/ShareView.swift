@@ -84,6 +84,20 @@ struct ShareView: View {
                     .foregroundStyle(BrightPulse.ink)
             }
 
+        case .queuedOffline:
+            VStack(spacing: 10) {
+                Image(systemName: "tray.and.arrow.down.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(BrightPulse.yellowInk)
+                Text("Saved offline")
+                    .font(BrightPulseFont.body(size: 14, weight: .semibold))
+                    .foregroundStyle(BrightPulse.ink)
+                Text("Couldn't reach your SuperBrain server — this will send automatically once the app is back online.")
+                    .font(BrightPulseFont.body(size: 12))
+                    .foregroundStyle(BrightPulse.inkMuted)
+                    .multilineTextAlignment(.center)
+            }
+
         case .failure(let message):
             VStack(spacing: 12) {
                 Text(message)

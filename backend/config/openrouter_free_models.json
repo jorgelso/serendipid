@@ -1,5 +1,5 @@
 {
-  "cached_at": "2026-08-10T12:52:16.597717",
+  "cached_at": "2026-08-11T00:52:28.196236",
   "models": [
     {
       "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -62,13 +62,13 @@
             "category": "3d",
             "elo": 1187,
             "win_rate": 41.4,
-            "rank": 51
+            "rank": 52
           },
           {
             "arena": "models",
             "category": "asciiart",
-            "elo": 1109,
-            "win_rate": 36.1,
+            "elo": 1115,
+            "win_rate": 36.8,
             "rank": 51
           },
           {
@@ -81,36 +81,36 @@
           {
             "arena": "models",
             "category": "dataviz",
-            "elo": 1149,
+            "elo": 1150,
             "win_rate": 37.3,
-            "rank": 74
+            "rank": 73
           },
           {
             "arena": "models",
             "category": "gamedev",
-            "elo": 1168,
-            "win_rate": 38.3,
+            "elo": 1167,
+            "win_rate": 38,
             "rank": 64
           },
           {
             "arena": "models",
             "category": "svg",
             "elo": 1126,
-            "win_rate": 37.6,
+            "win_rate": 37.7,
             "rank": 50
           },
           {
             "arena": "models",
             "category": "uicomponent",
-            "elo": 1172,
-            "win_rate": 38.4,
-            "rank": 62
+            "elo": 1171,
+            "win_rate": 38.3,
+            "rank": 63
           },
           {
             "arena": "models",
             "category": "website",
-            "elo": 1134,
-            "win_rate": 33,
+            "elo": 1135,
+            "win_rate": 33.2,
             "rank": 83
           }
         ],
@@ -383,7 +383,7 @@
     {
       "id": "inclusionai/ling-3.0-tiny:free",
       "canonical_slug": "inclusionai/ling-3.0-tiny-20260806",
-      "hugging_face_id": null,
+      "hugging_face_id": "inclusionAI/Ling-3.0-tiny",
       "name": "inclusionAI: Ling 3.0 Tiny (free)",
       "created": 1786034890,
       "description": "Ling 3.0 Tiny is a mixture-of-experts model from InclusionAI, with 1.3B active parameters out of 7.9B total. It is designed for responsive agents, instruction following, and multi-turn conversations, with switchable...",
@@ -426,12 +426,24 @@
         "top_logprobs",
         "top_p"
       ],
-      "default_parameters": {},
+      "default_parameters": {
+        "temperature": 1,
+        "top_p": 0.95,
+        "top_k": 20
+      },
       "supported_voices": null,
       "knowledge_cutoff": null,
       "expiration_date": null,
       "links": {
         "details": "/api/v1/models/inclusionai/ling-3.0-tiny-20260806/endpoints"
+      },
+      "benchmarks": {
+        "design_arena": [],
+        "artificial_analysis": {
+          "intelligence_index": 24.5,
+          "coding_index": 26.5,
+          "agentic_index": 16
+        }
       },
       "reasoning": {
         "mandatory": false,
@@ -1108,7 +1120,7 @@
           {
             "arena": "models",
             "category": "dataviz",
-            "elo": 959,
+            "elo": 960,
             "win_rate": 39.7,
             "rank": 103
           },

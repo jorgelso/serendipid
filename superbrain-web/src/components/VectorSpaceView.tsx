@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import type { ClientPost, Theme, VectorSpaceColorSlot, VectorSpacePoint } from "@/types/domain";
+import type { ClientPost, Theme, VectorSpacePoint } from "@/types/domain";
 import type { VectorSpaceSceneHandle } from "./VectorSpaceScene";
-import VectorSpaceLegend from "./VectorSpaceLegend";
+import VectorSpaceLegend, { UNCLUSTERED_SELECTION } from "./VectorSpaceLegend";
+import VectorSpaceSearch from "./VectorSpaceSearch";
 import PostModal from "./PostModal";
 
 // react-three-fiber's <Canvas> needs a real WebGL context, so it can't be
@@ -26,11 +27,38 @@ interface VectorSpaceViewProps {
 }
 
 export default function VectorSpaceView({ points, themes, unclusteredCount }: VectorSpaceViewProps) {
-  const [activeColorSlot, setActiveColorSlot] = useState<VectorSpaceColorSlot | null>(null);
+  // Theme selection (legend) and text search are two ways of picking the
+  // same thing — a set of shortcodes to light up — and are mutually
+  // exclusive: starting one clears the other so there's never an ambiguous
+  // "both active" state.
+  const [legendSelection, setLegendSelection] = useState<string | null>(null);
+  const [searchShortcodes, setSearchShortcodes] = useState<Set<string> | null>(null);
   const [selectedPost, setSelectedPost] = useState<ClientPost | null>(null);
   const [loadingShortcode, setLoadingShortcode] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const sceneRef = useRef<VectorSpaceSceneHandle>(null);
+
+  const legendHighlight = useMemo(() => {
+    if (legendSelection === null) return null;
+    const matches = new Set<string>();
+    for (const point of points) {
+      const key = point.themeId ?? UNCLUSTERED_SELECTION;
+      if (key === legendSelection) matches.add(point.shortcode);
+    }
+    return matches;
+  }, [points, legendSelection]);
+
+  const highlightedShortcodes = searchShortcodes ?? legendHighlight;
+
+  function handleSelectTheme(key: string | null) {
+    setSearchShortcodes(null);
+    setLegendSelection(key);
+  }
+
+  function handleSearchResults(shortcodes: Set<string> | null) {
+    setLegendSelection(null);
+    setSearchShortcodes(shortcodes);
+  }
 
   async function handleSelect(shortcode: string) {
     setLoadingShortcode(shortcode);
@@ -53,10 +81,15 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
 
   return (
     <div className="fixed inset-0 z-0">
-      <VectorSpaceScene ref={sceneRef} points={points} activeColorSlot={activeColorSlot} onSelect={handleSelect} />
+      <VectorSpaceScene
+        ref={sceneRef}
+        points={points}
+        highlightedShortcodes={highlightedShortcodes}
+        onSelect={handleSelect}
+      />
 
       <div className="pointer-events-none absolute inset-0 flex items-start justify-between px-4 pb-4 pt-20">
-        <div className="pointer-events-auto flex items-center gap-2">
+        <div className="pointer-events-auto flex flex-wrap items-center gap-2">
           <div className="rounded-2xl border border-line bg-surface/90 px-4 py-2.5 text-xs text-ink-muted shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
             <span className="font-display font-bold text-ink">{points.length} reels</span> · drag to
             rotate · scroll to zoom
@@ -69,12 +102,13 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
           >
             ↺ Reset view
           </button>
+          <VectorSpaceSearch onResults={handleSearchResults} />
         </div>
         <VectorSpaceLegend
           themes={themes}
           unclusteredCount={unclusteredCount}
-          activeColorSlot={activeColorSlot}
-          onSelectSlot={setActiveColorSlot}
+          activeSelection={legendSelection}
+          onSelect={handleSelectTheme}
         />
       </div>
 

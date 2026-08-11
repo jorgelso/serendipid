@@ -8,6 +8,12 @@ enum ShareState: Equatable {
     case ready(preview: String?)
     case saving
     case success
+    /// The backend was unreachable (`APIError.network` — offline, host down,
+    /// DNS failure) rather than rejecting the request, so the share was
+    /// queued locally via `PendingShareStore` instead of failing outright.
+    /// `RootTabView` drains this queue the next time the main app is
+    /// reachable, mirroring the Android app's offline-first save queue.
+    case queuedOffline
     case failure(String)
 }
 
@@ -16,6 +22,7 @@ enum ShareState: Equatable {
 final class ShareViewModel {
     private let configStore: ServerConfigStore
     private let apiClient: APIClient
+    private let pendingShareStore: PendingShareStore
 
     var state: ShareState = .loadingURL
     var sharedURL: String?
@@ -26,6 +33,7 @@ final class ShareViewModel {
         let configStore = ServerConfigStore()
         self.configStore = configStore
         self.apiClient = APIClient(configStore: configStore)
+        self.pendingShareStore = PendingShareStore()
     }
 
     func start(extensionContext: NSExtensionContext?) async {
@@ -55,7 +63,8 @@ final class ShareViewModel {
         state = .saving
 
         do {
-            let response: AnalysisResponse = try await apiClient.send(.analyze, body: AnalyzeRequest(url: sharedURL))
+            // User explicitly shared this URL — restore it if it was previously deleted.
+            let response: AnalysisResponse = try await apiClient.send(.analyze, body: AnalyzeRequest(url: sharedURL, restore: true))
             guard response.success else {
                 state = .failure(response.error ?? "Could not save this link.")
                 return
@@ -79,6 +88,14 @@ final class ShareViewModel {
             extensionContext?.completeRequest(returningItems: nil)
         } catch let error as APIError {
             switch error {
+            case .network:
+                // The backend never actually saw this request — it's safe to
+                // queue and retry later, unlike the cases below where the
+                // backend responded with a meaningful signal.
+                pendingShareStore.enqueue(url: sharedURL, collectionID: selectedCollectionID)
+                state = .queuedOffline
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                extensionContext?.completeRequest(returningItems: nil)
             case .alreadyProcessing:
                 state = .failure("This link is already being analyzed.")
             case .serviceUnavailable(let message):

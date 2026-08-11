@@ -20,12 +20,16 @@ export async function GET(request: NextRequest) {
   const language = searchParams.get("language") || undefined;
   const collectionId = searchParams.get("collection") || undefined;
   const sort = searchParams.get("sort") === "importance" ? "importance" : "recent";
+  const importance = (searchParams.get("importance") || "")
+    .split(",")
+    .map((v) => Number(v))
+    .filter((v) => Number.isInteger(v) && v >= 1 && v <= 5);
 
   try {
     const config = getConfig();
     const { posts, collections } = await getExport();
 
-    const filtered = filterPosts(posts, collections, { category, language, collectionId, sort });
+    const filtered = filterPosts(posts, collections, { category, language, collectionId, sort, importance });
     const total = filtered.length;
     const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p, config.apiUrl));
 

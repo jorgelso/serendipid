@@ -8,11 +8,21 @@ interface ReviewActionsProps {
   shortcode: string;
   url: string;
   analysisVersion: number;
+  // "cheap" is only valid for posts stamped exactly version 7 — the one
+  // version whose gap to current is purely the importance-scoring rubric
+  // fix (see backend POST /reanalyze/bulk). Every other caller omits this
+  // and gets the existing full-reanalysis behavior unchanged.
+  rescanMode?: "full" | "cheap";
 }
 
 type State = "idle" | "reanalyzing" | "marking" | "done" | "error";
 
-export default function ReviewActions({ shortcode, url, analysisVersion }: ReviewActionsProps) {
+export default function ReviewActions({
+  shortcode,
+  url,
+  analysisVersion,
+  rescanMode = "full",
+}: ReviewActionsProps) {
   const router = useRouter();
   const changelog = useChangelog();
   const [state, setState] = useState<State>("idle");
@@ -40,9 +50,18 @@ export default function ReviewActions({ shortcode, url, analysisVersion }: Revie
     setState("reanalyzing");
     setMessage(null);
     try {
-      await post("/api/reanalyze", { url }, "Re-analysis failed.");
-      setState("done");
-      setMessage("Re-analyzed — refresh to see the update.");
+      if (rescanMode === "cheap") {
+        const data = await post("/api/reanalyze/bulk", { shortcodes: [shortcode] }, "Fix failed.");
+        if (data.errors?.length) {
+          throw new Error(data.errors[0]?.error ?? "Fix failed.");
+        }
+        setState("done");
+        setMessage("Fixed — refresh to see the update.");
+      } else {
+        await post("/api/reanalyze", { url }, "Re-analysis failed.");
+        setState("done");
+        setMessage("Re-analyzed — refresh to see the update.");
+      }
     } catch (err) {
       setState("error");
       setMessage(err instanceof Error ? err.message : "Re-analysis failed.");
@@ -84,7 +103,13 @@ export default function ReviewActions({ shortcode, url, analysisVersion }: Revie
           disabled={busy}
           className="rounded-full bg-yellow-ink text-bg text-[11px] font-bold px-3 py-1.5 disabled:opacity-50"
         >
-          {state === "reanalyzing" ? "Re-analyzing… (can take a few minutes)" : "Re-run analysis"}
+          {state === "reanalyzing"
+            ? rescanMode === "cheap"
+              ? "Fixing…"
+              : "Re-analyzing… (can take a few minutes)"
+            : rescanMode === "cheap"
+              ? "Fix importance score"
+              : "Re-run analysis"}
         </button>
         <button
           onClick={handleMarkReviewed}

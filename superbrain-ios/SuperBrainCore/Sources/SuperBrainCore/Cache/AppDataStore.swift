@@ -18,6 +18,7 @@ public final class AppDataStore {
     public private(set) var exportFetchedAt: Date?
     public private(set) var themes: [Theme]?
     public private(set) var unclusteredShortcodes: [String]?
+    public private(set) var vectorSpacePoints: [VectorSpacePoint]?
     public private(set) var changelog: ChangelogResponse?
 
     /// Guards against duplicate concurrent fetches (e.g. two screens opening
@@ -48,6 +49,7 @@ public final class AppDataStore {
             exportFetchedAt = Date()
             themes = nil
             unclusteredShortcodes = nil
+            vectorSpacePoints = nil
             inFlightExport = nil
             return payload
         } catch {
@@ -79,6 +81,26 @@ public final class AppDataStore {
         return (result.themes, result.unclusteredShortcodes)
     }
 
+    /// Positions every post in the Space tab's 3D scene via dual PCA over
+    /// embeddings, colored by `getThemes()`'s clusters — never re-clusters.
+    /// Same off-main-actor shape as `getThemes()`: PCA's Gram-matrix power
+    /// iteration is real CPU work (an N×N matrix over up to a few hundred
+    /// posts), so it runs in a detached task rather than blocking this
+    /// `@MainActor` class's synchronous callers.
+    @discardableResult
+    public func getVectorSpace(forceRefresh: Bool = false) async throws -> [VectorSpacePoint] {
+        if !forceRefresh, let vectorSpacePoints {
+            return vectorSpacePoints
+        }
+        let themeResult = try await getThemes(forceRefresh: forceRefresh)
+        let posts = try await getExport().posts
+        let points = await Task.detached(priority: .userInitiated) {
+            VectorSpaceProjection.compute(posts: posts, themes: themeResult.themes)
+        }.value
+        vectorSpacePoints = points
+        return points
+    }
+
     @discardableResult
     public func getChangelog(forceRefresh: Bool = false) async throws -> ChangelogResponse {
         if !forceRefresh, let changelog {
@@ -108,5 +130,6 @@ public final class AppDataStore {
         exportFetchedAt = nil
         themes = nil
         unclusteredShortcodes = nil
+        vectorSpacePoints = nil
     }
 }

@@ -346,7 +346,8 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
           // Notification fires after analysis completes (see .then() below).
 
           // Trigger backend analysis in background
-          apiService.analyzeInstagramUrl(url).then(async (analyzedPost) => {
+          // User explicitly shared this URL — restore it if it was previously deleted.
+          apiService.analyzeInstagramUrl(url, true).then(async (analyzedPost) => {
             // When analysis completes, merge fresh posts with analyzing placeholders
             const freshPosts = await apiService.getRecentPosts(50);
             if (freshPosts.length > 0) {
@@ -423,7 +424,8 @@ const ShareHandlerScreen = ({ route, navigation }: Props) => {
         }
         
         // Trigger backend analysis in background
-        apiService.analyzeInstagramUrl(url).then(async (analyzedPost) => {
+        // User explicitly shared this URL — restore it if it was previously deleted.
+        apiService.analyzeInstagramUrl(url, true).then(async (analyzedPost) => {
           const freshPosts = await apiService.getRecentPosts(50);
           if (freshPosts.length > 0) {
             const sc = post.shortcode!;

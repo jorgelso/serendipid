@@ -83,6 +83,9 @@ struct ChatThreadListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .refreshable {
+                    await viewModel.refresh()
+                }
             }
         }
     }

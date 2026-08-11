@@ -7,6 +7,7 @@ import MediaViewer from "./MediaViewer";
 import AnalysisDetails from "./AnalysisDetails";
 import ReviewActions from "./ReviewActions";
 import EditPostForm from "./EditPostForm";
+import DeletePostButton from "./DeletePostButton";
 
 interface PostDetailProps {
   initialPost: ClientPost;
@@ -27,12 +28,15 @@ export default function PostDetail({ initialPost, showFullDetails = false }: Pos
           {post.title || "Untitled reel"}
         </h2>
         {!editing && (
-          <button
-            onClick={() => setEditing(true)}
-            className="shrink-0 text-xs font-bold text-coral-ink hover:opacity-70 transition-opacity"
-          >
-            ✏️ Edit
-          </button>
+          <div className="shrink-0 flex items-center gap-3">
+            <button
+              onClick={() => setEditing(true)}
+              className="text-xs font-bold text-coral-ink hover:opacity-70 transition-opacity"
+            >
+              ✏️ Edit
+            </button>
+            <DeletePostButton shortcode={post.shortcode} title={post.title} variant="button" />
+          </div>
         )}
       </div>
 

@@ -186,3 +186,31 @@ def apply_trusted_creator_boost(importance, username: str):
     if username.strip().lower() in TRUSTED_CREATORS:
         return max(importance, 4)
     return importance
+
+
+def score_and_stamp_importance(db, shortcode: str, title: str, summary: str, tags, category, username: str):
+    """Score one post's importance from its already-stored fields (no
+    re-download) and stamp it to CURRENT_ANALYSIS_VERSION on success.
+
+    Extracted from scripts/score_importance.py's per-post loop so the
+    backfill script and the API's bulk-rescan endpoint (which uses this as
+    the cheap fix for posts stamped exactly version 7 — the only version
+    whose gap to current is purely the importance-scoring rubric change)
+    share one implementation instead of duplicating the prompt/parse/boost/
+    save sequence.
+
+    Returns the final 1-5 score on success, or None if the model didn't
+    return a parseable score (nothing is written to the DB in that case).
+    """
+    from core.model_router import get_router
+
+    prompt = build_importance_prompt(title, summary, tags, category)
+    response = get_router().generate_importance_text(prompt)
+    importance = parse_importance(response) if response else None
+    if importance is None:
+        return None
+
+    importance = apply_trusted_creator_boost(importance, username)
+    if not db.update_importance(shortcode, importance):
+        return None
+    return importance

@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.configStore) private var configStore
     @Environment(\.apiClient) private var apiClient
     @State private var viewModel: SettingsViewModel?
+    @State private var pendingShareCount = 0
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,9 @@ struct SettingsView: View {
                 viewModel = SettingsViewModel(configStore: configStore, apiClient: apiClient)
             }
         }
+        .onAppear {
+            pendingShareCount = PendingShareStore().count
+        }
     }
 
     @ViewBuilder
@@ -33,6 +37,7 @@ struct SettingsView: View {
                 statusView(viewModel: viewModel)
 
                 if viewModel.connectionState == .connected {
+                    syncRow
                     PillButton("Disconnect", style: .secondary) {
                         viewModel.disconnect()
                     }
@@ -50,6 +55,45 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var syncRow: some View {
+        NavigationLink {
+            RetryQueueView()
+        } label: {
+            Card {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sync & Retry")
+                            .font(BrightPulseFont.body(size: 15, weight: .semibold))
+                            .foregroundStyle(BrightPulse.ink)
+                        if pendingShareCount > 0 {
+                            Text("\(pendingShareCount) save\(pendingShareCount == 1 ? "" : "s") waiting to send")
+                                .font(BrightPulseFont.body(size: 12))
+                                .foregroundStyle(BrightPulse.yellowInk)
+                        } else {
+                            Text("Everything you've shared has reached the server")
+                                .font(BrightPulseFont.body(size: 12))
+                                .foregroundStyle(BrightPulse.inkMuted)
+                        }
+                    }
+                    Spacer()
+                    if pendingShareCount > 0 {
+                        Text("\(pendingShareCount)")
+                            .font(BrightPulseFont.body(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(BrightPulse.coral))
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BrightPulse.inkMuted)
+                }
+                .padding(16)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func connectionCard(viewModel: SettingsViewModel) -> some View {

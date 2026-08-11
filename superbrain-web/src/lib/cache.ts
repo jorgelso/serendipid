@@ -1,8 +1,8 @@
-import { fetchChangelog, fetchExport } from "./apiClient";
+import { fetchCategories, fetchChangelog, fetchExport } from "./apiClient";
 import { computeThemes } from "./clustering";
 import { getConfig } from "./config";
 import { computeVectorSpaceLayout } from "./vectorSpace";
-import type { ChangelogResponse, ExportPayload, Theme, VectorSpacePoint } from "@/types/domain";
+import type { CategoriesResponse, ChangelogResponse, ExportPayload, Theme, VectorSpacePoint } from "@/types/domain";
 
 interface AppCache {
   exportPayload: ExportPayload | null;
@@ -14,6 +14,8 @@ interface AppCache {
   vectorSpaceComputedAt: string | null;
   changelog: ChangelogResponse | null;
   changelogFetchedAt: string | null;
+  categories: CategoriesResponse | null;
+  categoriesFetchedAt: string | null;
 }
 
 // Stored on globalThis (not a plain module-level variable) so it survives
@@ -34,6 +36,8 @@ function getCache(): AppCache {
       vectorSpaceComputedAt: null,
       changelog: null,
       changelogFetchedAt: null,
+      categories: null,
+      categoriesFetchedAt: null,
     };
   }
   return globalThis.__superbrainCache;
@@ -104,6 +108,21 @@ export async function getChangelog(forceRefresh = false): Promise<ChangelogRespo
   const payload = await fetchChangelog();
   cache.changelog = payload;
   cache.changelogFetchedAt = new Date().toISOString();
+  return payload;
+}
+
+// Not touched by invalidateCache() — the canonical category taxonomy
+// doesn't change when posts are mutated (reanalyze/mark-reviewed/
+// update-post/delete), it's independent, slow-changing data (same rationale
+// as getChangelog() above).
+export async function getCategories(forceRefresh = false): Promise<CategoriesResponse> {
+  const cache = getCache();
+  if (!forceRefresh && cache.categories) {
+    return cache.categories;
+  }
+  const payload = await fetchCategories();
+  cache.categories = payload;
+  cache.categoriesFetchedAt = new Date().toISOString();
   return payload;
 }
 

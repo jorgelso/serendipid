@@ -1,7 +1,7 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
 import { getConfig } from "@/lib/config";
-import { getExport } from "@/lib/cache";
-import { categoryOptions, filterPosts, languageOptions, toDisplayPost } from "@/lib/posts";
+import { getCategories, getExport } from "@/lib/cache";
+import { filterPosts, languageOptions, toDisplayPost, unionWithCanonicalCategories } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
 import BrowseFilters from "@/components/BrowseFilters";
 import InfiniteFeed from "@/components/InfiniteFeed";
@@ -20,22 +20,24 @@ async function loadBrowseData(
   category: string,
   language: string,
   collectionId: string,
-  sort: string
+  sort: string,
+  importance: number[]
 ): Promise<BrowseData> {
   const config = getConfig();
-  const { posts, collections } = await getExport();
+  const [{ posts, collections }, { canonical }] = await Promise.all([getExport(), getCategories()]);
 
   const filtered = filterPosts(posts, collections, {
     category: category || undefined,
     language: language || undefined,
     collectionId: collectionId || undefined,
     sort: sort === "importance" ? "importance" : "recent",
+    importance,
   });
 
   return {
     posts: filtered.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p, config.apiUrl)),
     total: filtered.length,
-    categories: categoryOptions(posts),
+    categories: unionWithCanonicalCategories(posts, canonical),
     languages: languageOptions(posts),
     collections: collections.map((c) => ({ id: c.id, name: c.name })),
   };
@@ -47,12 +49,17 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
   const language = typeof searchParams.language === "string" ? searchParams.language : "";
   const collection = typeof searchParams.collection === "string" ? searchParams.collection : "";
   const sort = typeof searchParams.sort === "string" ? searchParams.sort : "recent";
+  const importanceParam = typeof searchParams.importance === "string" ? searchParams.importance : "";
+  const importance = importanceParam
+    .split(",")
+    .map((v) => Number(v))
+    .filter((v) => Number.isInteger(v) && v >= 1 && v <= 5);
 
   let data: BrowseData | null = null;
   let errorMessage: string | null = null;
 
   try {
-    data = await loadBrowseData(category, language, collection, sort);
+    data = await loadBrowseData(category, language, collection, sort, importance);
   } catch (err) {
     errorMessage =
       err instanceof SuperBrainApiError ? err.message : "Something went wrong loading your library.";
@@ -75,6 +82,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
             language={language}
             collection={collection}
             sort={sort}
+            importance={importance}
           />
         </div>
       )}
@@ -94,7 +102,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
           // picking up the new initialPosts prop, which is exactly the
           // "filter changes the URL but not what's shown" bug. The key
           // forces a remount whenever the filter combination changes.
-          key={`${category}|${language}|${collection}|${sort}`}
+          key={`${category}|${language}|${collection}|${sort}|${importance.join(",")}`}
           initialPosts={data.posts}
           total={data.total}
           pageSize={PAGE_SIZE}
@@ -103,6 +111,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
             ...(language ? { language } : {}),
             ...(collection ? { collection } : {}),
             ...(sort === "importance" ? { sort } : {}),
+            ...(importance.length > 0 ? { importance: importance.join(",") } : {}),
           }}
         />
       )}

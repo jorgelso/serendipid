@@ -98,6 +98,28 @@ export interface CategoriesResponse {
   total: number;
 }
 
+// Mirrors backend/api.py's GET /queue-status. max_concurrent is currently
+// always 1 (backend/api.py), so the whole processing_queue is effectively a
+// single-file line — see the /versions bulk-rescan progress hook.
+export interface QueueStatusResponse {
+  currently_processing: string[];
+  processing_count: number;
+  queue: { shortcode: string; url: string; position: number }[];
+  queue_count: number;
+  retry_queue: unknown[];
+  retry_count: number;
+  max_concurrent: number;
+  available_slots: number;
+}
+
+// Mirrors backend/api.py's POST /reanalyze/bulk.
+export interface BulkReanalyzeResponse {
+  success: boolean;
+  rescored: string[];
+  queued: string[];
+  errors: { shortcode: string; error: string }[];
+}
+
 export interface SearchSemanticHit {
   shortcode: string;
   similarity: number;

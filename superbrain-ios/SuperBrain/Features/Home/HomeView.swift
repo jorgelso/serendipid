@@ -20,6 +20,16 @@ struct HomeView: View {
             .navigationDestination(for: String.self) { shortcode in
                 PostDetailView(shortcode: shortcode)
             }
+            .navigationDestination(for: DiscoverRoute.self) { _ in
+                DiscoverView()
+            }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink(value: DiscoverRoute()) {
+                        Image(systemName: "chart.bar")
+                    }
+                }
+            }
         }
         .task {
             if viewModel == nil {

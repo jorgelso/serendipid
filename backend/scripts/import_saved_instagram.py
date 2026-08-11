@@ -587,13 +587,18 @@ def main() -> None:
                     print(f"[{i}/{total}]   ALREADY PROCESSING: {e.detail}")
                 elif e.status == 504:
                     print(f"[{i}/{total}]   TIMEOUT (10 min): {e.detail}")
+                elif e.status == 410:
+                    # User deleted this post via a client — respect that and
+                    # stop retrying rather than re-submitting every run.
+                    print(f"[{i}/{total}]   DELETED by user, skipping: {e.detail}")
                 else:
                     print(f"[{i}/{total}]   FAILED ({e.status}): {e.detail}")
 
-                if entry["attempts"] >= args.max_attempts:
+                if e.status == 410 or entry["attempts"] >= args.max_attempts:
                     entry["status"] = "permanently_skipped"
                     skipped_count += 1
-                    print(f"[{i}/{total}]   Giving up after {entry['attempts']} attempts.")
+                    if e.status != 410:
+                        print(f"[{i}/{total}]   Giving up after {entry['attempts']} attempts.")
                 else:
                     entry["status"] = "pending"
                     pending_count += 1

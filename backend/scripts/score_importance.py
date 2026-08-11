@@ -21,15 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.database import get_db
-from core.model_router import get_router
-from core.importance import parse_importance, apply_trusted_creator_boost, build_importance_prompt
+from core.importance import score_and_stamp_importance
 
 
 def main() -> None:
     force = "--force" in sys.argv
 
     db = get_db()
-    router = get_router()
 
     if not db.is_connected():
         print("[ERROR] Could not connect to database.")
@@ -49,20 +47,15 @@ def main() -> None:
         shortcode = row["shortcode"]
         print(f"[{i}/{len(rows)}] {shortcode} ...", end=" ", flush=True)
 
-        prompt = build_importance_prompt(row['title'], row['summary'], row['tags'], row['category'])
-
-        response = router.generate_importance_text(prompt)
-        importance = parse_importance(response) if response else None
-
+        importance = score_and_stamp_importance(
+            db, shortcode, row["title"], row["summary"], row["tags"], row["category"], row["username"]
+        )
         if importance is None:
             fail += 1
             print("FAILED (no parseable score returned)")
-            continue
-
-        importance = apply_trusted_creator_boost(importance, row["username"])
-        db.update_importance(shortcode, importance)
-        ok += 1
-        print(f"OK ({importance}/5)")
+        else:
+            ok += 1
+            print(f"OK ({importance}/5)")
 
     print(f"\nDone. {ok} succeeded, {fail} failed.")
 

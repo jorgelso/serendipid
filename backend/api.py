@@ -30,6 +30,7 @@ from core.database import get_db
 from core.link_checker import validate_link
 from core.model_router import get_router
 from core.categories import CATEGORIES
+from core.importance import score_and_stamp_importance
 from core import rag
 
 # Configure logging
@@ -306,6 +307,12 @@ logger.info("✅ Background queue worker initialized")
 class AnalyzeRequest(BaseModel):
     url: str
     force: bool = False
+    # Explicit intent required to bring a soft-deleted post back. Without
+    # this, resubmitting a shortcode that's is_hidden=1 (e.g. an automated
+    # import/sync script re-encountering it) is a no-op — see the 410 branch
+    # in analyze_content(). Deliberate user actions (sharing a URL again,
+    # re-saving from Instagram) should set this to True.
+    restore: bool = False
     caption: Optional[str] = None
     hashtags: Optional[List[str]] = None
 
@@ -314,6 +321,7 @@ class AnalyzeRequest(BaseModel):
             "example": {
                 "url": "https://www.instagram.com/p/DRWKk5JiL0h/",
                 "force": False,
+                "restore": False,
                 "caption": None,
                 "hashtags": None
             }
@@ -325,6 +333,22 @@ class AnalysisResponse(BaseModel):
     data: Optional[dict] = None
     error: Optional[str] = None
     processing_time: Optional[float] = None
+
+
+class BulkReanalyzeRequest(BaseModel):
+    shortcodes: List[str]
+
+
+class BulkReanalyzeError(BaseModel):
+    shortcode: str
+    error: str
+
+
+class BulkReanalyzeResponse(BaseModel):
+    success: bool
+    rescored: List[str]  # cheap importance-only rescore, already done synchronously
+    queued: List[str]    # full re-analysis, now in processing_queue (async)
+    errors: List[BulkReanalyzeError]
 
 
 # API Endpoints
@@ -450,6 +474,214 @@ async def get_caption(url: str, token: str = Depends(verify_token)):
         }
 
 
+async def _run_or_queue_analysis(
+    shortcode: str,
+    url_str: str,
+    content_type: str,
+    caption: Optional[str] = None,
+    hashtags: Optional[List[str]] = None,
+    *,
+    run_inline: bool = True,
+) -> dict:
+    """
+    Shared by POST /analyze (called after Step 1 there has already handled
+    any existing cached row — including hard-deleting it for a force
+    re-analyze) and POST /reanalyze/bulk's full-reanalysis branch.
+
+    Returns {"status": "queued", "position": N} or {"status": "ran", "data": {...}}.
+    The "queued" outcome is deliberately returned, not raised as an
+    HTTPException, here — raising it used to put that outcome inside the same
+    try/except cleanup block as a real failure, which called
+    db.remove_from_queue() on the item that had just been queued a few lines
+    earlier, un-queuing it before the background queue_worker() thread (which
+    polls every 5s) ever got a chance to process it. Callers decide what to
+    do with a "queued" result themselves.
+
+    run_inline=False unconditionally queues even when a processing slot is
+    free, so a bulk caller's HTTP response never blocks on one item's
+    multi-minute subprocess.
+    """
+    db = get_db()
+
+    with _queue_admission_lock:
+        processing_items = db.get_processing()
+        if shortcode in processing_items:
+            logger.warning(f"⏳ [{shortcode}] Already being processed. Please wait...")
+            raise HTTPException(
+                status_code=409,
+                detail="This URL is already being analyzed. Please wait and try again in a moment."
+            )
+
+        queue_items = db.get_queue()
+        for item in queue_items:
+            if item['shortcode'] == shortcode:
+                logger.info(f"🔄 [{shortcode}] Duplicate found in queue - removing old entry and processing fresh request")
+                db.remove_from_queue(shortcode)
+                break
+
+        queue_items = db.get_queue()
+        slot_free = len(processing_items) < max_concurrent
+        if not run_inline or not slot_free:
+            logger.warning(f"🚦 [{shortcode}] Server busy or queuing requested — adding to queue...")
+            queue_position = db.add_to_queue(shortcode, url_str, caption, hashtags)
+            if queue_position > 0:
+                logger.info(f"📝 [{shortcode}] ✅ Added to queue at position {queue_position}")
+                logger.info(f"📊 Queue status: {len(queue_items) + 1} waiting | {len(processing_items)} analyzing")
+                return {"status": "queued", "position": queue_position}
+            raise HTTPException(status_code=500, detail="Failed to add to queue. Please try again.")
+
+        # Step 4: Start processing
+        if len(queue_items) > 0:
+            logger.info(f"📊 Queue status: {len(queue_items)} waiting | Starting: {shortcode}")
+        logger.info(f"🚀 [{shortcode}] Starting analysis...")
+        db.mark_processing(shortcode, url_str, content_type)
+
+    # Run main.py as subprocess — executed in a thread pool so the asyncio
+    # event loop stays free to serve /ping and other requests during analysis.
+    logger.info(f"📊 [{shortcode}] Phase 1: Downloading content...")
+
+    def _run_subprocess() -> tuple:
+        cmd = [sys.executable, "main.py", url_str]
+        if caption:
+            cmd += ["--caption", caption]
+        if hashtags:
+            cmd += ["--hashtags", ",".join(hashtags)]
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='utf-8',
+            env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
+            cwd=str(Path(__file__).parent),
+            bufsize=1
+        )
+        with _active_processes_lock:
+            _active_processes[shortcode] = proc
+        lines = []
+        for line in proc.stdout:
+            lines.append(line)
+            lc = line.strip()
+            if "Step 4: Visual Analysis" in lc:
+                logger.info(f"🎬 [{shortcode}] Phase 2: Visual analysis (AI processing)...")
+            elif "Step 5: Audio Transcription" in lc or "Phase 2: Audio" in lc:
+                logger.info(f"🎙️ [{shortcode}] Phase 3: Audio transcription (Whisper)...")
+            elif "Phase 3: Light Tasks" in lc:
+                logger.info(f"⚡ [{shortcode}] Phase 4: Music ID + Text (parallel)...")
+            elif "GENERATING COMPREHENSIVE SUMMARY" in lc:
+                logger.info(f"🧠 [{shortcode}] Phase 5: Generating AI summary...")
+            elif "Saving to Database" in lc:
+                logger.info(f"💾 [{shortcode}] Phase 6: Saving to database...")
+            elif "Cleaned up temp folder" in lc:
+                logger.info(f"🗑️ [{shortcode}] Phase 7: Cleanup complete")
+        proc.wait()
+        with _active_processes_lock:
+            _active_processes.pop(shortcode, None)
+        return proc.returncode, ''.join(lines), proc.stderr.read()
+
+    try:
+        returncode, stdout, stderr = await asyncio.wait_for(
+            asyncio.to_thread(_run_subprocess),
+            timeout=600
+        )
+
+        if stderr.strip():
+            # Log stderr from main.py to help diagnose issues
+            logger.warning(f"⚠️  [{shortcode}] main.py stderr:\n{stderr[:1000]}")
+
+        if returncode == 2:
+            # main.py detected quota exhaustion (Instagram block or AI) and queued item for retry.
+            # NOTE: Do NOT remove from queue here — main.py already called
+            # queue_for_retry() which set status='retry'. Removing would lose it.
+            logger.info(f"⏰ [{shortcode}] Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours.")
+            raise HTTPException(
+                status_code=202,
+                detail="Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours."
+            )
+
+        if returncode != 0:
+            # Extract last meaningful error line from stdout for the error message
+            error_lines = [l.strip() for l in stdout.splitlines() if l.strip() and ('❌' in l or 'Error' in l or 'failed' in l.lower())]
+            error_detail = error_lines[-1] if error_lines else (stderr.strip()[:200] or "Analysis failed")
+            logger.error(f"❌ [{shortcode}] Analysis failed: {error_detail}")
+            logger.debug(f"[{shortcode}] stdout tail:\n{stdout[-800:]}")
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail
+            )
+
+        logger.info(f"✅ [{shortcode}] Analysis complete! Fetching from database...")
+
+        # Get result from database — retry up to 4 times in case the SQLite write
+        # hasn't flushed yet (race condition between subprocess write and our read).
+        analysis = None
+        for _attempt in range(4):
+            analysis = db.check_cache(shortcode)
+            if analysis:
+                if _attempt > 0:
+                    logger.info(f"🔄 [{shortcode}] Found in database on retry {_attempt}")
+                break
+            if _attempt < 3:
+                logger.warning(f"⏳ [{shortcode}] Not in DB yet (attempt {_attempt+1}/4), retrying in 1s…")
+                await asyncio.sleep(1)
+
+        if not analysis:
+            logger.error(f"❌ [{shortcode}] Not found in database after 4 attempts!")
+            raise HTTPException(
+                status_code=500,
+                detail="Analysis completed but result not found in database"
+            )
+
+        # Filter response
+        filtered_data = {
+            'url': analysis.get('url', ''),
+            'username': analysis.get('username', ''),
+            'content_type': analysis.get('content_type', content_type),
+            'thumbnail': analysis.get('thumbnail', ''),
+            'title': analysis.get('title', ''),
+            'summary': analysis.get('summary', ''),
+            'tags': analysis.get('tags', []),
+            'music': analysis.get('music', ''),
+            'category': analysis.get('category', ''),
+            'needs_review': analysis.get('needs_review', False)
+        }
+
+        db.remove_from_queue(shortcode)
+        logger.info(f"🔓 [{shortcode}] Released from processing queue")
+
+        return {"status": "ran", "data": filtered_data}
+
+    except asyncio.TimeoutError:
+        logger.error(f"❌ [{shortcode}] Analysis reached 10-minute timeout. Forcing termination.")
+        with _active_processes_lock:
+            proc = _active_processes.pop(shortcode, None)
+        if proc:
+            try:
+                proc.kill()
+                proc.wait()
+            except Exception:
+                pass
+        db.remove_from_queue(shortcode)
+        raise HTTPException(
+            status_code=504,
+            detail="Analysis timed out. The process took longer than the 10-minute allowed maximum."
+        )
+    except HTTPException as he:
+        # Don't remove from queue for 202 (retry-queued) — the item was
+        # intentionally kept in the retry queue by main.py.
+        if he.status_code != 202:
+            db.remove_from_queue(shortcode)
+        raise
+    except subprocess.SubprocessError as e:
+        logger.error(f"❌ [{shortcode}] Subprocess error: {str(e)}")
+        db.remove_from_queue(shortcode)
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+    except Exception as e:
+        logger.error(f"❌ [{shortcode}] Unexpected error: {str(e)}")
+        db.remove_from_queue(shortcode)
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify_token)):
     """
@@ -491,11 +723,21 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
                 logger.info(f"🔄 [{shortcode}] Force re-analyze requested — clearing cached data")
                 db.hard_delete_post(shortcode)
                 cached_result = None  # fall through to fresh analysis
-            # Restore soft-deleted post if user is re-adding it
+            # Soft-deleted posts stay deleted on a bare resubmission — restoring
+            # requires explicit intent (request.restore=True) so an automated
+            # import/sync script re-encountering the same URL can't silently
+            # undo a user's delete. See restore_post() in database.py.
             elif cached_result.get('is_hidden') == 1:
-                db.restore_post(shortcode)
-                cached_result['is_hidden'] = 0
-                logger.info(f"♻️ [{shortcode}] Restored from soft-delete. Returning cached data.")
+                if request.restore:
+                    db.restore_post(shortcode)
+                    cached_result['is_hidden'] = 0
+                    logger.info(f"♻️ [{shortcode}] Restored from soft-delete (restore=true). Returning cached data.")
+                else:
+                    logger.info(f"🚫 [{shortcode}] Post is soft-deleted — resubmission ignored (pass restore=true to bring it back)")
+                    raise HTTPException(
+                        status_code=410,
+                        detail=f"Post {shortcode} was deleted. Resubmit with restore=true to restore it, or force=true to re-analyze from scratch."
+                    )
             else:
                 logger.info(f"⚡ [{shortcode}] Found in cache! Returning instantly.")
 
@@ -524,209 +766,100 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
                 processing_time=processing_time
             )
         
-        # Step 2: Not in cache - check if already being processed
+        # Step 2: Not in cache — run inline if a slot is free, otherwise
+        # queue automatically (the background queue_worker picks it up).
         logger.info(f"💾 [{shortcode}] Not in cache")
 
-        # The whole "is there capacity? -> claim it" decision is held under
-        # one lock, shared with queue_worker's background pickup — otherwise
-        # two requests (or this request racing the background worker) can
-        # both observe spare capacity before either claims it, and both end
-        # up spawning a main.py subprocess despite max_concurrent=1.
-        with _queue_admission_lock:
-            # Check if already in queue or processing
-            processing_items = db.get_processing()
-            if shortcode in processing_items:
-                logger.warning(f"⏳ [{shortcode}] Already being processed. Please wait...")
-                raise HTTPException(
-                    status_code=409,
-                    detail="This URL is already being analyzed. Please wait and try again in a moment."
-                )
-
-            # Check if URL is already in queue - if so, remove the old queued item
-            queue_items = db.get_queue()
-            for item in queue_items:
-                if item['shortcode'] == shortcode:
-                    logger.info(f"🔄 [{shortcode}] Duplicate found in queue - removing old entry and processing fresh request")
-                    db.remove_from_queue(shortcode)
-                    break
-
-            # Step 3: Check queue size (re-fetch after potential duplicate removal)
-            queue_items = db.get_queue()
-            if len(processing_items) >= max_concurrent:
-                logger.warning(f"🚦 [{shortcode}] Server busy - 1 post analyzing. Adding to queue...")
-                queue_position = db.add_to_queue(shortcode, request.url, request.caption, request.hashtags)
-                if queue_position > 0:
-                    logger.info(f"📝 [{shortcode}] ✅ Added to queue at position {queue_position}")
-                    logger.info(f"📊 Queue status: {len(queue_items) + 1} waiting | 1 analyzing")
-                    raise HTTPException(
-                        status_code=503,
-                        detail=f"Server busy analyzing 1 post. Your request is queued (position: {queue_position}). It will be processed automatically. Check back in a few minutes."
-                    )
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to add to queue. Please try again."
-                    )
-
-            # Step 4: Start processing
-            if len(queue_items) > 0:
-                logger.info(f"📊 Queue status: {len(queue_items)} waiting | Starting: {shortcode}")
-            logger.info(f"🚀 [{shortcode}] Starting analysis...")
-            db.mark_processing(shortcode, url_str, content_type)
-
-        # Run main.py as subprocess — executed in a thread pool so the asyncio
-        # event loop stays free to serve /ping and other requests during analysis.
-        logger.info(f"📊 [{shortcode}] Phase 1: Downloading content...")
-
-        def _run_subprocess() -> tuple:
-            cmd = [sys.executable, "main.py", url_str]
-            if request.caption:
-                cmd += ["--caption", request.caption]
-            if request.hashtags:
-                cmd += ["--hashtags", ",".join(request.hashtags)]
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='utf-8',
-                env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
-                cwd=str(Path(__file__).parent),
-                bufsize=1
-            )
-            with _active_processes_lock:
-                _active_processes[shortcode] = proc
-            lines = []
-            for line in proc.stdout:
-                lines.append(line)
-                lc = line.strip()
-                if "Step 4: Visual Analysis" in lc:
-                    logger.info(f"🎬 [{shortcode}] Phase 2: Visual analysis (AI processing)...")
-                elif "Step 5: Audio Transcription" in lc or "Phase 2: Audio" in lc:
-                    logger.info(f"🎙️ [{shortcode}] Phase 3: Audio transcription (Whisper)...")
-                elif "Phase 3: Light Tasks" in lc:
-                    logger.info(f"⚡ [{shortcode}] Phase 4: Music ID + Text (parallel)...")
-                elif "GENERATING COMPREHENSIVE SUMMARY" in lc:
-                    logger.info(f"🧠 [{shortcode}] Phase 5: Generating AI summary...")
-                elif "Saving to Database" in lc:
-                    logger.info(f"💾 [{shortcode}] Phase 6: Saving to database...")
-                elif "Cleaned up temp folder" in lc:
-                    logger.info(f"🗑️ [{shortcode}] Phase 7: Cleanup complete")
-            proc.wait()
-            with _active_processes_lock:
-                _active_processes.pop(shortcode, None)
-            return proc.returncode, ''.join(lines), proc.stderr.read()
-
-        try:
-            returncode, stdout, stderr = await asyncio.wait_for(
-                asyncio.to_thread(_run_subprocess),
-                timeout=600
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"❌ [{shortcode}] Analysis reached 10-minute timeout. Forcing termination.")
-            with _active_processes_lock:
-                proc = _active_processes.pop(shortcode, None)
-            if proc:
-                try:
-                    proc.kill()
-                    proc.wait()
-                except Exception:
-                    pass
-            db.remove_from_queue(shortcode)
+        outcome = await _run_or_queue_analysis(
+            shortcode, url_str, content_type, request.caption, request.hashtags, run_inline=True
+        )
+        if outcome["status"] == "queued":
             raise HTTPException(
-                status_code=504,
-                detail="Analysis timed out. The process took longer than the 10-minute allowed maximum."
+                status_code=503,
+                detail=f"Server busy analyzing 1 post. Your request is queued (position: {outcome['position']}). It will be processed automatically. Check back in a few minutes."
             )
-        
-        if stderr.strip():
-            # Log stderr from main.py to help diagnose issues
-            logger.warning(f"⚠️  [{shortcode}] main.py stderr:\n{stderr[:1000]}")
-        
-        if returncode == 2:
-            # main.py detected quota exhaustion (Instagram block or AI) and queued item for retry.
-            # NOTE: Do NOT remove from queue here — main.py already called
-            # queue_for_retry() which set status='retry'. Removing would lose it.
-            logger.info(f"⏰ [{shortcode}] Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours.")
-            raise HTTPException(
-                status_code=202,
-                detail="Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours."
-            )
-        
-        if returncode != 0:
-            # Extract last meaningful error line from stdout for the error message
-            error_lines = [l.strip() for l in stdout.splitlines() if l.strip() and ('❌' in l or 'Error' in l or 'failed' in l.lower())]
-            error_detail = error_lines[-1] if error_lines else (stderr.strip()[:200] or "Analysis failed")
-            logger.error(f"❌ [{shortcode}] Analysis failed: {error_detail}")
-            logger.debug(f"[{shortcode}] stdout tail:\n{stdout[-800:]}")
-            raise HTTPException(
-                status_code=400,
-                detail=error_detail
-            )
-        
-        logger.info(f"✅ [{shortcode}] Analysis complete! Fetching from database...")
-        
-        # Get result from database — retry up to 4 times in case the SQLite write
-        # hasn't flushed yet (race condition between subprocess write and our read).
-        analysis = None
-        for _attempt in range(4):
-            analysis = db.check_cache(shortcode)
-            if analysis:
-                if _attempt > 0:
-                    logger.info(f"🔄 [{shortcode}] Found in database on retry {_attempt}")
-                break
-            if _attempt < 3:
-                logger.warning(f"⏳ [{shortcode}] Not in DB yet (attempt {_attempt+1}/4), retrying in 1s…")
-                await asyncio.sleep(1)
-        
-        if not analysis:
-            logger.error(f"❌ [{shortcode}] Not found in database after 4 attempts!")
-            raise HTTPException(
-                status_code=500,
-                detail="Analysis completed but result not found in database"
-            )
-        
-        # Filter response
-        filtered_data = {
-            'url': analysis.get('url', ''),
-            'username': analysis.get('username', ''),
-            'content_type': analysis.get('content_type', content_type),
-            'thumbnail': analysis.get('thumbnail', ''),
-            'title': analysis.get('title', ''),
-            'summary': analysis.get('summary', ''),
-            'tags': analysis.get('tags', []),
-            'music': analysis.get('music', ''),
-            'category': analysis.get('category', ''),
-            'needs_review': analysis.get('needs_review', False)
-        }
-        
+
         processing_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"✅ [{shortcode}] Response sent ({processing_time:.2f}s total)")
-        
-        # Remove from processing queue
-        db.remove_from_queue(shortcode)
-        logger.info(f"🔓 [{shortcode}] Released from processing queue")
-        
+
         return AnalysisResponse(
             success=True,
             cached=False,
-            data=filtered_data,
+            data=outcome["data"],
             processing_time=processing_time
         )
-        
-    except HTTPException as he:
-        # Don't remove from queue for 202 (retry-queued) — the item was
-        # intentionally kept in the retry queue by main.py.
-        if he.status_code != 202:
-            db.remove_from_queue(shortcode)
+
+    except HTTPException:
         raise
-    except subprocess.SubprocessError as e:
-        logger.error(f"❌ [{shortcode}] Subprocess error: {str(e)}")
-        db.remove_from_queue(shortcode)
-        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
     except Exception as e:
         logger.error(f"❌ [{shortcode}] Unexpected error: {str(e)}")
-        db.remove_from_queue(shortcode)
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+
+@app.post("/reanalyze/bulk", response_model=BulkReanalyzeResponse)
+async def reanalyze_bulk(request: BulkReanalyzeRequest, token: str = Depends(verify_token)):
+    """
+    Rescan many posts at once — used to bring a whole cohort of stale
+    `analysis_version` posts up to date rather than one at a time.
+
+    For each shortcode:
+    - If it's currently stamped exactly version 7, the gap to current is
+      purely the importance-scoring rubric fix (version 8) — apply that
+      cheap, synchronous, no-re-download fix (core.importance.score_and_stamp_importance,
+      the same helper scripts/score_importance.py uses) and report it under
+      `rescored`. This is the ONLY version for which a cheap fix is
+      sufficient: every earlier version's gap to current also includes
+      version 7's own caption/media-mismatch fix, which has no cheap
+      backfill and requires a full re-analysis regardless.
+    - Otherwise, hard-delete the cached row and queue a full re-analysis via
+      the same _run_or_queue_analysis() helper POST /analyze uses, forced to
+      queue (run_inline=False) rather than run inline so this endpoint's
+      response never blocks on one item's multi-minute subprocess — the
+      background queue_worker() thread processes the queue one item at a
+      time regardless of how it got queued.
+
+    Any shortcode not found in the database, or whose cheap/full attempt
+    fails, is reported under `errors` rather than aborting the whole batch.
+    """
+    db = get_db()
+    rescored: List[str] = []
+    queued: List[str] = []
+    errors: List[BulkReanalyzeError] = []
+
+    for shortcode in request.shortcodes:
+        try:
+            row = db.check_cache(shortcode)
+            if not row:
+                errors.append(BulkReanalyzeError(shortcode=shortcode, error="Post not found"))
+                continue
+
+            if row.get("analysis_version") == 7:
+                importance = score_and_stamp_importance(
+                    db, shortcode, row.get("title"), row.get("summary"),
+                    row.get("tags"), row.get("category"), row.get("username"),
+                )
+                if importance is None:
+                    errors.append(BulkReanalyzeError(
+                        shortcode=shortcode, error="No parseable importance score returned"
+                    ))
+                else:
+                    rescored.append(shortcode)
+                continue
+
+            db.hard_delete_post(shortcode)
+            outcome = await _run_or_queue_analysis(
+                shortcode, row.get("url"), row.get("content_type", "instagram"), run_inline=False
+            )
+            # run_inline=False guarantees outcome["status"] == "queued" —
+            # _run_or_queue_analysis only returns "ran" when run_inline=True
+            # and a slot was free.
+            queued.append(shortcode)
+        except HTTPException as e:
+            errors.append(BulkReanalyzeError(shortcode=shortcode, error=str(e.detail)))
+        except Exception as e:
+            errors.append(BulkReanalyzeError(shortcode=shortcode, error=str(e)))
+
+    return BulkReanalyzeResponse(success=True, rescored=rescored, queued=queued, errors=errors)
 
 
 @app.get("/cache/{shortcode}")
