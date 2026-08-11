@@ -99,6 +99,60 @@ export function connectedComponents(vectors: Float32Array[], threshold: number):
   return Array.from(groups.values());
 }
 
+/** Average-linkage hierarchical agglomerative merge over a set of vectors
+ * (here, micro-cluster centroids). Unlike connectedComponents() (single-
+ * linkage via union-find), a merge here requires the *aggregate* similarity
+ * between two clusters' members to clear the threshold, not just one
+ * bridging pair — which is what stops a chain of loosely-related
+ * micro-clusters (e.g. catholic content -> self-improvement -> philosophy)
+ * from all collapsing into one theme just because each neighbor in the
+ * chain is individually similar enough. Repeatedly merges the closest pair
+ * of clusters until no remaining pair clears the threshold. */
+export function agglomerativeMerge(vectors: Float32Array[], threshold: number): number[][] {
+  const n = vectors.length;
+  if (n === 0) return [];
+
+  const sim: number[][] = Array.from({ length: n }, () => new Array<number>(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const s = dot(vectors[i], vectors[j]);
+      sim[i][j] = s;
+      sim[j][i] = s;
+    }
+  }
+
+  function averageLinkage(a: number[], b: number[]): number {
+    let sum = 0;
+    for (const i of a) {
+      for (const j of b) sum += sim[i][j];
+    }
+    return sum / (a.length * b.length);
+  }
+
+  const clusters: number[][] = vectors.map((_, i) => [i]);
+
+  for (;;) {
+    let bestI = -1;
+    let bestJ = -1;
+    let bestSim = -Infinity;
+    for (let i = 0; i < clusters.length; i++) {
+      for (let j = i + 1; j < clusters.length; j++) {
+        const s = averageLinkage(clusters[i], clusters[j]);
+        if (s > bestSim) {
+          bestSim = s;
+          bestI = i;
+          bestJ = j;
+        }
+      }
+    }
+    if (bestI === -1 || bestSim < threshold) break;
+    clusters[bestI] = clusters[bestI].concat(clusters[bestJ]);
+    clusters.splice(bestJ, 1);
+  }
+
+  return clusters;
+}
+
 export function centroid(vectors: Float32Array[]): Float32Array {
   const dim = vectors[0].length;
   const sum = new Float32Array(dim);
@@ -227,7 +281,7 @@ function buildThemes(
   coarseThreshold: number,
   postsByShortcode: Map<string, PostLike>
 ): Theme[] {
-  const groups = connectedComponents(centroids, coarseThreshold);
+  const groups = agglomerativeMerge(centroids, coarseThreshold);
 
   return groups.map((indices, i) => {
     const themeMicroClusters = indices.map((idx) => microClusters[idx]);

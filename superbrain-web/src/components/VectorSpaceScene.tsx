@@ -129,6 +129,10 @@ function lightenColor(hex: string, amount: number): string {
   return `#${new THREE.Color(hex).lerp(new THREE.Color("#ffffff"), amount).getHexString()}`;
 }
 
+function mixColor(hexA: string, hexB: string, weight: number): string {
+  return `#${new THREE.Color(hexA).lerp(new THREE.Color(hexB), weight).getHexString()}`;
+}
+
 // A faint wireframe box enclosing the data reads as a containment
 // field/data volume.
 function BoundingBox() {
@@ -426,7 +430,11 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
   const colored = useMemo<ColoredPoint[]>(
     () =>
       points.map((point) => {
-        const color = colorForSlot(palette, point.colorSlot);
+        const baseColor = colorForSlot(palette, point.colorSlot);
+        const color =
+          point.blendColorSlot && point.blendWeight
+            ? mixColor(baseColor, colorForSlot(palette, point.blendColorSlot), point.blendWeight)
+            : baseColor;
         return { point, color, coreColor: lightenColor(color, 0.18) };
       }),
     [points, palette]

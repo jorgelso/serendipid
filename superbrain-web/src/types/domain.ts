@@ -218,6 +218,14 @@ export interface VectorSpacePoint {
   colorSlot: VectorSpaceColorSlot;
   themeId: string | null;
   themeLabel: string;
+  // Set when this post's embedding sits close to a second theme's centroid
+  // as well as its own (e.g. an "AI ethics" post between an AI theme and a
+  // religion theme) — see computeVectorSpaceLayout() in vectorSpace.ts.
+  // colorSlot/themeId/themeLabel above are unaffected (legend counts and
+  // click-filtering stay keyed on the primary theme); this only tells the
+  // renderer to blend a second hue into the point's dot color.
+  blendColorSlot?: VectorSpaceColorSlot | null;
+  blendWeight?: number; // 0-0.5, how much of blendColorSlot to mix in
   title: string | null;
   category: string[];
   thumbnail: string | null;

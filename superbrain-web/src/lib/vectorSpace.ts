@@ -7,7 +7,7 @@
 
 import { UMAP } from "umap-js";
 import type { Post, Theme, VectorSpaceColorSlot, VectorSpacePoint } from "@/types/domain";
-import { normalize, parseEmbedding } from "./clustering";
+import { centroid, dot, normalize, parseEmbedding } from "./clustering";
 import { classifyMedia } from "./media";
 import { resolveMediaUrls } from "./posts";
 
@@ -54,6 +54,53 @@ function buildThemeAssignments(themes: Theme[]): Map<string, ThemeAssignment> {
     }
   });
   return bySh;
+}
+
+// How close a post's similarity to a *second* theme's centroid has to be to
+// its own theme's, before that second theme is blended into its dot color
+// (e.g. an "AI ethics" post sitting between an AI theme and a religion
+// theme). 0 => tied with its own theme (full 50/50 blend); this margin =>
+// no longer close enough to blend at all.
+const BLEND_SIMILARITY_MARGIN = 0.05;
+
+interface ThemeBlend {
+  colorSlot: VectorSpaceColorSlot;
+  weight: number; // 0-0.5
+}
+
+/** For a post whose embedding sits close to a second theme's centroid as
+ * well as its own assigned one, returns the second theme's color slot and
+ * how much of it to blend in (0 at the margin's edge, up to 0.5 for a tie).
+ * Returns null when the post isn't meaningfully "between" two themes. */
+function computeThemeBlend(
+  vector: Float32Array,
+  ownThemeId: string,
+  themeCentroids: Map<string, Float32Array>,
+  themeColorSlots: Map<string, VectorSpaceColorSlot>
+): ThemeBlend | null {
+  const ownCentroid = themeCentroids.get(ownThemeId);
+  if (!ownCentroid) return null;
+  const ownSim = dot(vector, ownCentroid);
+
+  let bestOtherThemeId: string | null = null;
+  let bestOtherSim = -Infinity;
+  for (const [themeId, themeCentroidVector] of themeCentroids) {
+    if (themeId === ownThemeId) continue;
+    const s = dot(vector, themeCentroidVector);
+    if (s > bestOtherSim) {
+      bestOtherSim = s;
+      bestOtherThemeId = themeId;
+    }
+  }
+  if (!bestOtherThemeId) return null;
+
+  const gap = Math.min(Math.max(ownSim - bestOtherSim, 0), BLEND_SIMILARITY_MARGIN);
+  if (gap >= BLEND_SIMILARITY_MARGIN) return null;
+
+  const colorSlot = themeColorSlots.get(bestOtherThemeId);
+  if (!colorSlot) return null;
+
+  return { colorSlot, weight: 0.5 * (1 - gap / BLEND_SIMILARITY_MARGIN) };
 }
 
 /** Recenters on the centroid and uniformly rescales (same factor on every
@@ -209,14 +256,32 @@ export function computeVectorSpaceLayout(
 
   const shortcodes: string[] = [];
   const vectors: number[][] = [];
+  const vectorByShortcode = new Map<string, Float32Array>();
   posts.forEach((post) => {
     const vector = parseEmbedding(post.embedding);
     if (!vector) return;
+    const normalized = normalize(vector);
     shortcodes.push(post.shortcode);
-    vectors.push(Array.from(normalize(vector)));
+    vectors.push(Array.from(normalized));
+    vectorByShortcode.set(post.shortcode, normalized);
   });
 
   if (vectors.length === 0) return [];
+
+  // Every theme's centroid, computed from its actual member posts' vectors
+  // (not just the coarse pass's micro-cluster centroids) — used below to
+  // find posts that sit close to a *second* theme as well as their own, so
+  // they can render as a blended color instead of a single hard-coded hue.
+  const themeColorSlots = new Map<string, VectorSpaceColorSlot>();
+  const themeCentroids = new Map<string, Float32Array>();
+  themes.forEach((theme, themeIndex) => {
+    themeColorSlots.set(theme.id, themeIndex < 8 ? `theme-${themeIndex}` : "other");
+    const memberVectors = theme.microClusters
+      .flatMap((mc) => mc.postShortcodes)
+      .map((sc) => vectorByShortcode.get(sc))
+      .filter((v): v is Float32Array => Boolean(v));
+    if (memberVectors.length > 0) themeCentroids.set(theme.id, centroid(memberVectors));
+  });
 
   const rawPositions =
     vectors.length < MIN_POINTS_FOR_UMAP
@@ -240,12 +305,20 @@ export function computeVectorSpaceLayout(
     const mediaUrls = resolveMediaUrls(post.media_urls, apiBaseUrl);
     const videoUrl = classifyMedia(mediaUrls).videos[0] ?? null;
 
+    const vector = vectorByShortcode.get(shortcode);
+    const blend =
+      vector && assignment?.themeId
+        ? computeThemeBlend(vector, assignment.themeId, themeCentroids, themeColorSlots)
+        : null;
+
     return {
       shortcode,
       position: positions[i],
       colorSlot: assignment?.colorSlot ?? "unclustered",
       themeId: assignment?.themeId ?? null,
       themeLabel: assignment?.themeLabel ?? "Unclustered",
+      blendColorSlot: blend?.colorSlot ?? null,
+      blendWeight: blend?.weight,
       title: post.title,
       category: post.category,
       // A short, cacheable proxy URL (see src/app/api/thumbnail) rather than
