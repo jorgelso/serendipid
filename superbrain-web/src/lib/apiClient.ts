@@ -8,7 +8,10 @@ import type {
   ChatThreadDetail,
   ExportPayload,
   QueueStatusResponse,
+  RatingTier,
+  SearchHistoryEntry,
   SearchSemanticResponse,
+  ViewHistoryEntry,
 } from "@/types/domain";
 
 export class SuperBrainApiError extends Error {
@@ -196,6 +199,8 @@ export interface PostEdits {
   summary?: string;
   category?: string[];
   language?: string[];
+  enjoyment_rating?: RatingTier;
+  perceived_importance_rating?: RatingTier;
 }
 
 // The backend's PUT /post/{shortcode} does not validate category/language
@@ -259,4 +264,32 @@ export async function sendChatMessage(threadId: string, message: string): Promis
       503: "The chatbot couldn't reach any AI provider right now — check the backend's chat provider keys (Gemini/OpenAI) or try again shortly.",
     },
   });
+}
+
+// Feeds src/lib/recommendations.ts — never called from a "use client" component.
+interface ViewHistoryResponse {
+  success: boolean;
+  count: number;
+  data: ViewHistoryEntry[];
+}
+
+export async function fetchViewHistory(limit = 5000): Promise<ViewHistoryResponse> {
+  return request<ViewHistoryResponse>("/view-history", { params: { limit } });
+}
+
+interface SearchHistoryResponse {
+  success: boolean;
+  count: number;
+  data: SearchHistoryEntry[];
+}
+
+export async function fetchSearchHistory(limit = 2000): Promise<SearchHistoryResponse> {
+  return request<SearchHistoryResponse>("/search-history", { params: { limit } });
+}
+
+// Fire-and-forget from the frontend's view-tracking hook — a failure here
+// must never surface to the user, so callers should swallow errors rather
+// than propagate this promise's rejection.
+export async function logPostView(shortcode: string): Promise<{ success: boolean; shortcode: string }> {
+  return request<{ success: boolean; shortcode: string }>(`/post/${shortcode}/view`, { method: "POST" });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-// Reads the /space view's categorical palette (globals.css --viz-series-1..8
+// Reads the /space view's categorical palette (globals.css --viz-series-1..24
 // + --viz-neutral) as resolved hex strings. three.js material colors need an
 // actual value, not a CSS custom property, so this is the one place that
 // bridges the app's existing CSS-variable theming (media query +
@@ -13,7 +13,21 @@ import type { VectorSpaceColorSlot } from "@/types/domain";
 
 export type VizPalette = Record<string, string>;
 
-const SERIES_COUNT = 8;
+const SERIES_COUNT = 24;
+
+// How many largest themes are colored/shown by default before the legend
+// requires expanding (VectorSpaceLegend.tsx). Also read by VectorSpaceScene
+// to gray out points past this rank when the legend is collapsed — shared
+// here so the two stay in sync rather than each hardcoding "8".
+export const LEGEND_VISIBLE_CAP = 8;
+
+// Extracts a colorSlot's theme rank ("theme-11" -> 11); null for "other" /
+// "unclustered", which have no rank.
+export function seriesIndex(slot: VectorSpaceColorSlot): number | null {
+  if (!slot.startsWith("theme-")) return null;
+  const n = Number(slot.slice("theme-".length));
+  return Number.isFinite(n) ? n : null;
+}
 
 function readPalette(): VizPalette {
   const style = getComputedStyle(document.documentElement);

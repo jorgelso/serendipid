@@ -4,6 +4,7 @@ import { getConfig } from "@/lib/config";
 import { sortPostsByRecency, toDisplayPost } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
 import InfiniteFeed from "@/components/InfiniteFeed";
+import RecommendationsRail from "@/components/RecommendationsRail";
 
 const PAGE_SIZE = 24;
 
@@ -46,6 +47,8 @@ export default async function HomePage() {
           {errorMessage}
         </div>
       )}
+
+      <RecommendationsRail />
 
       {feed && (
         <InfiniteFeed

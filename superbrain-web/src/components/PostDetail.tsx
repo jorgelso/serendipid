@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import type { ClientPost } from "@/types/domain";
+import { useQualifyingView } from "@/lib/useQualifyingView";
 import { CategoryBadges, LanguageBadges } from "./Chips";
 import MediaViewer from "./MediaViewer";
 import AnalysisDetails from "./AnalysisDetails";
 import ReviewActions from "./ReviewActions";
 import EditPostForm from "./EditPostForm";
 import DeletePostButton from "./DeletePostButton";
+import RatingControls from "./RatingControls";
 
 interface PostDetailProps {
   initialPost: ClientPost;
@@ -20,6 +22,7 @@ interface PostDetailProps {
 export default function PostDetail({ initialPost, showFullDetails = false }: PostDetailProps) {
   const [post, setPost] = useState(initialPost);
   const [editing, setEditing] = useState(false);
+  const { onVideoTimeUpdate } = useQualifyingView(post);
 
   return (
     <div>
@@ -41,7 +44,16 @@ export default function PostDetail({ initialPost, showFullDetails = false }: Pos
       </div>
 
       <div className="mt-3">
-        <MediaViewer post={post} />
+        <MediaViewer post={post} onVideoTimeUpdate={onVideoTimeUpdate} />
+      </div>
+
+      <div className="mt-3">
+        <RatingControls
+          shortcode={post.shortcode}
+          enjoymentRating={post.enjoyment_rating}
+          perceivedImportanceRating={post.perceived_importance_rating}
+          onSaved={(edits) => setPost((prev) => ({ ...prev, ...edits }))}
+        />
       </div>
 
       {editing ? (
@@ -72,6 +84,9 @@ export default function PostDetail({ initialPost, showFullDetails = false }: Pos
 
           {post.summary && (
             <p className="mt-3 text-sm leading-relaxed text-ink-muted">{post.summary}</p>
+          )}
+          {post.caption && (
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted italic">{post.caption}</p>
           )}
         </>
       )}

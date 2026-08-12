@@ -24,12 +24,23 @@ export async function GET(request: NextRequest) {
     .split(",")
     .map((v) => Number(v))
     .filter((v) => Number.isInteger(v) && v >= 1 && v <= 5);
+  const eloquent = searchParams.get("eloquent") === "true";
+  const tutorialParam = searchParams.get("tutorial");
+  const tutorial = tutorialParam === "yes" || tutorialParam === "no" ? tutorialParam : undefined;
 
   try {
     const config = getConfig();
     const { posts, collections } = await getExport();
 
-    const filtered = filterPosts(posts, collections, { category, language, collectionId, sort, importance });
+    const filtered = filterPosts(posts, collections, {
+      category,
+      language,
+      collectionId,
+      sort,
+      importance,
+      eloquent,
+      tutorial,
+    });
     const total = filtered.length;
     const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p, config.apiUrl));
 

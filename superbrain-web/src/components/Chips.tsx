@@ -140,6 +140,22 @@ export function ImportanceBadge({ importance }: { importance: number | null }) {
   );
 }
 
+/** Thumbnail-overlay badge for eloquence-judged posts (backend/core/
+ * eloquence.py) — renders nothing for unscored posts or ones judged not
+ * eloquent (see /eloquent, which already filters to is_eloquent===1, so
+ * only the tutorial/speech distinction needs surfacing here). */
+export function EloquentBadge({ isTutorial }: { isTutorial: 0 | 1 | null }) {
+  const label = isTutorial ? "🎙️ Tutorial" : "🎙️ Speech";
+  return (
+    <span
+      title={isTutorial ? "Eloquent tutorial-style delivery" : "Eloquent speech/commentary-style delivery"}
+      className="shrink-0 font-display text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap bg-lavender-soft text-lavender-ink"
+    >
+      {label}
+    </span>
+  );
+}
+
 export function TagChips({ tags, limit }: { tags: string[]; limit?: number }) {
   if (!tags || tags.length === 0) return null;
   const uniqueTags = Array.from(new Set(tags));

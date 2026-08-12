@@ -274,6 +274,60 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: enjoyment_rating / perceived_importance_rating — user-driven
+        # Netflix-style tri-state ratings (NULL | 'liked' | 'loved'), distinct from
+        # the AI-scored `importance` column above. Not a CURRENT_ANALYSIS_VERSION
+        # bump — these are user judgments, not pipeline output.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN enjoyment_rating TEXT DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN perceived_importance_rating TEXT DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: is_eloquent / eloquence_rationale — AI-judged verdict on
+        # whether audio_transcription reads as oratory-eloquent (see
+        # core/eloquence.py), independent of the `importance` rating above.
+        # NULL is_eloquent for posts not yet scored, so "not scored" stays
+        # distinguishable from "scored not eloquent" (0).
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN is_eloquent INTEGER DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN eloquence_rationale TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: is_tutorial — whether an eloquent post is delivered as a
+        # tutorial/how-to (vs. a speech/commentary), see core/eloquence.py's
+        # neuroscience/self-improvement domain carve-out. NULL for posts not
+        # yet scored.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN is_tutorial INTEGER DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: add caption — the raw Instagram post caption (scraped by
+        # instaloader into media/<shortcode>/info.txt), stored verbatim for
+        # display under the AI summary. Empty for posts with no caption, non-
+        # Instagram posts, or saved before this was tracked (backfilled via
+        # scripts/backfill_captions.py from each post's info.txt).
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN caption TEXT DEFAULT ''")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Collections table
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
@@ -314,6 +368,66 @@ class Database:
                 deleted_at  TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_deleted_log_at ON deleted_log (deleted_at);
+        """)
+        self._conn.commit()
+
+        # eloquence_stash — force re-analysis (see hard_delete_post) removes
+        # a post's whole row and lets the pipeline INSERT a brand-new one
+        # (main.py short-circuits on a cached row via check_cache(), so
+        # force-reanalysis can't just UPSERT over the existing row the way a
+        # normal re-save does — the row genuinely has to be gone first for
+        # the pipeline to actually redo the work). Eloquence scoring
+        # (core/eloquence.py) is a separate, deliberately-decoupled batch
+        # pass, not part of the live pipeline, so nothing would ever
+        # re-populate is_eloquent/eloquence_rationale/is_tutorial after that
+        # delete+reinsert — hard_delete_post stashes them here first, and
+        # save_analysis() restores (and clears) the stash right after
+        # inserting the fresh row, so a reanalysis never silently reverts an
+        # eloquence score back to "unscored".
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS eloquence_stash (
+                shortcode            TEXT PRIMARY KEY,
+                is_eloquent          INTEGER,
+                eloquence_rationale  TEXT,
+                is_tutorial          INTEGER,
+                stashed_at           TEXT
+            );
+        """)
+        self._conn.commit()
+
+        # post_views — one row per qualifying view (video >=60% watched, non-video
+        # open >=20s — see superbrain-web's useQualifyingView hook). Repeat views
+        # across separate opens are NOT deduped: each open logs its own row, and
+        # recency-weighted summation in the web recommendation engine
+        # (superbrain-web/src/lib/recommendations.ts) is what turns "viewed many
+        # times, recently" into a stronger signal than "viewed once" while still
+        # letting old views decay away individually.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS post_views (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                shortcode   TEXT NOT NULL,
+                viewed_at   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_post_views_shortcode ON post_views (shortcode);
+            CREATE INDEX IF NOT EXISTS idx_post_views_viewed_at ON post_views (viewed_at DESC);
+        """)
+        self._conn.commit()
+
+        # search_queries — every semantic-search query and chat question, with
+        # its embedding, so the web app can build a rolling "interest vector"
+        # (superbrain-web/src/lib/recommendations.ts) without re-embedding.
+        # source distinguishes GET /search/semantic from chat. This table also
+        # doubles as an embedding cache (see get_cached_query_embedding below)
+        # so repeating the same query text never re-calls the embedding API.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS search_queries (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_text       TEXT,
+                query_embedding  TEXT,
+                source           TEXT DEFAULT 'search',
+                created_at       TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_search_queries_created_at ON search_queries (created_at DESC);
         """)
         self._conn.commit()
 
@@ -460,7 +574,8 @@ class Database:
     LIGHT_COLUMNS = (
         "shortcode, url, username, content_type, analyzed_at, updated_at, "
         "post_date, likes, thumbnail, title, summary, tags, music, category, "
-        "language, is_hidden, analysis_version, media_files, importance"
+        "language, is_hidden, analysis_version, media_files, importance, "
+        "enjoyment_rating, perceived_importance_rating, caption"
     )
 
     def _row_to_dict(self, row):
@@ -541,7 +656,7 @@ class Database:
                       likes=0, post_date=None, content_type="instagram", thumbnail="",
                       source_hashtags=None, embedding=None, analysis_version=None,
                       language=None, media_files=None, importance=None,
-                      model_used=None, transcription_backend=None):
+                      model_used=None, transcription_backend=None, caption=None):
         """Insert or update an analysis record. Returns True on success.
 
         source_hashtags: original hashtags from the source platform (e.g. an
@@ -575,6 +690,11 @@ class Database:
         transcription_backend: which Whisper backend produced
         audio_transcription ("Groq Whisper API" / "Local Whisper (base)"),
         or None/"" if there was no audio track.
+
+        caption: the raw Instagram post caption as scraped by instaloader
+        (see instagram/instagram_downloader.py), stored verbatim — distinct
+        from the AI-generated `summary`. None/"" for non-Instagram content
+        or posts with no caption.
         """
         if not self.is_connected():
             print("[WARNING] Database not connected. Analysis not saved.")
@@ -629,8 +749,9 @@ class Database:
                     (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
                      thumbnail, title, summary, tags, music, category,
                      visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
-                     analysis_version, language, media_files, importance, model_used, transcription_backend)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     analysis_version, language, media_files, importance, model_used, transcription_backend,
+                     caption)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
                     url                   = excluded.url,
                     username              = excluded.username,
@@ -654,12 +775,29 @@ class Database:
                     media_files           = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END,
                     importance            = CASE WHEN excluded.importance IS NOT NULL THEN excluded.importance ELSE analyses.importance END,
                     model_used            = excluded.model_used,
-                    transcription_backend = excluded.transcription_backend
+                    transcription_backend = excluded.transcription_backend,
+                    caption               = CASE WHEN excluded.caption != '' THEN excluded.caption ELSE analyses.caption END
             """, (shortcode, url, username, content_type, now, now, post_date, likes,
                   thumbnail, title, summary, tags_json, music, category_json,
                   visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
                   version, language_json, media_files_json, importance,
-                  model_used or "", transcription_backend or ""))
+                  model_used or "", transcription_backend or "", caption or ""))
+
+            # Restore any eloquence score stashed by hard_delete_post() (force
+            # re-analysis) — see that method and eloquence_stash's comment in
+            # _create_tables. No-op for a normal first-time save/UPSERT where
+            # nothing was ever stashed for this shortcode.
+            stashed = self._conn.execute(
+                "SELECT is_eloquent, eloquence_rationale, is_tutorial FROM eloquence_stash WHERE shortcode = ?",
+                (shortcode,)
+            ).fetchone()
+            if stashed:
+                self._conn.execute(
+                    "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ?, is_tutorial = ? WHERE shortcode = ?",
+                    (stashed[0], stashed[1], stashed[2], shortcode),
+                )
+                self._conn.execute("DELETE FROM eloquence_stash WHERE shortcode = ?", (shortcode,))
+
             self._conn.commit()
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True
@@ -685,6 +823,22 @@ class Database:
             print(f"[WARNING]  Error updating embedding: {e}")
             return False
 
+    def update_caption(self, shortcode, caption) -> bool:
+        """Set just the raw Instagram caption for an existing post — used by
+        scripts/backfill_captions.py so it doesn't need to re-run analysis."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute(
+                "UPDATE analyses SET caption = ? WHERE shortcode = ?",
+                (caption, shortcode),
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error updating caption: {e}")
+            return False
+
     def update_importance(self, shortcode, importance) -> bool:
         """Set the importance score for an existing post and stamp it as
         reviewed under CURRENT_ANALYSIS_VERSION — used by the backfill
@@ -703,6 +857,67 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error updating importance: {e}")
             return False
+
+    def update_eloquence(self, shortcode, is_eloquent: bool, rationale: str, is_tutorial=None) -> bool:
+        """Set the eloquence verdict/rationale (and optionally is_tutorial)
+        for an existing post (see core/eloquence.py). Does not touch
+        analysis_version — eloquence is a separate scored dimension, not
+        part of the core analysis pipeline. is_tutorial is only written when
+        explicitly passed (not None), so callers that score eloquence and
+        tutorial-ness separately can still each write just their own field."""
+        if not self.is_connected():
+            return False
+        try:
+            if is_tutorial is None:
+                self._conn.execute(
+                    "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ? WHERE shortcode = ?",
+                    (1 if is_eloquent else 0, rationale, shortcode),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ?, is_tutorial = ? WHERE shortcode = ?",
+                    (1 if is_eloquent else 0, rationale, 1 if is_tutorial else 0, shortcode),
+                )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error updating eloquence: {e}")
+            return False
+
+    def update_is_tutorial(self, shortcode, is_tutorial: bool) -> bool:
+        """Set whether an eloquent post is delivered as a tutorial/how-to vs.
+        a speech/commentary (see core/eloquence.py's domain carve-out)."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute(
+                "UPDATE analyses SET is_tutorial = ? WHERE shortcode = ?",
+                (1 if is_tutorial else 0, shortcode),
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error updating is_tutorial: {e}")
+            return False
+
+    def get_posts_for_eloquence_scoring(self, min_length: int, include_scored: bool = False):
+        """Return [{shortcode, title, audio_transcription}, ...] for posts
+        long enough to be eloquence-scoring candidates (length filtering
+        only — the filler-ratio pre-filter is applied in Python by the
+        caller, see core/eloquence.py's passes_prefilter()). Skips posts
+        already scored (is_eloquent IS NOT NULL) unless include_scored."""
+        if not self.is_connected():
+            return []
+        try:
+            query = "SELECT shortcode, title, audio_transcription FROM analyses WHERE LENGTH(audio_transcription) > ?"
+            params = [min_length]
+            if not include_scored:
+                query += " AND is_eloquent IS NULL"
+            cur = self._conn.execute(query, params)
+            return [{"shortcode": r[0], "title": r[1], "audio_transcription": r[2]} for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting eloquence-scoring candidates: {e}")
+            return []
 
     def get_posts_missing_importance(self, include_scored: bool = False):
         """Return [{shortcode, username, title, summary, tags, category}, ...]
@@ -782,7 +997,133 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error fetching embeddings: {e}")
             return []
-    
+
+    # ------------------------------------------------------------------
+    # Personalization signals — view/search history + embedding cache
+    # (backs superbrain-web's Home recommendation engine, src/lib/recommendations.ts)
+    # ------------------------------------------------------------------
+
+    def log_post_view(self, shortcode) -> bool:
+        """Insert a qualifying-view row. Best-effort — callers (POST
+        /post/{shortcode}/view) must not let a failure here surface to the
+        user. No existence check against `analyses`: an orphaned row is
+        harmless, the web engine drops unmatched shortcodes when hydrating."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute(
+                "INSERT INTO post_views (shortcode, viewed_at) VALUES (?, ?)",
+                (shortcode, datetime.utcnow().isoformat()),
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error logging post view: {e}")
+            return False
+
+    def get_view_history(self, since=None, limit=5000):
+        """Return [{shortcode, viewed_at}], newest first."""
+        if not self.is_connected():
+            return []
+        try:
+            if since:
+                cur = self._conn.execute(
+                    "SELECT shortcode, viewed_at FROM post_views "
+                    "WHERE viewed_at >= ? ORDER BY viewed_at DESC LIMIT ?",
+                    (since, limit),
+                )
+            else:
+                cur = self._conn.execute(
+                    "SELECT shortcode, viewed_at FROM post_views ORDER BY viewed_at DESC LIMIT ?",
+                    (limit,),
+                )
+            return [{"shortcode": s, "viewed_at": v} for s, v in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error fetching view history: {e}")
+            return []
+
+    def get_cached_query_embedding(self, query_text):
+        """Return a previously-generated embedding for this exact query text
+        (normalized: trimmed + lowercased), if one exists — lets
+        GET /search/semantic and the chat RAG pipeline skip a redundant
+        embedding-API call when a query repeats (e.g. the /space search box
+        re-submitting the same term). Returns None on no match."""
+        if not self.is_connected() or not query_text:
+            return None
+        try:
+            cur = self._conn.execute(
+                "SELECT query_embedding FROM search_queries "
+                "WHERE LOWER(TRIM(query_text)) = LOWER(TRIM(?)) AND query_embedding IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 1",
+                (query_text,),
+            )
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return None
+            return json.loads(row[0])
+        except Exception as e:
+            print(f"[WARNING]  Error fetching cached query embedding: {e}")
+            return None
+
+    def log_search_query(self, query_text, query_embedding, source="search") -> bool:
+        """Insert a search/chat query history row. Always inserts a fresh row
+        (even when the embedding was reused from get_cached_query_embedding)
+        so the event's own timestamp is available for recency-weighting.
+        Best-effort — must never break the search/chat request it's attached to."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute(
+                "INSERT INTO search_queries (query_text, query_embedding, source, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    query_text,
+                    json.dumps(query_embedding) if query_embedding else None,
+                    source,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error logging search query: {e}")
+            return False
+
+    def get_search_history(self, since=None, limit=2000):
+        """Return [{query_text, query_embedding: [float,...] | None, source, created_at}],
+        newest first."""
+        if not self.is_connected():
+            return []
+        try:
+            if since:
+                cur = self._conn.execute(
+                    "SELECT query_text, query_embedding, source, created_at FROM search_queries "
+                    "WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
+                    (since, limit),
+                )
+            else:
+                cur = self._conn.execute(
+                    "SELECT query_text, query_embedding, source, created_at FROM search_queries "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                )
+            out = []
+            for query_text, emb_json, source, created_at in cur.fetchall():
+                try:
+                    embedding = json.loads(emb_json) if emb_json else None
+                except Exception:
+                    embedding = None
+                out.append({
+                    "query_text": query_text,
+                    "query_embedding": embedding,
+                    "source": source,
+                    "created_at": created_at,
+                })
+            return out
+        except Exception as e:
+            print(f"[WARNING]  Error fetching search history: {e}")
+            return []
+
     def get_recent(self, limit=10):
         """Return the most recently analysed posts (excludes soft-deleted)."""
         if not self.is_connected():
@@ -1313,10 +1654,27 @@ class Database:
             return False
 
     def hard_delete_post(self, shortcode):
-        """Permanently remove a post row — used for force re-analysis. Returns True if deleted."""
+        """Permanently remove a post row — used for force re-analysis. Returns True if deleted.
+
+        Stashes is_eloquent/eloquence_rationale/is_tutorial into
+        eloquence_stash first (if the post had actually been scored) — see
+        that table's comment in _create_tables for why this is needed.
+        save_analysis() restores from the stash right after the fresh row
+        is inserted."""
         if not self.is_connected():
             return False
         try:
+            row = self._conn.execute(
+                "SELECT is_eloquent, eloquence_rationale, is_tutorial FROM analyses WHERE shortcode = ?",
+                (shortcode,)
+            ).fetchone()
+            if row and row[0] is not None:
+                self._conn.execute(
+                    """INSERT OR REPLACE INTO eloquence_stash
+                       (shortcode, is_eloquent, eloquence_rationale, is_tutorial, stashed_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (shortcode, row[0], row[1], row[2], datetime.utcnow().isoformat()),
+                )
             cur = self._conn.execute(
                 "DELETE FROM analyses WHERE shortcode = ?",
                 (shortcode,)

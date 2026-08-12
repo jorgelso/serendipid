@@ -7,6 +7,7 @@ import RefreshButton from "./RefreshButton";
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/browse", label: "Browse" },
+  { href: "/eloquent", label: "Eloquent" },
   { href: "/search", label: "Search" },
   { href: "/chat", label: "Chat" },
   { href: "/insights", label: "Insights" },

@@ -16,6 +16,11 @@ export interface Post {
   thumbnail: string | null;
   title: string | null;
   summary: string | null;
+  // Raw Instagram post caption as written by the creator (scraped at
+  // analysis time from media/{shortcode}/info.txt) — distinct from the
+  // AI-generated `summary` above. Empty/null for non-Instagram posts, posts
+  // with no caption, or posts saved before this was tracked.
+  caption: string | null;
   tags: string[];
   music: string | null;
   // A post can genuinely belong to 1-3 categories (backend/core/categories.py's
@@ -50,7 +55,23 @@ export interface Post {
   // Raw JSON-text TEXT column as /export returns it (1536-dim OpenAI vector).
   // Only ever parsed server-side for clustering — never sent to the client.
   embedding: string | null;
+  // Netflix-style tri-state manual ratings — null (default) | 'liked' | 'loved'.
+  // Distinct from the AI-scored `importance` above: these are the user's own
+  // subjective judgment, fed into the Home recommendation engine
+  // (src/lib/recommendations.ts) alongside implicit view/search signals.
+  enjoyment_rating: RatingTier;
+  perceived_importance_rating: RatingTier;
+  // AI-judged oratory eloquence of audio_transcription (backend/core/
+  // eloquence.py) — null for posts not yet scored (distinct from 0/"scored
+  // not eloquent"). is_tutorial marks whether an eloquent post is delivered
+  // as a tutorial/how-to vs. a speech/commentary; null when is_eloquent
+  // itself is null, or if the model didn't return a parseable TUTORIAL field.
+  is_eloquent: 0 | 1 | null;
+  is_tutorial: 0 | 1 | null;
+  eloquence_rationale: string | null;
 }
+
+export type RatingTier = "liked" | "loved" | null;
 
 // Post shape safe to send to the browser: embedding stripped.
 export type ClientPost = Omit<Post, "embedding">;
@@ -210,6 +231,37 @@ export interface ChatThreadDetail extends ChatThread {
 export interface ChatMessageExchange {
   user_message: ChatMessage;
   assistant_message: ChatMessage;
+}
+
+// Mirrors backend/api.py's GET /view-history (backend/core/database.py's
+// post_views table). Feeds the Home recommendation engine
+// (src/lib/recommendations.ts) — never rendered directly.
+export interface ViewHistoryEntry {
+  shortcode: string;
+  viewed_at: string;
+}
+
+// Mirrors backend/api.py's GET /search-history (backend/core/database.py's
+// search_queries table). query_embedding is only ever consumed inside
+// src/lib/recommendations.ts (server-only, same embedding-never-reaches-the-
+// browser rule as Post.embedding) — never forward this type to a browser-
+// facing response.
+export interface SearchHistoryEntry {
+  query_text: string;
+  query_embedding: number[] | null;
+  source: "search" | "chat";
+  created_at: string;
+}
+
+export type RecommendationStrategy = "cluster" | "vector" | "hybrid";
+
+// src/app/api/recommendations/route.ts's response shape.
+export interface RecommendationsResponse {
+  success: boolean;
+  strategy: RecommendationStrategy;
+  coldStart: boolean;
+  count: number;
+  posts: ClientPost[];
 }
 
 export interface VectorSpacePoint {

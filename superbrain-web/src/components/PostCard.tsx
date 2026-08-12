@@ -7,6 +7,7 @@ import { useChangelog } from "@/lib/useChangelog";
 import {
   CategoryBadge,
   CategoryBadges,
+  EloquentBadge,
   ImportanceBadge,
   LanguageBadges,
   MissingVideoBadge,
@@ -61,9 +62,10 @@ export default function PostCard({ post, rescanMode }: PostCardProps) {
           <div className="absolute top-3 left-3 pointer-events-none">
             <CategoryBadge category={post.category} />
           </div>
-          {post.importance != null && (
-            <div className="absolute bottom-3 left-3 pointer-events-none">
-              <ImportanceBadge importance={post.importance} />
+          {(post.importance != null || post.is_eloquent === 1) && (
+            <div className="absolute bottom-3 left-3 flex flex-col items-start gap-1.5 pointer-events-none">
+              {post.importance != null && <ImportanceBadge importance={post.importance} />}
+              {post.is_eloquent === 1 && <EloquentBadge isTutorial={post.is_tutorial} />}
             </div>
           )}
           <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5 pointer-events-none">

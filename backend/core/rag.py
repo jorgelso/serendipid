@@ -57,16 +57,24 @@ def retrieve_relevant_posts(router, db, query, limit=8, min_similarity=0.2):
     full stored content (summary + audio_transcription + visual_analysis +
     text_analysis), not just the embedded title/summary/tags snippet.
 
-    Returns [] if no embedding could be generated (e.g. OPENAI_API_KEY not
-    configured) or nothing matched above min_similarity.
+    Returns (results, query_embedding). results is [] if no embedding could
+    be generated (e.g. OPENAI_API_KEY not configured) or nothing matched
+    above min_similarity; query_embedding is returned either way so callers
+    (answer_question -> api.py's send_chat_message) can log it for the
+    interest-history table without re-embedding.
     """
-    query_embedding = router.generate_embedding(query)
+    # Reuse a prior embedding for the same normalized query text if one
+    # exists (search_queries doubles as an embedding cache), same as
+    # GET /search/semantic.
+    query_embedding = db.get_cached_query_embedding(query)
     if not query_embedding:
-        return []
+        query_embedding = router.generate_embedding(query)
+    if not query_embedding:
+        return [], None
 
     stored = db.get_all_embeddings()
     if not stored:
-        return []
+        return [], query_embedding
 
     ranked = rank_by_embedding(query_embedding, stored, limit=limit, min_similarity=min_similarity)
 
@@ -89,7 +97,7 @@ def retrieve_relevant_posts(router, db, query, limit=8, min_similarity=0.2):
             "visual_analysis": post.get("visual_analysis") or "",
             "text_analysis": post.get("text_analysis") or "",
         })
-    return results
+    return results, query_embedding
 
 
 def _format_post_for_prompt(post, index):
@@ -173,11 +181,13 @@ def answer_question(router, db, thread_id, question, limit=8, min_similarity=0.2
     Synchronous (like generate_embedding/generate_chat_text) — callers in
     api.py should run this via asyncio.to_thread.
 
-    Returns (answer_text: str, sources: list[dict]) — sources are the light
-    citation shape (see _light_source), not the full prompt content.
+    Returns (answer_text: str, sources: list[dict], query_embedding). sources
+    are the light citation shape (see _light_source), not the full prompt
+    content. query_embedding lets the caller log this question into
+    search_queries (source="chat") without a second embed call.
     """
     history = db.get_chat_messages(thread_id)
-    sources = retrieve_relevant_posts(router, db, question, limit=limit, min_similarity=min_similarity)
+    sources, query_embedding = retrieve_relevant_posts(router, db, question, limit=limit, min_similarity=min_similarity)
     prompt = build_chat_prompt(question, history, sources)
     answer = router.generate_chat_text(prompt)
-    return answer, [_light_source(s) for s in sources]
+    return answer, [_light_source(s) for s in sources], query_embedding

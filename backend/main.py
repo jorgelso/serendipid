@@ -931,7 +931,8 @@ def main():
         username = ""
         likes = 0
         post_date = None
-    
+        caption = ""
+
         if info_files:
             try:
                 with open(info_files[0], 'r', encoding='utf-8') as f:
@@ -939,13 +940,17 @@ def main():
                     username_match = re.search(r'Username: @(\S+)', content)
                     likes_match = re.search(r'Likes: (\d+)', content)
                     date_match = re.search(r'Date: ([\d\-: ]+)', content)
-                
+                    caption_match = re.search(r'Caption:\n-+\n(.*?)\n-+\n', content, re.DOTALL)
+
                     if username_match:
                         username = username_match.group(1)
                     if likes_match:
                         likes = int(likes_match.group(1))
                     if date_match:
                         post_date = date_match.group(1)
+                    if caption_match:
+                        caption_text = caption_match.group(1).strip()
+                        caption = "" if caption_text == "No caption" else caption_text
             except:
                 pass
 
@@ -1047,6 +1052,7 @@ def main():
         embedding=embedding,
         model_used=model_used,
         transcription_backend=transcription_backend,
+        caption=caption,
     )
 
     if not saved:

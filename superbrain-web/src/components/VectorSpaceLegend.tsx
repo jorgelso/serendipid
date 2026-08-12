@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { Theme, VectorSpaceColorSlot } from "@/types/domain";
-import { colorForSlot, useVizPalette } from "@/lib/useVizPalette";
+import { LEGEND_VISIBLE_CAP, colorForSlot, useVizPalette } from "@/lib/useVizPalette";
 
 // Sentinel for the "no theme" bucket, safe to compare against real theme ids
 // since computeThemes() (src/lib/clustering.ts) always ids themes "theme-N".
@@ -20,18 +20,24 @@ interface VectorSpaceLegendProps {
   unclusteredCount: number;
   activeSelection: string | null;
   onSelect: (key: string | null) => void;
+  // Lifted up to VectorSpaceView so VectorSpaceScene can gray out points
+  // past LEGEND_VISIBLE_CAP whenever the legend itself is collapsed —
+  // "shrink the legend" and "points lose their color" are the same toggle.
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }
 
-// The first 8 themes (already largest-first from computeThemes()) get their
-// own validated categorical hue; anything past that shares the neutral
-// "other" swatch, per the dataviz skill's scatter series cap — but every
-// theme still gets its own row here and is individually selectable by
-// theme id, not just lumped into an unclickable "Other themes" count. Color
-// is capped at 8 distinguishable hues; visibility/selectability isn't.
+// The first 24 themes (already largest-first from computeThemes()) get their
+// own categorical hue (8 validated anchors + light/dark tinted variants of
+// each, see globals.css's --viz-series-1..24); anything past that shares the
+// neutral "other" swatch. Every theme still gets its own row here and is
+// individually selectable by theme id, not just lumped into an unclickable
+// "Other themes" count — color is capped at 24 distinguishable-ish hues,
+// visibility/selectability isn't.
 function buildEntries(themes: Theme[], unclusteredCount: number): LegendEntry[] {
   const entries: LegendEntry[] = themes.map((theme, i) => ({
     key: theme.id,
-    colorSlot: i < 8 ? `theme-${i}` : "other",
+    colorSlot: i < 24 ? `theme-${i}` : "other",
     label: theme.label,
     count: theme.postCount,
   }));
@@ -78,21 +84,20 @@ function LegendRow({
   );
 }
 
-const VISIBLE_CAP = 8;
-
 export default function VectorSpaceLegend({
   themes,
   unclusteredCount,
   activeSelection,
   onSelect,
+  expanded,
+  onExpandedChange,
 }: VectorSpaceLegendProps) {
-  const [expanded, setExpanded] = useState(false);
   const entries = useMemo(() => buildEntries(themes, unclusteredCount), [themes, unclusteredCount]);
 
   if (entries.length === 0) return null;
 
-  const primary = entries.slice(0, VISIBLE_CAP);
-  const rest = entries.slice(VISIBLE_CAP);
+  const primary = entries.slice(0, LEGEND_VISIBLE_CAP);
+  const rest = entries.slice(LEGEND_VISIBLE_CAP);
 
   return (
     <div className="pointer-events-auto flex max-h-[70vh] w-56 flex-col gap-1 overflow-y-auto rounded-2xl border border-line bg-surface/90 p-3 shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
@@ -123,7 +128,7 @@ export default function VectorSpaceLegend({
         <>
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
+            onClick={() => onExpandedChange(!expanded)}
             className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs font-semibold text-ink-muted hover:bg-surface-2"
           >
             <span className="w-2.5 shrink-0 text-center">{expanded ? "−" : "+"}</span>

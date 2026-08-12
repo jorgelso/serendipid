@@ -81,6 +81,11 @@ export function filterPosts(
     // Toggle set, not a single value — e.g. [1, 3] keeps posts scored either
     // 1 or 3. Empty/undefined means no importance filtering at all.
     importance?: number[];
+    // Eloquence view (see /eloquent page): eloquent=true keeps only
+    // is_eloquent===1; tutorial narrows further to is_tutorial===1 ("yes")
+    // or ===0 ("no") among those — undefined/"all" applies no narrowing.
+    eloquent?: boolean;
+    tutorial?: "yes" | "no";
   }
 ): Post[] {
   let filtered = options.sort === "importance" ? sortPostsByImportance(posts) : sortPostsByRecency(posts);
@@ -98,6 +103,14 @@ export function filterPosts(
   if (options.importance && options.importance.length > 0) {
     const importanceSet = new Set(options.importance);
     filtered = filtered.filter((p) => p.importance != null && importanceSet.has(p.importance));
+  }
+  if (options.eloquent) {
+    filtered = filtered.filter((p) => p.is_eloquent === 1);
+  }
+  if (options.tutorial === "yes") {
+    filtered = filtered.filter((p) => p.is_tutorial === 1);
+  } else if (options.tutorial === "no") {
+    filtered = filtered.filter((p) => p.is_tutorial === 0);
   }
   return filtered;
 }
@@ -287,6 +300,7 @@ export function mergeSearchHitsWithPosts(
           thumbnail: hit.thumbnail,
           title: hit.title,
           summary: hit.summary,
+          caption: null,
           tags: hit.tags,
           music: null,
           category: hit.category,
@@ -300,6 +314,11 @@ export function mergeSearchHitsWithPosts(
           needs_review: false,
           media_files: [],
           media_urls: [],
+          enjoyment_rating: null,
+          perceived_importance_rating: null,
+          is_eloquent: null,
+          is_tutorial: null,
+          eloquence_rationale: null,
         };
 
     return {

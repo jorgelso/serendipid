@@ -49,12 +49,19 @@
      validated default order — this app's own accent hues (coral/mint/rose,
      teal/mint, etc.) fail CVD-separation when validated as a scatter
      categorical set, so this is a deliberately separate ramp, not reused
-     from the tokens above). Order is the CVD-safety mechanism: only the
-     first 3 slots are guaranteed distinguishable in every simultaneous
-     on-screen pairing (a scatter's "all pairs" case), slots 4-8 pass the
-     weaker "adjacent pairs" gate and rely on the always-visible legend/hover
-     label as secondary encoding. --viz-neutral covers "other" (themes past
-     the 8th) and "unclustered" points alike. */
+     from the tokens above). Slots 1-8 are the validated 8-hue anchor set:
+     order is the CVD-safety mechanism, only the first 3 are guaranteed
+     distinguishable in every simultaneous on-screen pairing (a scatter's
+     "all pairs" case), slots 4-8 pass the weaker "adjacent pairs" gate and
+     rely on the always-visible legend/hover label as secondary encoding.
+     Slots 9-16 and 17-24 are "light"/"dark" lightness+hue-shifted variants
+     of the same 8 anchors (see scripts/gen-viz-palette in CLAUDE.md for how
+     they were derived) — a deliberate, documented departure from the
+     skill's "never cycle past 8 hues" rule, chosen because this is a
+     single-user app: past 8 categories, only the legend/hover reliably
+     identifies a point either way, so a tinted 24-slot extension beats an
+     all-gray "other" bucket for anything past the top 8. --viz-neutral
+     covers "other" (themes past the 24th) and "unclustered" points alike. */
   --viz-series-1: #2a78d6;
   --viz-series-2: #eb6834;
   --viz-series-3: #1baf7a;
@@ -63,6 +70,22 @@
   --viz-series-6: #008300;
   --viz-series-7: #4a3aa7;
   --viz-series-8: #e34948;
+  --viz-series-9: #6d8bf7;
+  --viz-series-10: #ff8e2a;
+  --viz-series-11: #09cdae;
+  --viz-series-12: #ddad00;
+  --viz-series-13: #ff8c9d;
+  --viz-series-14: #00a456;
+  --viz-series-15: #774ebc;
+  --viz-series-16: #ff6e3b;
+  --viz-series-17: #0065b1;
+  --viz-series-18: #ce443e;
+  --viz-series-19: #2f9047;
+  --viz-series-20: #db7b00;
+  --viz-series-21: #c1629e;
+  --viz-series-22: #326100;
+  --viz-series-23: #2e42aa;
+  --viz-series-24: #c12451;
   --viz-neutral: var(--color-ink-muted);
 }
 
@@ -99,6 +122,22 @@
     --viz-series-6: #008300;
     --viz-series-7: #9085e9;
     --viz-series-8: #e66767;
+    --viz-series-9: #6d8df8;
+    --viz-series-10: #e37100;
+    --viz-series-11: #00ae94;
+    --viz-series-12: #ba8e00;
+    --viz-series-13: #eb6073;
+    --viz-series-14: #00974a;
+    --viz-series-15: #a57ee0;
+    --viz-series-16: #e56c4b;
+    --viz-series-17: #0080cd;
+    --viz-series-18: #ca423e;
+    --viz-series-19: #358c4c;
+    --viz-series-20: #c36d0e;
+    --viz-series-21: #bb448c;
+    --viz-series-22: #3d6e00;
+    --viz-series-23: #6a7ddd;
+    --viz-series-24: #d25573;
   }
 }
 
@@ -134,6 +173,22 @@
   --viz-series-6: #008300;
   --viz-series-7: #9085e9;
   --viz-series-8: #e66767;
+  --viz-series-9: #6d8df8;
+  --viz-series-10: #e37100;
+  --viz-series-11: #00ae94;
+  --viz-series-12: #ba8e00;
+  --viz-series-13: #eb6073;
+  --viz-series-14: #00974a;
+  --viz-series-15: #a57ee0;
+  --viz-series-16: #e56c4b;
+  --viz-series-17: #0080cd;
+  --viz-series-18: #ca423e;
+  --viz-series-19: #358c4c;
+  --viz-series-20: #c36d0e;
+  --viz-series-21: #bb448c;
+  --viz-series-22: #3d6e00;
+  --viz-series-23: #6a7ddd;
+  --viz-series-24: #d25573;
 }
 
 @theme inline {

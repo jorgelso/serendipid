@@ -1150,12 +1150,24 @@ async def search_semantic(
         router = get_router()
         db = get_db()
 
-        query_embedding = await asyncio.to_thread(router.generate_embedding, q)
+        # Reuse a prior embedding for the same normalized query text if one
+        # exists (search_queries doubles as an embedding cache — see
+        # get_cached_query_embedding) rather than re-calling the embedding
+        # API for a repeated search (e.g. the /space search box resubmitting
+        # the same term).
+        query_embedding = db.get_cached_query_embedding(q)
+        if not query_embedding:
+            query_embedding = await asyncio.to_thread(router.generate_embedding, q)
         if not query_embedding:
             raise HTTPException(
                 status_code=503,
                 detail="Could not generate a query embedding — check OPENAI_API_KEY in backend/config/.api_keys."
             )
+
+        try:
+            db.log_search_query(q, query_embedding, source="search")
+        except Exception as e:
+            logger.warning(f"Failed to log search query: {e}")
 
         stored = db.get_all_embeddings()
         if not stored:
@@ -1273,9 +1285,14 @@ async def send_chat_message(thread_id: str, req: ChatMessageCreate, token: str =
         router = get_router()
 
         try:
-            answer, sources = await asyncio.to_thread(rag.answer_question, router, db, thread_id, question)
+            answer, sources, query_embedding = await asyncio.to_thread(rag.answer_question, router, db, thread_id, question)
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e))
+
+        try:
+            db.log_search_query(question, query_embedding, source="chat")
+        except Exception as e:
+            logger.warning(f"Failed to log chat query: {e}")
 
         user_message = db.add_chat_message(thread_id, "user", question)
         assistant_message = db.add_chat_message(thread_id, "assistant", answer, sources=sources)
@@ -1429,8 +1446,12 @@ ALLOWED_POST_FIELDS = {
     'shortcode', 'url', 'username', 'content_type', 'post_date',
     'likes', 'thumbnail', 'title', 'summary', 'tags', 'music', 'category',
     'visual_analysis', 'audio_transcription', 'text_analysis', 'analysis_version',
-    'language', 'media_files'
+    'language', 'media_files', 'enjoyment_rating', 'perceived_importance_rating'
 }
+
+# Manual rating axes (distinct from the AI-scored `importance` column) —
+# Netflix-style tri-state: null (default) | 'liked' | 'loved'.
+RATING_VALUES = {None, 'liked', 'loved'}
 
 class ImportData(BaseModel):
     version: Optional[str] = None
@@ -1598,12 +1619,22 @@ async def update_post(shortcode: str, updates: dict, token: str = Depends(verify
         # 'reviewed': true clears the needs_review flag (see db.update_post)
         # without re-running analysis — used when a post from before a
         # pipeline change turns out to already be good enough.
-        allowed_fields = {'category', 'language', 'title', 'summary', 'reviewed'}
+        allowed_fields = {
+            'category', 'language', 'title', 'summary', 'reviewed',
+            'enjoyment_rating', 'perceived_importance_rating',
+        }
         filtered_updates = {k: v for k, v in updates.items() if k in allowed_fields}
-        
+
         if not filtered_updates:
             raise HTTPException(status_code=400, detail="No valid fields to update")
-        
+
+        for field in ('enjoyment_rating', 'perceived_importance_rating'):
+            if field in filtered_updates and filtered_updates[field] not in RATING_VALUES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field} must be null, 'liked', or 'loved'"
+                )
+
         result = db.update_post(shortcode, filtered_updates)
         
         if result:
@@ -1621,6 +1652,60 @@ async def update_post(shortcode: str, updates: dict, token: str = Depends(verify
         raise
     except Exception as e:
         logger.error(f"Error updating post: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----------------------------------------------------------------------
+# Personalization signals — feed superbrain-web's Home recommendation
+# engine (src/lib/recommendations.ts). Deliberately NOT folded into
+# /export: that payload is cached wholesale by every client, and a view
+# log firing on every post open would invalidate/blow away the expensive
+# posts+clustering cache for no reason. These are read separately instead.
+# ----------------------------------------------------------------------
+
+@app.post("/post/{shortcode}/view")
+async def log_post_view(shortcode: str, token: str = Depends(verify_token)):
+    """Log a qualifying view (video >=60% watched, or non-video open >=20s —
+    see superbrain-web's useQualifyingView hook for what qualifies). The
+    frontend fires this fire-and-forget, so failures here should never
+    surface to the user — return success:false rather than raising where
+    reasonable."""
+    try:
+        db = get_db()
+        ok = db.log_post_view(shortcode)
+        return {"success": ok, "shortcode": shortcode}
+    except Exception as e:
+        logger.error(f"Error logging post view: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/view-history")
+async def get_view_history(
+    since: Optional[str] = Query(default=None, description="ISO timestamp; only return views at or after this time"),
+    limit: int = Query(default=5000, ge=1, le=20000),
+    token: str = Depends(verify_token)
+):
+    try:
+        db = get_db()
+        results = db.get_view_history(since=since, limit=limit)
+        return {"success": True, "count": len(results), "data": results}
+    except Exception as e:
+        logger.error(f"Error fetching view history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/search-history")
+async def get_search_history(
+    since: Optional[str] = Query(default=None, description="ISO timestamp; only return queries at or after this time"),
+    limit: int = Query(default=2000, ge=1, le=10000),
+    token: str = Depends(verify_token)
+):
+    try:
+        db = get_db()
+        results = db.get_search_history(since=since, limit=limit)
+        return {"success": True, "count": len(results), "data": results}
+    except Exception as e:
+        logger.error(f"Error fetching search history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

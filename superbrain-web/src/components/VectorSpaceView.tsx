@@ -36,6 +36,10 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
   const [selectedPost, setSelectedPost] = useState<ClientPost | null>(null);
   const [loadingShortcode, setLoadingShortcode] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Owned here (not inside VectorSpaceLegend) so VectorSpaceScene can also
+  // read it: collapsing the legend to the top 8 clusters grays out every
+  // point past that rank too, not just the legend rows.
+  const [legendExpanded, setLegendExpanded] = useState(true);
   const sceneRef = useRef<VectorSpaceSceneHandle>(null);
 
   const legendHighlight = useMemo(() => {
@@ -86,6 +90,7 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
         points={points}
         highlightedShortcodes={highlightedShortcodes}
         onSelect={handleSelect}
+        legendExpanded={legendExpanded}
       />
 
       <div className="pointer-events-none absolute inset-0 flex items-start justify-between px-4 pb-4 pt-20">
@@ -109,6 +114,8 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
           unclusteredCount={unclusteredCount}
           activeSelection={legendSelection}
           onSelect={handleSelectTheme}
+          expanded={legendExpanded}
+          onExpandedChange={setLegendExpanded}
         />
       </div>
 

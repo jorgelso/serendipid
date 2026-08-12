@@ -6,7 +6,7 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber"
 import { Html, Instance, Instances, Line, OrbitControls, Stars } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { VectorSpaceColorSlot, VectorSpacePoint } from "@/types/domain";
-import { colorForSlot, useVizPalette } from "@/lib/useVizPalette";
+import { LEGEND_VISIBLE_CAP, colorForSlot, seriesIndex, useVizPalette } from "@/lib/useVizPalette";
 import HoverPreviewCard from "./HoverPreviewCard";
 
 interface VectorSpaceSceneProps {
@@ -20,6 +20,10 @@ interface VectorSpaceSceneProps {
   // up as if they were one cluster.
   highlightedShortcodes: Set<string> | null;
   onSelect: (shortcode: string) => void;
+  // Mirrors VectorSpaceLegend's own expanded/collapsed state (owned by the
+  // shared parent, VectorSpaceView) so collapsing the legend to its top-8
+  // view also grays out every point past that rank, not just the rows.
+  legendExpanded: boolean;
 }
 
 export interface VectorSpaceSceneHandle {
@@ -131,6 +135,15 @@ function lightenColor(hex: string, amount: number): string {
 
 function mixColor(hexA: string, hexB: string, weight: number): string {
   return `#${new THREE.Color(hexA).lerp(new THREE.Color(hexB), weight).getHexString()}`;
+}
+
+// While the legend is collapsed to its top-8 view, points ranked past that
+// fall back to "other" (neutral gray) here too — collapsing the legend and
+// losing a point's color are the same toggle from the user's perspective.
+function effectiveSlot(slot: VectorSpaceColorSlot, legendExpanded: boolean): VectorSpaceColorSlot {
+  if (legendExpanded) return slot;
+  const idx = seriesIndex(slot);
+  return idx !== null && idx >= LEGEND_VISIBLE_CAP ? "other" : slot;
 }
 
 // A faint wireframe box enclosing the data reads as a containment
@@ -301,6 +314,11 @@ interface ColoredPoint {
   point: VectorSpacePoint;
   color: string;
   coreColor: string;
+  // The slot color/coreColor were actually rendered with — may differ from
+  // point.colorSlot when the legend is collapsed (effectiveSlot() falls back
+  // to "other"). GlowLayer's neutral-glow check needs this, not the raw
+  // point.colorSlot, so a collapsed-legend point dims its glow too.
+  slot: VectorSpaceColorSlot;
 }
 
 function colorFor(isDimmed: boolean, layerColor: string): string {
@@ -346,10 +364,10 @@ function GlowLayer({
         blending={THREE.AdditiveBlending}
         toneMapped={false}
       />
-      {colored.map(({ point, color }) => {
+      {colored.map(({ point, color, slot }) => {
         const isDimmed = highlightedShortcodes !== null && !highlightedShortcodes.has(point.shortcode);
         const isHovered = hoveredShortcode === point.shortcode;
-        const neutralScale = isNeutralSlot(point.colorSlot) ? NEUTRAL_GLOW_SCALE : 1;
+        const neutralScale = isNeutralSlot(slot) ? NEUTRAL_GLOW_SCALE : 1;
         return (
           <Instance
             key={point.shortcode}
@@ -415,7 +433,7 @@ function CoreLayer({
 }
 
 const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProps>(function VectorSpaceScene(
-  { points, highlightedShortcodes, onSelect },
+  { points, highlightedShortcodes, onSelect, legendExpanded },
   ref
 ) {
   const palette = useVizPalette();
@@ -430,14 +448,16 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
   const colored = useMemo<ColoredPoint[]>(
     () =>
       points.map((point) => {
-        const baseColor = colorForSlot(palette, point.colorSlot);
+        const slot = effectiveSlot(point.colorSlot, legendExpanded);
+        const baseColor = colorForSlot(palette, slot);
+        const blendSlot = point.blendColorSlot && effectiveSlot(point.blendColorSlot, legendExpanded);
         const color =
-          point.blendColorSlot && point.blendWeight
-            ? mixColor(baseColor, colorForSlot(palette, point.blendColorSlot), point.blendWeight)
+          blendSlot && point.blendWeight
+            ? mixColor(baseColor, colorForSlot(palette, blendSlot), point.blendWeight)
             : baseColor;
-        return { point, color, coreColor: lightenColor(color, 0.18) };
+        return { point, color, coreColor: lightenColor(color, 0.18), slot };
       }),
-    [points, palette]
+    [points, palette, legendExpanded]
   );
 
   const hoveredPoint = useMemo(

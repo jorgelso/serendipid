@@ -35,15 +35,17 @@ interface ThemeAssignment {
   themeLabel: string;
 }
 
-// The first 8 themes (already sorted largest-first by computeThemes()) get
-// one of the 8 validated categorical hues (globals.css --viz-series-1..8);
-// everything past that folds into "other" rather than cycling colors, per
-// the dataviz skill's scatter/all-pairs series cap.
+// The first 24 themes (already sorted largest-first by computeThemes()) get
+// one of the 24 categorical hues (globals.css --viz-series-1..24: 8
+// validated anchors + light/dark variants of each); everything past that
+// folds into "other". Kept in sync with VectorSpaceLegend.tsx's own 24-slot
+// cap — both independently decide colorSlot from theme rank, so a change to
+// one needs the other updated too.
 function buildThemeAssignments(themes: Theme[]): Map<string, ThemeAssignment> {
   const bySh = new Map<string, ThemeAssignment>();
   themes.forEach((theme, themeIndex) => {
     const assignment: ThemeAssignment = {
-      colorSlot: themeIndex < 8 ? `theme-${themeIndex}` : "other",
+      colorSlot: themeIndex < 24 ? `theme-${themeIndex}` : "other",
       themeId: theme.id,
       themeLabel: theme.label,
     };

@@ -6,6 +6,12 @@ export default function AnalysisDetails({ post }: { post: ClientPost }) {
     { label: "Visual analysis", value: post.visual_analysis },
     { label: "Audio transcription", value: post.audio_transcription },
     { label: "Text analysis", value: post.text_analysis },
+    {
+      label: `Eloquence: ${post.is_eloquent ? "eloquent" : "not eloquent"}${
+        post.is_tutorial != null ? ` (${post.is_tutorial ? "tutorial" : "speech/commentary"})` : ""
+      }`,
+      value: post.eloquence_rationale,
+    },
   ].filter((f) => f.value);
 
   const metaFields = [

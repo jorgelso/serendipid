@@ -5,7 +5,15 @@ import type { ClientPost } from "@/types/domain";
 import { classifyMedia, isMissingVideo } from "@/lib/media";
 import ReanalyzeButton from "./ReanalyzeButton";
 
-function Carousel({ items, kind }: { items: string[]; kind: "video" | "image" }) {
+function Carousel({
+  items,
+  kind,
+  onVideoTimeUpdate,
+}: {
+  items: string[];
+  kind: "video" | "image";
+  onVideoTimeUpdate?: (currentTime: number, duration: number) => void;
+}) {
   const [index, setIndex] = useState(0);
   const src = items[Math.min(index, items.length - 1)];
 
@@ -13,7 +21,15 @@ function Carousel({ items, kind }: { items: string[]; kind: "video" | "image" })
     <div>
       <div className="rounded-2xl overflow-hidden bg-ink flex items-center justify-center">
         {kind === "video" ? (
-          <video key={src} src={src} controls className="w-full max-h-[70vh]" />
+          <video
+            key={src}
+            src={src}
+            controls
+            className="w-full max-h-[70vh]"
+            onTimeUpdate={(e) =>
+              onVideoTimeUpdate?.(e.currentTarget.currentTime, e.currentTarget.duration)
+            }
+          />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={src} alt="" className="w-full max-h-[70vh] object-contain" />
@@ -44,11 +60,17 @@ function Carousel({ items, kind }: { items: string[]; kind: "video" | "image" })
   );
 }
 
-export default function MediaViewer({ post }: { post: ClientPost }) {
+export default function MediaViewer({
+  post,
+  onVideoTimeUpdate,
+}: {
+  post: ClientPost;
+  onVideoTimeUpdate?: (currentTime: number, duration: number) => void;
+}) {
   const { videos, images } = classifyMedia(post.media_urls);
 
   if (videos.length > 0) {
-    return <Carousel items={videos} kind="video" />;
+    return <Carousel items={videos} kind="video" onVideoTimeUpdate={onVideoTimeUpdate} />;
   }
 
   if (images.length > 0) {
