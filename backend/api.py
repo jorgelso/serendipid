@@ -53,6 +53,12 @@ def is_valid_api_token_format(token: str) -> bool:
 
 TOKEN_FILE = Path(__file__).parent / "token.txt"
 
+# Ceiling on how long a single Instagram analysis subprocess (main.py) is allowed
+# to run before being force-killed. Default raised from the original 600s (10 min)
+# to give slower hardware (e.g. a Raspberry Pi falling back to local Whisper when
+# Groq is unavailable) enough headroom. Override via env var if needed.
+ANALYSIS_SUBPROCESS_TIMEOUT = int(os.getenv("ANALYSIS_SUBPROCESS_TIMEOUT", "1200"))
+
 def load_or_create_api_token():
     """Load existing API token or create one if missing."""
     if TOKEN_FILE.exists():
@@ -259,9 +265,9 @@ def queue_worker():
 
                     # Wait for completion
                     try:
-                        process.wait(timeout=600)
+                        process.wait(timeout=ANALYSIS_SUBPROCESS_TIMEOUT)
                     except subprocess.TimeoutExpired:
-                        logger.error(f"❌ [{shortcode}] Process timed out after 10 minutes. Killing...")
+                        logger.error(f"❌ [{shortcode}] Process timed out after {ANALYSIS_SUBPROCESS_TIMEOUT}s. Killing...")
                         process.kill()
                         process.wait()
                         db.remove_from_queue(shortcode)
@@ -582,7 +588,7 @@ async def _run_or_queue_analysis(
     try:
         returncode, stdout, stderr = await asyncio.wait_for(
             asyncio.to_thread(_run_subprocess),
-            timeout=600
+            timeout=ANALYSIS_SUBPROCESS_TIMEOUT
         )
 
         if stderr.strip():
@@ -652,7 +658,7 @@ async def _run_or_queue_analysis(
         return {"status": "ran", "data": filtered_data}
 
     except asyncio.TimeoutError:
-        logger.error(f"❌ [{shortcode}] Analysis reached 10-minute timeout. Forcing termination.")
+        logger.error(f"❌ [{shortcode}] Analysis reached {ANALYSIS_SUBPROCESS_TIMEOUT}s timeout. Forcing termination.")
         with _active_processes_lock:
             proc = _active_processes.pop(shortcode, None)
         if proc:
