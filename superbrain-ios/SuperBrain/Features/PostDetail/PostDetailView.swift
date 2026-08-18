@@ -40,6 +40,15 @@ struct PostDetailView: View {
             }
             await viewModel?.loadIfNeeded()
         }
+        .task(id: shortcode) {
+            // A "qualifying view" — long enough to count as genuine interest,
+            // not just a bounce — mirrors the web app's useQualifyingView
+            // hook (20s dwell for a non-video open). Cancelled automatically
+            // if the user navigates away before this fires.
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard !Task.isCancelled else { return }
+            await dataStore.logView(shortcode: shortcode)
+        }
     }
 
     @ViewBuilder
@@ -75,6 +84,10 @@ struct PostDetailView: View {
                     .foregroundStyle(BrightPulse.inkMuted)
 
                 badgeRow(post: post)
+
+                RatingControlsView(post: post) {
+                    await viewModel.reload()
+                }
 
                 if let summary = post.summary, !summary.isEmpty {
                     Text(summary)
@@ -112,6 +125,12 @@ struct PostDetailView: View {
             }
             if let importanceBadge = ImportanceBadge(importance: post.importance) {
                 importanceBadge
+            }
+            if post.is_eloquent == true {
+                PillBadge(
+                    post.is_tutorial == true ? "🎙 tutorial" : "🎙 eloquent",
+                    background: BrightPulse.tealSoft, foreground: BrightPulse.tealInk, uppercase: false
+                )
             }
         }
     }

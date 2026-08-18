@@ -10,6 +10,10 @@ struct ChatSourceCardsView: View {
 
     @Environment(AppDataStore.self) private var dataStore
     @Environment(\.configStore) private var configStore
+    /// Ports the web app's `ChatSourceModeToggle` — "always show" vs.
+    /// "show on request" is a persisted preference (`SettingsView`), not a
+    /// per-message choice.
+    @AppStorage("chatAlwaysShowSources") private var alwaysShowSources = false
     @State private var isExpanded = false
 
     var body: some View {
@@ -26,6 +30,9 @@ struct ChatSourceCardsView: View {
                         sourceCard(source)
                     }
                 }
+            }
+            .onAppear {
+                if alwaysShowSources { isExpanded = true }
             }
         }
     }

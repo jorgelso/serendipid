@@ -13,9 +13,24 @@ final class BrowseViewModel {
     var allPosts: [Post] = []
     var collections: [PostCollection] = []
 
+    enum SortOrder: String, CaseIterable {
+        case recent = "Recent"
+        case important = "Most important"
+    }
+
+    /// Mirrors the web app's eloquence filter (`EloquenceFilters.tsx`) — a
+    /// content-delivery axis independent of topic/category.
+    enum EloquenceFilter: String, CaseIterable {
+        case eloquentOnly = "Eloquent"
+        case tutorialOnly = "Tutorial-style"
+        case speechOnly = "Speech/commentary"
+    }
+
     var selectedCategory: String?
     var selectedLanguage: String?
     var selectedCollectionID: String?
+    var selectedEloquenceFilter: EloquenceFilter?
+    var sortOrder: SortOrder = .recent
     var displayLimit = pageSize
 
     var baseURL: URL? { configStore.baseURL }
@@ -63,7 +78,7 @@ final class BrowseViewModel {
     }
 
     var filteredPosts: [Post] {
-        allPosts.filter { post in
+        let filtered = allPosts.filter { post in
             if let selectedCategory, !post.category.contains(selectedCategory) { return false }
             if let selectedLanguage, !post.language.contains(selectedLanguage) { return false }
             if let selectedCollectionID,
@@ -71,7 +86,24 @@ final class BrowseViewModel {
                !collection.post_ids.contains(post.shortcode) {
                 return false
             }
+            switch selectedEloquenceFilter {
+            case nil:
+                break
+            case .eloquentOnly:
+                if post.is_eloquent != true { return false }
+            case .tutorialOnly:
+                if post.is_eloquent != true || post.is_tutorial != true { return false }
+            case .speechOnly:
+                if post.is_eloquent != true || post.is_tutorial != false { return false }
+            }
             return true
+        }
+
+        switch sortOrder {
+        case .recent:
+            return filtered
+        case .important:
+            return filtered.sorted { ($0.importance ?? 0) > ($1.importance ?? 0) }
         }
     }
 
@@ -89,6 +121,7 @@ final class BrowseViewModel {
         selectedCategory = nil
         selectedLanguage = nil
         selectedCollectionID = nil
+        selectedEloquenceFilter = nil
         displayLimit = Self.pageSize
     }
 

@@ -50,14 +50,28 @@ public enum APIEndpoint: Sendable {
     /// immediately, instead of waiting for its scheduled `retry_after`.
     case retryQueueFlush
     case queueItemDelete(shortcode: String)
+    /// Rescans every listed shortcode — bulk equivalent of the per-post
+    /// "Re-run analysis" action, used to clear a whole stale-version cohort
+    /// at once (`VersionsView`).
+    case reanalyzeBulk
+    /// Fire-and-forget qualifying-view log, feeding `RecommendationsEngine`'s
+    /// interest vector (mirrors the web app's `useQualifyingView` hook).
+    case postView(shortcode: String)
+    /// Every logged qualifying view, newest first — read back by
+    /// `RecommendationsEngine` to build the interest vector.
+    case viewHistory(limit: Int = 500)
+    /// Every logged search/chat query with its embedding, newest first —
+    /// the other half of `RecommendationsEngine`'s interest vector.
+    case searchHistory(limit: Int = 500)
 
     public var method: HTTPMethod {
         switch self {
         case .export, .recent, .categoryPosts, .tagSearch, .semanticSearch, .categories, .stats,
              .changelog, .collections, .chatThreads, .chatThread, .caption, .ping, .connectInfo,
-             .queueStatus, .retryQueue:
+             .queueStatus, .retryQueue, .viewHistory, .searchHistory:
             return .get
-        case .collectionUpsert, .chatThreadCreate, .chatMessages, .analyze, .retryQueueFlush:
+        case .collectionUpsert, .chatThreadCreate, .chatMessages, .analyze, .retryQueueFlush,
+             .reanalyzeBulk, .postView:
             return .post
         case .postUpdate, .collectionPosts:
             return .put
@@ -91,6 +105,10 @@ public enum APIEndpoint: Sendable {
         case .retryQueue: return "/queue/retry"
         case .retryQueueFlush: return "/queue/retry/flush"
         case .queueItemDelete(let shortcode): return "/queue/\(shortcode)"
+        case .reanalyzeBulk: return "/reanalyze/bulk"
+        case .postView(let shortcode): return "/post/\(shortcode)/view"
+        case .viewHistory: return "/view-history"
+        case .searchHistory: return "/search-history"
         }
     }
 
@@ -112,6 +130,8 @@ public enum APIEndpoint: Sendable {
             ]
         case .caption(let url):
             return [.init(name: "url", value: url)]
+        case .viewHistory(let limit), .searchHistory(let limit):
+            return [.init(name: "limit", value: "\(limit)")]
         default:
             return []
         }

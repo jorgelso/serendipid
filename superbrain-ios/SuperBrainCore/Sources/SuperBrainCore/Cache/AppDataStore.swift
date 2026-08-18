@@ -20,6 +20,8 @@ public final class AppDataStore {
     public private(set) var unclusteredShortcodes: [String]?
     public private(set) var vectorSpacePoints: [VectorSpacePoint]?
     public private(set) var changelog: ChangelogResponse?
+    public private(set) var viewHistory: [ViewHistoryEntry]?
+    public private(set) var searchHistory: [SearchHistoryEntry]?
 
     /// Guards against duplicate concurrent fetches (e.g. two screens opening
     /// at once both calling `getExport()`).
@@ -51,6 +53,9 @@ public final class AppDataStore {
             unclusteredShortcodes = nil
             vectorSpacePoints = nil
             inFlightExport = nil
+            if changelog == nil {
+                Task { try? await self.getChangelog() }
+            }
             return payload
         } catch {
             inFlightExport = nil
@@ -109,6 +114,38 @@ public final class AppDataStore {
         let response: ChangelogResponse = try await client.send(.changelog)
         changelog = response
         return response
+    }
+
+    @discardableResult
+    public func getViewHistory(forceRefresh: Bool = false) async throws -> [ViewHistoryEntry] {
+        if !forceRefresh, let viewHistory {
+            return viewHistory
+        }
+        let response: ViewHistoryResponse = try await client.send(.viewHistory())
+        viewHistory = response.data
+        return response.data
+    }
+
+    @discardableResult
+    public func getSearchHistory(forceRefresh: Bool = false) async throws -> [SearchHistoryEntry] {
+        if !forceRefresh, let searchHistory {
+            return searchHistory
+        }
+        let response: SearchHistoryResponse = try await client.send(.searchHistory())
+        searchHistory = response.data
+        return response.data
+    }
+
+    /// Fire-and-forget qualifying-view log (`POST /post/{shortcode}/view`) —
+    /// feeds `RecommendationsEngine`. Failures are swallowed: this is a
+    /// personalization signal, never something that should surface an error
+    /// to the user for just looking at a post.
+    public func logView(shortcode: String) async {
+        guard let response: PostViewLogResponse = try? await client.send(.postView(shortcode: shortcode)),
+              response.success else { return }
+        if viewHistory != nil {
+            viewHistory?.insert(ViewHistoryEntry(shortcode: shortcode, viewed_at: ISO8601DateFormatter().string(from: Date())), at: 0)
+        }
     }
 
     /// Synchronous shortcode lookup into whatever's currently cached — does

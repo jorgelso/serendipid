@@ -65,6 +65,10 @@ struct HomeView: View {
 
     private func feed(viewModel: HomeViewModel) -> some View {
         ScrollView {
+            if !viewModel.recommendedPosts.isEmpty {
+                recommendationsRail(viewModel: viewModel)
+            }
+
             LazyVStack(spacing: 16) {
                 ForEach(viewModel.visiblePosts) { post in
                     NavigationLink(value: post.shortcode) {
@@ -85,6 +89,29 @@ struct HomeView: View {
         .refreshable {
             await viewModel.refresh()
         }
+    }
+
+    private func recommendationsRail(viewModel: HomeViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recommended for you")
+                .font(BrightPulseFont.display(size: 16, weight: .semibold))
+                .foregroundStyle(BrightPulse.ink)
+                .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(viewModel.recommendedPosts) { post in
+                        NavigationLink(value: post.shortcode) {
+                            PostCardView(post: post, baseURL: viewModel.baseURL)
+                                .frame(width: 220)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.top, 16)
     }
 }
 

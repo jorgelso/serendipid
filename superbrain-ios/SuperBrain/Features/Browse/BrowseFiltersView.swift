@@ -9,18 +9,22 @@ struct BrowseFiltersView: View {
     @Binding var selectedCategory: String?
     @Binding var selectedLanguage: String?
     @Binding var selectedCollectionID: String?
+    @Binding var selectedEloquenceFilter: BrowseViewModel.EloquenceFilter?
+    @Binding var sortOrder: BrowseViewModel.SortOrder
     let onClear: () -> Void
 
     private var hasActiveFilter: Bool {
-        selectedCategory != nil || selectedLanguage != nil || selectedCollectionID != nil
+        selectedCategory != nil || selectedLanguage != nil || selectedCollectionID != nil || selectedEloquenceFilter != nil
     }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
+                sortMenu
                 filterMenu(title: "Category", selection: $selectedCategory, options: categories)
                 filterMenu(title: "Language", selection: $selectedLanguage, options: languages)
                 collectionMenu
+                eloquenceMenu
 
                 if hasActiveFilter {
                     Button("Clear", action: onClear)
@@ -30,6 +34,36 @@ struct BrowseFiltersView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+        }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(BrowseViewModel.SortOrder.allCases, id: \.self) { order in
+                Button(order.rawValue) { sortOrder = order }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(sortOrder.rawValue)
+            }
+            .font(BrightPulseFont.body(size: 13, weight: .semibold))
+            .foregroundStyle(BrightPulse.ink)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(BrightPulse.surface2))
+        }
+    }
+
+    private var eloquenceMenu: some View {
+        Menu {
+            Button("All") { selectedEloquenceFilter = nil }
+            ForEach(BrowseViewModel.EloquenceFilter.allCases, id: \.self) { filter in
+                Button(filter.rawValue) { selectedEloquenceFilter = filter }
+            }
+        } label: {
+            filterLabel(title: "Delivery", value: selectedEloquenceFilter?.rawValue)
         }
     }
 

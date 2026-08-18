@@ -1137,7 +1137,8 @@ async def search_semantic(
     q: str = Query(..., description="Free-text topic/query to search for"),
     limit: int = Query(default=20, ge=1, le=100),
     min_similarity: float = Query(default=0.0, ge=0.0, le=1.0, description="Drop results below this cosine similarity"),
-    token: str = Depends(verify_token)
+    token: str = Depends(verify_token),
+    x_client_env: Optional[str] = Header(default=None, description="'dev' from a local `next dev` session; omitted/anything else counts as real usage")
 ):
     """
     Semantic search over analyzed posts by meaning, not just keyword overlap.
@@ -1171,7 +1172,7 @@ async def search_semantic(
             )
 
         try:
-            db.log_search_query(q, query_embedding, source="search")
+            db.log_search_query(q, query_embedding, source="search", client_env=resolve_client_env(x_client_env))
         except Exception as e:
             logger.warning(f"Failed to log search query: {e}")
 
@@ -1266,7 +1267,12 @@ async def get_chat_thread(thread_id: str, token: str = Depends(verify_token)):
 
 
 @app.post("/chat/threads/{thread_id}/messages")
-async def send_chat_message(thread_id: str, req: ChatMessageCreate, token: str = Depends(verify_token)):
+async def send_chat_message(
+    thread_id: str,
+    req: ChatMessageCreate,
+    token: str = Depends(verify_token),
+    x_client_env: Optional[str] = Header(default=None, description="'dev' from a local `next dev` session; omitted/anything else counts as real usage")
+):
     """
     Ask the RAG chatbot a question within a thread.
 
@@ -1296,7 +1302,7 @@ async def send_chat_message(thread_id: str, req: ChatMessageCreate, token: str =
             raise HTTPException(status_code=503, detail=str(e))
 
         try:
-            db.log_search_query(question, query_embedding, source="chat")
+            db.log_search_query(question, query_embedding, source="chat", client_env=resolve_client_env(x_client_env))
         except Exception as e:
             logger.warning(f"Failed to log chat query: {e}")
 
@@ -1458,6 +1464,17 @@ ALLOWED_POST_FIELDS = {
 # Manual rating axes (distinct from the AI-scored `importance` column) —
 # Netflix-style tri-state: null (default) | 'liked' | 'loved'.
 RATING_VALUES = {None, 'liked', 'loved'}
+
+
+def resolve_client_env(x_client_env: Optional[str]) -> str:
+    """Normalizes the optional `X-Client-Env` header used to tag
+    post_views/search_queries rows as 'dev' or 'prod' — see the client_env
+    migrations in core/database.py for the full rationale. Anything other
+    than the literal string 'dev' (missing header, unrecognized value, the
+    iOS app which has no dev/prod build distinction and never sends this)
+    normalizes to 'prod', so a bug here fails toward *counting* a view/search
+    as real rather than silently excluding real usage."""
+    return "dev" if x_client_env == "dev" else "prod"
 
 class ImportData(BaseModel):
     version: Optional[str] = None
@@ -1670,7 +1687,11 @@ async def update_post(shortcode: str, updates: dict, token: str = Depends(verify
 # ----------------------------------------------------------------------
 
 @app.post("/post/{shortcode}/view")
-async def log_post_view(shortcode: str, token: str = Depends(verify_token)):
+async def log_post_view(
+    shortcode: str,
+    token: str = Depends(verify_token),
+    x_client_env: Optional[str] = Header(default=None, description="'dev' from a local `next dev` session; omitted/anything else counts as real usage")
+):
     """Log a qualifying view (video >=60% watched, or non-video open >=20s —
     see superbrain-web's useQualifyingView hook for what qualifies). The
     frontend fires this fire-and-forget, so failures here should never
@@ -1678,7 +1699,7 @@ async def log_post_view(shortcode: str, token: str = Depends(verify_token)):
     reasonable."""
     try:
         db = get_db()
-        ok = db.log_post_view(shortcode)
+        ok = db.log_post_view(shortcode, client_env=resolve_client_env(x_client_env))
         return {"success": ok, "shortcode": shortcode}
     except Exception as e:
         logger.error(f"Error logging post view: {e}")

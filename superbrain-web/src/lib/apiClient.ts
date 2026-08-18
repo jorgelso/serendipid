@@ -51,6 +51,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       method: options.method ?? "GET",
       headers: {
         "X-API-Key": config.apiKey,
+        // Tags post_views/search_queries rows so `next dev` testing traffic
+        // never pollutes the recommendation engine's real signal — see the
+        // client_env migrations in backend/core/database.py. `next dev` sets
+        // NODE_ENV=development automatically; `next start` sets "production".
+        "X-Client-Env": process.env.NODE_ENV === "production" ? "prod" : "dev",
         ...(options.body ? { "Content-Type": "application/json" } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,

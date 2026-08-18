@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.apiClient) private var apiClient
     @State private var viewModel: SettingsViewModel?
     @State private var pendingShareCount = 0
+    @AppStorage("chatAlwaysShowSources") private var alwaysShowSources = false
 
     var body: some View {
         NavigationStack {
@@ -38,6 +39,8 @@ struct SettingsView: View {
 
                 if viewModel.connectionState == .connected {
                     syncRow
+                    versionsRow
+                    preferencesCard
                     PillButton("Disconnect", style: .secondary) {
                         viewModel.disconnect()
                     }
@@ -94,6 +97,48 @@ struct SettingsView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private var versionsRow: some View {
+        NavigationLink {
+            VersionsView()
+        } label: {
+            Card {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Analysis versions")
+                            .font(BrightPulseFont.body(size: 15, weight: .semibold))
+                            .foregroundStyle(BrightPulse.ink)
+                        Text("Pipeline changelog & bulk rescan for stale posts")
+                            .font(BrightPulseFont.body(size: 12))
+                            .foregroundStyle(BrightPulse.inkMuted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BrightPulse.inkMuted)
+                }
+                .padding(16)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var preferencesCard: some View {
+        Card {
+            Toggle(isOn: $alwaysShowSources) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Always show chat sources")
+                        .font(BrightPulseFont.body(size: 15, weight: .semibold))
+                        .foregroundStyle(BrightPulse.ink)
+                    Text("Off shows a \"Show sources\" toggle per answer instead")
+                        .font(BrightPulseFont.body(size: 12))
+                        .foregroundStyle(BrightPulse.inkMuted)
+                }
+            }
+            .tint(BrightPulse.coral)
+            .padding(16)
+        }
     }
 
     private func connectionCard(viewModel: SettingsViewModel) -> some View {

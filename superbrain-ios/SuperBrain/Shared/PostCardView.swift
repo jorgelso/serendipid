@@ -15,6 +15,8 @@ struct PostCardView: View {
     let baseURL: URL?
     var similarity: Double? = nil
 
+    @Environment(AppDataStore.self) private var dataStore
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             thumbnail
@@ -59,10 +61,10 @@ struct PostCardView: View {
                     }
                 }
                 Spacer()
-                if post.needs_review {
+                if post.needs_review, let currentVersion = dataStore.changelog?.current_version {
                     HStack {
                         Spacer()
-                        VersionBehindBadge(versionsBehind: 1)
+                        VersionBehindBadge(versionsBehind: max(1, currentVersion - post.analysis_version))
                     }
                 }
             }

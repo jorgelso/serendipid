@@ -413,6 +413,18 @@ class Database:
         """)
         self._conn.commit()
 
+        # Migration: client_env — 'dev' | 'prod', tags which build logged this
+        # view so a local `next dev` session testing the UI never pollutes the
+        # recommendation engine's real signal. Defaults to 'prod' so anything
+        # that doesn't send an env (the iOS app, which has no dev/prod build
+        # distinction, and any pre-migration row) counts as real usage.
+        # get_view_history() only ever returns 'prod' rows — see there.
+        try:
+            self._conn.execute("ALTER TABLE post_views ADD COLUMN client_env TEXT DEFAULT 'prod'")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # search_queries — every semantic-search query and chat question, with
         # its embedding, so the web app can build a rolling "interest vector"
         # (superbrain-web/src/lib/recommendations.ts) without re-embedding.
@@ -430,6 +442,15 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_search_queries_created_at ON search_queries (created_at DESC);
         """)
         self._conn.commit()
+
+        # Migration: client_env — see the identical migration on post_views
+        # above for the full rationale. Same default ('prod'), same
+        # dev-traffic-never-pollutes-recommendations intent.
+        try:
+            self._conn.execute("ALTER TABLE search_queries ADD COLUMN client_env TEXT DEFAULT 'prod'")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
         # Analysis changelog — queryable "what's new" history for the
         # analysis pipeline/taxonomy, keyed by ANALYSIS_VERSION. Mirrors the
@@ -1003,17 +1024,20 @@ class Database:
     # (backs superbrain-web's Home recommendation engine, src/lib/recommendations.ts)
     # ------------------------------------------------------------------
 
-    def log_post_view(self, shortcode) -> bool:
+    def log_post_view(self, shortcode, client_env="prod") -> bool:
         """Insert a qualifying-view row. Best-effort — callers (POST
         /post/{shortcode}/view) must not let a failure here surface to the
         user. No existence check against `analyses`: an orphaned row is
-        harmless, the web engine drops unmatched shortcodes when hydrating."""
+        harmless, the web engine drops unmatched shortcodes when hydrating.
+        client_env should be 'dev' or 'prod' (api.py normalizes anything else
+        to 'prod') — see the client_env migration above post_views' CREATE
+        TABLE for why."""
         if not self.is_connected():
             return False
         try:
             self._conn.execute(
-                "INSERT INTO post_views (shortcode, viewed_at) VALUES (?, ?)",
-                (shortcode, datetime.utcnow().isoformat()),
+                "INSERT INTO post_views (shortcode, viewed_at, client_env) VALUES (?, ?, ?)",
+                (shortcode, datetime.utcnow().isoformat(), client_env),
             )
             self._conn.commit()
             return True
@@ -1022,19 +1046,23 @@ class Database:
             return False
 
     def get_view_history(self, since=None, limit=5000):
-        """Return [{shortcode, viewed_at}], newest first."""
+        """Return [{shortcode, viewed_at}], newest first. Only 'prod'-tagged
+        rows — this feeds the recommendation engine exclusively, so dev-build
+        testing traffic must never appear here (see the client_env
+        migration)."""
         if not self.is_connected():
             return []
         try:
             if since:
                 cur = self._conn.execute(
                     "SELECT shortcode, viewed_at FROM post_views "
-                    "WHERE viewed_at >= ? ORDER BY viewed_at DESC LIMIT ?",
+                    "WHERE viewed_at >= ? AND client_env = 'prod' ORDER BY viewed_at DESC LIMIT ?",
                     (since, limit),
                 )
             else:
                 cur = self._conn.execute(
-                    "SELECT shortcode, viewed_at FROM post_views ORDER BY viewed_at DESC LIMIT ?",
+                    "SELECT shortcode, viewed_at FROM post_views "
+                    "WHERE client_env = 'prod' ORDER BY viewed_at DESC LIMIT ?",
                     (limit,),
                 )
             return [{"shortcode": s, "viewed_at": v} for s, v in cur.fetchall()]
@@ -1065,22 +1093,26 @@ class Database:
             print(f"[WARNING]  Error fetching cached query embedding: {e}")
             return None
 
-    def log_search_query(self, query_text, query_embedding, source="search") -> bool:
+    def log_search_query(self, query_text, query_embedding, source="search", client_env="prod") -> bool:
         """Insert a search/chat query history row. Always inserts a fresh row
         (even when the embedding was reused from get_cached_query_embedding)
         so the event's own timestamp is available for recency-weighting.
-        Best-effort — must never break the search/chat request it's attached to."""
+        Best-effort — must never break the search/chat request it's attached to.
+        client_env should be 'dev' or 'prod' (api.py normalizes anything else
+        to 'prod') — see the client_env migration above search_queries' CREATE
+        TABLE for why."""
         if not self.is_connected():
             return False
         try:
             self._conn.execute(
-                "INSERT INTO search_queries (query_text, query_embedding, source, created_at) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO search_queries (query_text, query_embedding, source, created_at, client_env) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (
                     query_text,
                     json.dumps(query_embedding) if query_embedding else None,
                     source,
                     datetime.utcnow().isoformat(),
+                    client_env,
                 ),
             )
             self._conn.commit()
@@ -1091,20 +1123,21 @@ class Database:
 
     def get_search_history(self, since=None, limit=2000):
         """Return [{query_text, query_embedding: [float,...] | None, source, created_at}],
-        newest first."""
+        newest first. Only 'prod'-tagged rows — same reasoning as
+        get_view_history above."""
         if not self.is_connected():
             return []
         try:
             if since:
                 cur = self._conn.execute(
                     "SELECT query_text, query_embedding, source, created_at FROM search_queries "
-                    "WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
+                    "WHERE created_at >= ? AND client_env = 'prod' ORDER BY created_at DESC LIMIT ?",
                     (since, limit),
                 )
             else:
                 cur = self._conn.execute(
                     "SELECT query_text, query_embedding, source, created_at FROM search_queries "
-                    "ORDER BY created_at DESC LIMIT ?",
+                    "WHERE client_env = 'prod' ORDER BY created_at DESC LIMIT ?",
                     (limit,),
                 )
             out = []

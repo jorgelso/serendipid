@@ -49,6 +49,17 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
     /// 1536-dim OpenAI embedding, JSON-text encoded. Only ever parsed by
     /// `EmbeddingMath` for related-posts/clustering — no UI reads it directly.
     public let embedding: String?
+    /// User's own subjective judgment — `nil`/`"liked"`/`"loved"`, distinct
+    /// from the AI-scored `importance` above. Set via `PUT /post/{shortcode}`.
+    public let enjoyment_rating: String?
+    public let perceived_importance_rating: String?
+    /// AI-judged oratory eloquence, independent of topic (`core/eloquence.py`).
+    /// `nil` = not yet scored — never treat that as "not eloquent."
+    public let is_eloquent: Bool?
+    /// Only meaningful when `is_eloquent == true`: whether the delivery reads
+    /// as tutorial-style instruction vs. speech/commentary.
+    public let is_tutorial: Bool?
+    public let eloquence_rationale: String?
 
     public init(
         shortcode: String, url: String, username: String, content_type: String,
@@ -57,7 +68,9 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
         tags: [String], music: String?, category: [String], language: [String],
         visual_analysis: String?, audio_transcription: String?, text_analysis: String?,
         is_hidden: Int, source_hashtags: [String], media_files: [String],
-        media_urls: [String], analysis_version: Int, needs_review: Bool, embedding: String?
+        media_urls: [String], analysis_version: Int, needs_review: Bool, embedding: String?,
+        enjoyment_rating: String? = nil, perceived_importance_rating: String? = nil,
+        is_eloquent: Bool? = nil, is_tutorial: Bool? = nil, eloquence_rationale: String? = nil
     ) {
         self.shortcode = shortcode
         self.url = url
@@ -85,6 +98,11 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
         self.analysis_version = analysis_version
         self.needs_review = needs_review
         self.embedding = embedding
+        self.enjoyment_rating = enjoyment_rating
+        self.perceived_importance_rating = perceived_importance_rating
+        self.is_eloquent = is_eloquent
+        self.is_tutorial = is_tutorial
+        self.eloquence_rationale = eloquence_rationale
     }
 }
 

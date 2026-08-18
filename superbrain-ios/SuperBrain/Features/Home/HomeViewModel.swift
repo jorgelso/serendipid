@@ -18,6 +18,11 @@ final class HomeViewModel {
 
     var loadState: LoadState = .idle
     var visiblePosts: [Post] = []
+    /// "Recommended for you" rail — `RecommendationsEngine` ranked by
+    /// similarity to a recency-weighted interest vector built from view
+    /// history, falling back to top-importance recent posts when there's no
+    /// view history yet. Mirrors the web app's Home recommendations rail.
+    var recommendedPosts: [Post] = []
     var baseURL: URL? { configStore.baseURL }
 
     private var allPostsSortedByRecency: [Post] = []
@@ -57,6 +62,10 @@ final class HomeViewModel {
             }
             visiblePosts = Array(allPostsSortedByRecency.prefix(Self.pageSize))
             loadState = .loaded
+
+            let viewHistory = (try? await dataStore.getViewHistory()) ?? []
+            let searchHistory = (try? await dataStore.getSearchHistory()) ?? []
+            recommendedPosts = RecommendationsEngine.recommend(posts: export.posts, viewHistory: viewHistory, searchHistory: searchHistory)
         } catch {
             loadState = .error(error.localizedDescription)
         }

@@ -51,6 +51,14 @@ struct BrowseView: View {
                     get: { viewModel.selectedCollectionID },
                     set: { viewModel.selectedCollectionID = $0; viewModel.onFilterChanged() }
                 ),
+                selectedEloquenceFilter: Binding(
+                    get: { viewModel.selectedEloquenceFilter },
+                    set: { viewModel.selectedEloquenceFilter = $0; viewModel.onFilterChanged() }
+                ),
+                sortOrder: Binding(
+                    get: { viewModel.sortOrder },
+                    set: { viewModel.sortOrder = $0 }
+                ),
                 onClear: { viewModel.clearFilters() }
             )
 

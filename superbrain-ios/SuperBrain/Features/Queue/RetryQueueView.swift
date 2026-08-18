@@ -84,6 +84,7 @@ struct RetryQueueView: View {
         .frame(maxWidth: .infinity)
     }
 
+    @ViewBuilder
     private func pendingSection(viewModel: RetryQueueViewModel) -> some View {
         Section {
             ForEach(viewModel.pendingShares) { share in
@@ -115,6 +116,7 @@ struct RetryQueueView: View {
         }
     }
 
+    @ViewBuilder
     private func retrySection(viewModel: RetryQueueViewModel) -> some View {
         Section {
             ForEach(viewModel.retryItems) { item in
@@ -200,14 +202,14 @@ private struct RetryItemRow: View {
 /// explicit offset by default, so this parses it as UTC explicitly rather
 /// than silently misreading it as local time.
 enum RelativeDateFormatting {
-    private static let backendFormatter: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let backendFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         formatter.timeZone = TimeZone(identifier: "UTC")
         return formatter
     }()
 
-    private static let backendFormatterNoFraction: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let backendFormatterNoFraction: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         formatter.timeZone = TimeZone(identifier: "UTC")

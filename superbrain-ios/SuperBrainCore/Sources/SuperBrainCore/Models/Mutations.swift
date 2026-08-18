@@ -31,22 +31,54 @@ public struct AnalysisResponse: Codable, Sendable {
     public let processing_time: Double?
 }
 
-/// `PUT /post/{shortcode}` body — the backend only honors these 5 keys, all
+/// `PUT /post/{shortcode}` body — the backend only honors these 7 keys, all
 /// optional; anything else is silently dropped, and a 400 is returned if none
-/// are present.
+/// are present. `enjoyment_rating`/`perceived_importance_rating` must each be
+/// `nil`, `"liked"`, or `"loved"` — the backend 400s on anything else.
 public struct PostUpdateRequest: Encodable, Sendable {
     public var category: [String]?
     public var language: [String]?
     public var title: String?
     public var summary: String?
     public var reviewed: Bool?
+    public var enjoyment_rating: String??
+    public var perceived_importance_rating: String??
 
-    public init(category: [String]? = nil, language: [String]? = nil, title: String? = nil, summary: String? = nil, reviewed: Bool? = nil) {
+    public init(
+        category: [String]? = nil, language: [String]? = nil, title: String? = nil,
+        summary: String? = nil, reviewed: Bool? = nil,
+        enjoyment_rating: String?? = nil, perceived_importance_rating: String?? = nil
+    ) {
         self.category = category
         self.language = language
         self.title = title
         self.summary = summary
         self.reviewed = reviewed
+        self.enjoyment_rating = enjoyment_rating
+        self.perceived_importance_rating = perceived_importance_rating
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case category, language, title, summary, reviewed, enjoyment_rating, perceived_importance_rating
+    }
+
+    /// A double-optional (`String??`) is how "field explicitly set to null"
+    /// (clear the rating) is distinguished from "field omitted" (leave it
+    /// alone) — `Encodable`'s default synthesis can't express that
+    /// distinction for an already-optional property, so encoding is manual.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(category, forKey: .category)
+        try container.encodeIfPresent(language, forKey: .language)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(summary, forKey: .summary)
+        try container.encodeIfPresent(reviewed, forKey: .reviewed)
+        if let enjoyment_rating {
+            try container.encode(enjoyment_rating, forKey: .enjoyment_rating)
+        }
+        if let perceived_importance_rating {
+            try container.encode(perceived_importance_rating, forKey: .perceived_importance_rating)
+        }
     }
 }
 
