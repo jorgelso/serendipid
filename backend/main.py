@@ -14,18 +14,61 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
+
+def _load_env_file():
+    """Load backend/.env into the process environment, if present. Real env
+    vars always take precedence — this only fills in what's not already
+    set, so it's a no-op for anyone not using a .env file. When main.py is
+    spawned as a subprocess by api.py (the normal path), it already
+    inherits api.py's environment, which has .env merged in at that point —
+    this is a safety net for running `python main.py <url>` standalone.
+    Must run before any local module is imported below, since some (e.g.
+    core.database's DATABASE_PATH) read env vars at import time."""
+    env_path = Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
+
+
+_load_env_file()
+
 # Import local modules
 from core.link_checker import validate_link
 from core.database import get_db
-from core.categories import CATEGORY_PROMPT, parse_categories, keyword_fallback_categories
-from core.languages import LANGUAGE_PROMPT, parse_languages
+from core.categories import CATEGORY_PROMPT
+from core.languages import LANGUAGE_PROMPT
 from core.importance import parse_importance, apply_trusted_creator_boost, build_importance_prompt
 from core.media_store import relocate_to_media_store
+from core.summary_parser import parse_summary, apply_music_override
 from analyzers.youtube_analyzer import analyze_youtube
 from analyzers.webpage_analyzer import analyze_webpage
 
 # Sentinel returned by run_*_analysis when the item has been queued for retry
 RETRY_SENTINEL = "__ENQUEUED_FOR_RETRY__"
+
+# ANALYSIS_MODE=batch submits the combined-summary LLM call (and, once that
+# resolves, importance scoring + embedding) to OpenAI's Batch API instead of
+# calling them synchronously — roughly half the cost, in exchange for
+# turnaround up to 24h. Only affects the Instagram pipeline in main() below;
+# YouTube/webpage analysis are single-call pipelines and stay synchronous
+# regardless. See core/batch_processor.py for the resumption logic.
+ANALYSIS_MODE = os.getenv("ANALYSIS_MODE", "immediate").strip().lower()
+
+# Exit code signaling "submitted to a batch job, not a success/failure/retry"
+# — distinct from 0=success, 1=hard failure, 2=queued-for-retry. api.py must
+# not treat this as a failure, and must not remove the processing_queue row
+# (db.enqueue_batch_job() already set it to status='batch').
+BATCH_EXIT_CODE = 3
 
 # Keywords that indicate a retryable quota / rate-limit failure
 _QUOTA_KEYWORDS = (
@@ -51,10 +94,11 @@ def print_section(title):
     print(f"  {title}")
     print('─' * 80 + "\n")
 
-def generate_final_summary(results, instagram_url, source_caption="", source_hashtags=None):
-    """Generate comprehensive summary using all analysis results via ModelRouter."""
-    from core.model_router import get_router
-
+def build_final_summary_prompt(results, instagram_url, source_caption="", source_hashtags=None):
+    """Build the combined title/summary/tags/music/category/language prompt
+    from all analysis results. Pure (no I/O) — split out of
+    generate_final_summary() so ANALYSIS_MODE=batch can submit this exact
+    prompt to a batch job instead of calling the router synchronously."""
     # Collect all analysis data
     visual_summary = ""
     audio_summary = ""
@@ -173,6 +217,15 @@ Apply the classification from above: for CONSISTENT or UNCLEAR, use the caption 
 
 Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
 
+    return prompt
+
+
+def generate_final_summary(results, instagram_url, source_caption="", source_hashtags=None):
+    """Generate comprehensive summary using all analysis results via ModelRouter."""
+    from core.model_router import get_router
+
+    prompt = build_final_summary_prompt(results, instagram_url, source_caption, source_hashtags)
+
     try:
         print("🤖 Generating comprehensive summary with AI...")
         router = get_router()
@@ -185,123 +238,6 @@ Be specific and thorough — prioritize capturing concrete, actionable detail ov
 
     except Exception as e:
         return f"Error generating summary: {e}\n\nRaw data available in individual analysis sections above.", None
-
-def _parse_field(text: str, emoji: str, label: str) -> str:
-    """
-    Extract a field value from AI output — handles all common AI formatting variations:
-      📌 TITLE: value
-      📌 **TITLE:** value
-      📌 **TITLE**  \n  value
-    Also handles emoji variation selectors (U+FE0F) that may or may not be present.
-    Returns the first non-empty content after the label, stopped at the next
-    section emoji line or blank-line boundary.
-    """
-    # Strip variation selector from emoji so pattern works whether or not it's present
-    emoji_base = emoji.replace('\ufe0f', '')
-    pattern = re.compile(
-        rf'{re.escape(emoji_base)}\ufe0f?\s*\*{{0,2}}{re.escape(label)}\*{{0,2}}:?\s*',
-        re.IGNORECASE
-    )
-    m = pattern.search(text)
-    # Fallback: model may output U+FFFD instead of the emoji (encoding mangling)
-    if not m:
-        pattern_fb = re.compile(
-            rf'\ufffd\s*\*{{0,2}}{re.escape(label)}\*{{0,2}}:?\s*',
-            re.IGNORECASE
-        )
-        m = pattern_fb.search(text)
-    if not m:
-        return ""
-    after = text[m.end():]
-    # Collect until next section (identified by an emoji at line start) or 2 blank lines
-    lines = after.split('\n')
-    content_lines = []
-    for line in lines:
-        stripped = line.strip()
-        # Stop at next section header — match ANY emoji/symbol at line start,
-        # OR a U+FFFD replacement char (model sometimes mangles lower-plane emojis)
-        if content_lines and re.match(
-            r'^[\U0001F000-\U0001FFFF\U00002600-\U000027BF\U00002B00-\U00002BFF\uFFFD]',
-            stripped,
-        ):
-            break
-        # Skip pure markdown bold/italic wrapper lines but keep the text
-        content_lines.append(re.sub(r'\*{1,3}([^*]+?)\*{1,3}', r'\1',
-                                      re.sub(r'^\*{1,3}|\*{1,3}$', '', stripped)))
-    # Remove leading/trailing blank lines and join
-    result = ' '.join(l for l in content_lines if l).strip()
-    # Strip surrounding markdown bold (**)
-    result = re.sub(r'^\*+|\*+$', '', result).strip('"').strip()
-    return result
-
-
-def parse_summary(summary_text):
-    """
-    Parse AI-generated summary to extract structured data.
-    Robust against markdown bold, missing colons, varied whitespace.
-
-    Returns:
-        tuple: (title, summary, tags, music, category, language)
-        category and language are each a list of 1+ labels — a post can
-        belong to more than one category, and occasionally spans more than
-        one language (e.g. speech in one language, captions in another).
-        Importance is scored separately — see score_importance() — rather
-        than parsed from this summary text.
-    """
-    title = ""
-    summary = ""
-    tags = []
-    music = ""
-    category = []
-    language = []
-
-    try:
-        title   = _parse_field(summary_text, "📌", "TITLE")
-        summary = _parse_field(summary_text, "📝", "SUMMARY")
-        music   = _parse_field(summary_text, "🎵", "MUSIC")
-
-        # Tags: grab block then split on whitespace/commas
-        raw_tags = _parse_field(summary_text, "🏷️", "TAGS")
-        if not raw_tags:  # try without variation selector
-            raw_tags = _parse_field(summary_text, "🏷", "TAGS")
-        if not raw_tags:  # model sometimes omits emoji entirely
-            _tm = re.search(r'(?:^|\n)\s*\*{0,2}TAGS\*{0,2}:?\s*([^\n]+)', summary_text, re.IGNORECASE)
-            if _tm:
-                raw_tags = _tm.group(1).strip()
-        if raw_tags:
-            tags = [t.strip() for t in re.split(r'[\s,]+', raw_tags) if t.strip()]
-
-        music = _parse_field(summary_text, "🎵", "MUSIC")
-        if not music:
-            _mm = re.search(r'(?:^|\n)\s*\*{0,2}MUSIC\*{0,2}:?\s*([^\n]+)', summary_text, re.IGNORECASE)
-            if _mm:
-                music = _mm.group(1).strip()
-
-        # Category: one or more comma-separated labels
-        raw_cat = _parse_field(summary_text, "📂", "CATEGORY")
-        raw_cat = re.sub(r'\*+', '', raw_cat).strip()
-        raw_cat = raw_cat.split('\n')[0].strip()
-        category = parse_categories(raw_cat)
-
-        # Language: one or more comma-separated labels (usually just one)
-        raw_lang = _parse_field(summary_text, "🌐", "LANGUAGE")
-        raw_lang = re.sub(r'\*+', '', raw_lang).strip()
-        raw_lang = raw_lang.split('\n')[0].strip()
-        language = parse_languages(raw_lang)
-
-    except Exception as e:
-        print(f"⚠️ Error parsing summary: {e}")
-
-    # Fallback: only when the model's CATEGORY field was missing/unparseable
-    # (never overrides a real answer the model already gave, even a single one).
-    if not category:
-        category = keyword_fallback_categories(f"{title} {summary} {' '.join(tags)} {summary_text}")
-
-    # No keyword fallback for language — guessing a language from keywords is
-    # unreliable, so an unparseable field is left empty (unknown) rather than
-    # guessed.
-
-    return title, summary, tags, music, category, language
 
 
 def score_importance(title, summary_text, tags, category, username):
@@ -323,6 +259,63 @@ def score_importance(title, summary_text, tags, category, username):
         print(f"⚠️  Importance scoring failed: {e}")
         importance = None
     return apply_trusted_creator_boost(importance, username)
+
+
+def parse_info_txt(info_files):
+    """Extract username/likes/post_date/caption from the first info.txt file,
+    if any. Pure — shared by both the immediate and ANALYSIS_MODE=batch paths."""
+    info = {"username": "", "likes": 0, "post_date": None, "caption": ""}
+    if not info_files:
+        return info
+    try:
+        with open(info_files[0], 'r', encoding='utf-8') as f:
+            content = f.read()
+            username_match = re.search(r'Username: @(\S+)', content)
+            likes_match = re.search(r'Likes: (\d+)', content)
+            date_match = re.search(r'Date: ([\d\-: ]+)', content)
+            caption_match = re.search(r'Caption:\n-+\n(.*?)\n-+\n', content, re.DOTALL)
+
+            if username_match:
+                info["username"] = username_match.group(1)
+            if likes_match:
+                info["likes"] = int(likes_match.group(1))
+            if date_match:
+                info["post_date"] = date_match.group(1)
+            if caption_match:
+                caption_text = caption_match.group(1).strip()
+                info["caption"] = "" if caption_text == "No caption" else caption_text
+    except Exception:
+        pass
+    return info
+
+
+def extract_instagram_thumbnail(jpg_files, mp4_files):
+    """Extract a base64 data-URI thumbnail: first downloaded jpg, or the
+    first frame of the first video via cv2. Pure (no DB/network I/O) —
+    shared by both the immediate and ANALYSIS_MODE=batch paths."""
+    if jpg_files:
+        print(f"🖼️  Saving thumbnail from {jpg_files[0].name}...")
+        return _jpg_to_thumbnail(jpg_files[0])
+    if mp4_files:
+        try:
+            import cv2
+            import base64
+            cap = cv2.VideoCapture(str(mp4_files[0]))
+            ret, frame = cap.read()
+            cap.release()
+            if ret:
+                h, w = frame.shape[:2]
+                new_w = 480
+                new_h = int(h * new_w / w)
+                frame = cv2.resize(frame, (new_w, new_h))
+                ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                if ok:
+                    encoded = base64.b64encode(buf.tobytes()).decode()
+                    print("🖼️  Saved first-frame thumbnail from video")
+                    return f"data:image/jpeg;base64,{encoded}"
+        except Exception as thumb_err:
+            print(f"⚠️  Could not extract video thumbnail: {thumb_err}")
+    return ""
 
 
 def run_script(script_name, args):
@@ -891,10 +884,58 @@ def main():
     
         analysis_elapsed = time.time() - analysis_start
         print(f"\n⏱️  Total Analysis Time: {analysis_elapsed:.1f}s")
-    
+
+        # === ANALYSIS_MODE=batch: submit the combined-summary call to
+        # OpenAI's Batch API (~50% cheaper, up to 24h turnaround) instead of
+        # calling it synchronously, persist everything needed to finish the
+        # pipeline later, and exit. This subprocess won't be alive when the
+        # batch completes — resumption happens in-process in api.py via
+        # core/batch_processor.check_and_advance_batches(), called on backend
+        # startup and from POST /batches/check, not from here.
+        if ANALYSIS_MODE == "batch":
+            print_header("📦 SUBMITTING TO OPENAI BATCH (summary)")
+            from core.model_router import get_router as _get_router
+
+            instagram_thumbnail = extract_instagram_thumbnail(jpg_files, mp4_files)
+            _info = parse_info_txt(info_files)
+            media_files = relocate_to_media_store(download_folder, shortcode)
+
+            visual_text = "\n\n".join([_clean_visual(r['output']) for r in results['visual']])
+            audio_text = "\n\n".join([_clean_audio(r['output']) for r in results['audio_transcription']])
+            text_text = "\n\n".join([_clean_text(r['output']) for r in results['text']])
+            transcription_backend = (
+                _audio_backend(results['audio_transcription'][0]['output'])
+                if results['audio_transcription'] else ""
+            )
+
+            prompt = build_final_summary_prompt(results, instagram_url, source_caption, source_hashtags)
+            router = _get_router()
+            batch_req = router.build_batch_chat_request(shortcode, prompt)
+            summary_batch_id = router.submit_openai_batch([batch_req], endpoint="/v1/chat/completions")
+
+            state = {
+                "source_caption": source_caption,
+                "source_hashtags": source_hashtags,
+                "username": _info["username"],
+                "likes": _info["likes"],
+                "post_date": _info["post_date"],
+                "caption": _info["caption"],
+                "media_files": media_files,
+                "visual_text": visual_text,
+                "audio_text": audio_text,
+                "text_text": text_text,
+                "transcription_backend": transcription_backend,
+                "thumbnail": instagram_thumbnail,
+                "music_identification": results.get('music_identification', []),
+                "content_type": "instagram",
+            }
+            db.enqueue_batch_job(shortcode, instagram_url, "instagram", summary_batch_id, json.dumps(state))
+            print(f"📦 Submitted to OpenAI batch (summary): {summary_batch_id}")
+            sys.exit(BATCH_EXIT_CODE)
+
         # Final comprehensive summary
         print_header("✅ GENERATING COMPREHENSIVE SUMMARY")
-    
+
         final_summary, model_used = generate_final_summary(results, instagram_url, source_caption, source_hashtags)
     
         print_section("📋 FINAL REPORT")
@@ -904,55 +945,14 @@ def main():
         title, summary_text, tags, music, category, language = parse_summary(final_summary)
     
         # OVERRIDE LLM MUSIC WITH DIRECT SHAZAM OUTPUT TO PRESERVE LINKS
-        if results.get('music_identification'):
-            for item in results['music_identification']:
-                out = item['output']
-                if 'Song:' in out:
-                    song = [l.split('Song:')[1].strip() for l in out.split('\n') if 'Song:' in l][0]
-                    artist_line = [l.split('Artist:')[1].strip() for l in out.split('\n') if 'Artist:' in l]
-                    artist = artist_line[0] if artist_line else 'Unknown'
-                    link = ""
-                    spot_line = [l.split('Spotify:')[1].strip() for l in out.split('\n') if 'Spotify:' in l]
-                    apple_line = [l.split('Apple Music:')[1].strip() for l in out.split('\n') if 'Apple Music:' in l]
-                    if spot_line:
-                        link = spot_line[0]
-                    elif apple_line:
-                        link = apple_line[0]
-                    music = f"{song} by {artist}"
-                    if link:
-                        music += f" | {link}"
-                    break
-                elif 'No match found' in out:
-                    music = "No music identified"
-                    break
+        music = apply_music_override(music, results.get('music_identification'))
 
-    
         # Get additional metadata from info.txt if available
-        username = ""
-        likes = 0
-        post_date = None
-        caption = ""
-
-        if info_files:
-            try:
-                with open(info_files[0], 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    username_match = re.search(r'Username: @(\S+)', content)
-                    likes_match = re.search(r'Likes: (\d+)', content)
-                    date_match = re.search(r'Date: ([\d\-: ]+)', content)
-                    caption_match = re.search(r'Caption:\n-+\n(.*?)\n-+\n', content, re.DOTALL)
-
-                    if username_match:
-                        username = username_match.group(1)
-                    if likes_match:
-                        likes = int(likes_match.group(1))
-                    if date_match:
-                        post_date = date_match.group(1)
-                    if caption_match:
-                        caption_text = caption_match.group(1).strip()
-                        caption = "" if caption_text == "No caption" else caption_text
-            except:
-                pass
+        _info = parse_info_txt(info_files)
+        username = _info["username"]
+        likes = _info["likes"]
+        post_date = _info["post_date"]
+        caption = _info["caption"]
 
         importance = score_importance(title, summary_text, tags, category, username)
 
@@ -968,34 +968,9 @@ def main():
             if results['audio_transcription'] else ""
         )
 
-        # — Instagram thumbnail: first downloaded jpg (converted to base64) —
-        instagram_thumbnail = ""
-        if jpg_files:
-            print(f"🖼️  Saving thumbnail from {jpg_files[0].name}...")
-            instagram_thumbnail = _jpg_to_thumbnail(jpg_files[0])
-        elif mp4_files:
-            # Try to extract first frame from the video using cv2
-            try:
-                import cv2
-                import base64
-                import tempfile
-                cap = cv2.VideoCapture(str(mp4_files[0]))
-                ret, frame = cap.read()
-                cap.release()
-                if ret:
-                    import cv2 as _cv2
-                    # Resize to 480 wide keeping aspect
-                    h, w = frame.shape[:2]
-                    new_w = 480
-                    new_h = int(h * new_w / w)
-                    frame = _cv2.resize(frame, (new_w, new_h))
-                    ok, buf = _cv2.imencode(".jpg", frame, [_cv2.IMWRITE_JPEG_QUALITY, 75])
-                    if ok:
-                        encoded = base64.b64encode(buf.tobytes()).decode()
-                        instagram_thumbnail = f"data:image/jpeg;base64,{encoded}"
-                        print("🖼️  Saved first-frame thumbnail from video")
-            except Exception as thumb_err:
-                print(f"⚠️  Could not extract video thumbnail: {thumb_err}")
+        # — Instagram thumbnail: first downloaded jpg (converted to base64), or
+        # first frame of the first video —
+        instagram_thumbnail = extract_instagram_thumbnail(jpg_files, mp4_files)
 
         # Generate an embedding for semantic search (best-effort — a failure here
         # shouldn't fail the whole analysis, the post just won't be

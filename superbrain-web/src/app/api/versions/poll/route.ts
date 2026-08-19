@@ -20,19 +20,26 @@ export async function GET(request: NextRequest) {
 
   try {
     // NOTE: deliberately not checking queueStatus.retry_queue — a shortcode
-    // that hit a quota/rate-limit failure gets parked there by main.py for
-    // ~24h before automatically retrying, which this endpoint treats the
-    // same as "not currently tracked" rather than "still pending". Its row
-    // was already hard-deleted when the bulk rescan started (see
-    // POST /reanalyze/bulk), so it won't appear in `finished` either until
-    // the retry actually succeeds — it just quietly drops out of the
-    // client's polling loop in the meantime, same as any other post that
-    // never got saved. A future improvement could surface retry_queue
-    // membership explicitly instead.
+    // that hit a quota/rate-limit failure gets parked there for ~24h before
+    // automatically retrying, which this endpoint treats the same as "not
+    // currently tracked" rather than "still pending". Unlike the old
+    // destructive rescan path, the post's row is NEVER deleted by a rescan
+    // (see backend/CLAUDE.md's "Rescan pipeline" section) — a rate-limited
+    // or failed rescan just leaves the existing row as-is, so it quietly
+    // drops out of the client's polling loop with its prior data intact,
+    // rather than disappearing. A future improvement could surface
+    // retry_queue membership explicitly instead of dropping it silently.
+    //
+    // rescan_batch_pending covers shortcodes submitted to a shared OpenAI
+    // batch job (ANALYSIS_MODE=batch) — they leave currently_processing/queue
+    // once submitted, so without this they'd be wrongly read as "finished"
+    // the moment local analyzer steps wrap up, well before the batch itself
+    // resolves.
     const queueStatus = await fetchQueueStatus();
     const stillPending = new Set([
       ...queueStatus.currently_processing,
       ...queueStatus.queue.map((q) => q.shortcode),
+      ...queueStatus.rescan_batch_pending.map((j) => j.shortcode),
     ]);
 
     const finishedShortcodes = shortcodes.filter((sc) => !stillPending.has(sc));

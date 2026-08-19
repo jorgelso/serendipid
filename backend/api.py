@@ -25,6 +25,34 @@ import threading
 import time
 from pathlib import Path
 
+
+def _load_env_file():
+    """Load backend/.env into the process environment, if present. Real env
+    vars (already set by the shell, a launcher script, or Docker) always
+    take precedence — this only fills in what's not already set, so it's a
+    no-op for anyone not using a .env file (the pre-existing behavior).
+    Hand-rolled instead of adding python-dotenv as a dependency for ~15
+    lines of parsing. Must run before any local module is imported below,
+    since some (e.g. core.database's DATABASE_PATH) read env vars at
+    import time."""
+    env_path = Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
+
+
+_load_env_file()
+
 # Import database module
 from core.database import get_db
 from core.link_checker import validate_link
@@ -58,6 +86,20 @@ TOKEN_FILE = Path(__file__).parent / "token.txt"
 # to give slower hardware (e.g. a Raspberry Pi falling back to local Whisper when
 # Groq is unavailable) enough headroom. Override via env var if needed.
 ANALYSIS_SUBPROCESS_TIMEOUT = int(os.getenv("ANALYSIS_SUBPROCESS_TIMEOUT", "1200"))
+
+# main.py reads its own copy of this (it's a separate subprocess) to decide
+# whether to submit the combined-summary call to OpenAI's Batch API instead
+# of calling it synchronously — see main.py and core/batch_processor.py.
+# Read here too, only for /queue-status reporting and to know whether the
+# exit-code-3 branches below are expected to ever fire.
+ANALYSIS_MODE = os.getenv("ANALYSIS_MODE", "immediate").strip().lower()
+
+# Same class of ceiling as ANALYSIS_SUBPROCESS_TIMEOUT above, but for a
+# single-shortcode `scripts/rescan_post.py <shortcode>` run (POST
+# /reanalyze/bulk's synchronous single-item path — see "Rescan pipeline" in
+# backend/CLAUDE.md). Not used for the --batch/background path, which has no
+# HTTP caller waiting on it and so has no timeout.
+RESCAN_SUBPROCESS_TIMEOUT = int(os.getenv("RESCAN_SUBPROCESS_TIMEOUT", "1200"))
 
 def load_or_create_api_token():
     """Load existing API token or create one if missing."""
@@ -201,6 +243,32 @@ if db.is_connected():
     if recovered > 0:
         logger.info(f"🔄 Recovered {recovered} interrupted items from previous session")
 
+# Check for any OpenAI batch jobs (ANALYSIS_MODE=batch) that completed while
+# this backend was offline. Runs once here (not periodically — batch mode is
+# checked on startup and on-demand only, see POST /batches/check below) in a
+# background thread so a slow OpenAI round-trip never delays server readiness.
+def _startup_batch_check():
+    try:
+        from core.batch_processor import check_and_advance_batches
+        result = check_and_advance_batches()
+        logger.info(f"📦 Startup batch check: {result}")
+    except Exception as e:
+        logger.error(f"Startup batch check failed: {e}")
+
+threading.Thread(target=_startup_batch_check, daemon=True).start()
+
+# Same idea, for the separate rescan-batch pipeline (core/rescan_batch_processor.py) —
+# a distinct check, not a call into check_and_advance_batches() above.
+def _startup_rescan_batch_check():
+    try:
+        from core.rescan_batch_processor import check_and_advance_rescan_batches
+        result = check_and_advance_rescan_batches()
+        logger.info(f"📦 Startup rescan-batch check: {result}")
+    except Exception as e:
+        logger.error(f"Startup rescan-batch check failed: {e}")
+
+threading.Thread(target=_startup_rescan_batch_check, daemon=True).start()
+
 # Background worker to process queue
 def queue_worker():
     """Background thread that processes queued items automatically"""
@@ -287,6 +355,14 @@ def queue_worker():
                         # main.py queued this item for retry — status already set in DB
                         logger.info(f"⏰ [{shortcode}] Quota exhausted — moved to retry queue")
                         db.remove_from_queue(shortcode)
+                    elif process.returncode == 3:
+                        # main.py submitted this item to OpenAI's Batch API
+                        # (ANALYSIS_MODE=batch) — db.enqueue_batch_job() already
+                        # set processing_queue.status='batch'. Do NOT remove it;
+                        # core/batch_processor.check_and_advance_batches() (run
+                        # on startup / POST /batches/check) finishes the item
+                        # later and removes the row itself once saved.
+                        logger.info(f"📦 [{shortcode}] Submitted to OpenAI batch — leaving as batch-pending")
                     else:
                         logger.error(f"❌ Queue item failed (rc={process.returncode}): {shortcode}")
                         db.remove_from_queue(shortcode)
@@ -605,6 +681,17 @@ async def _run_or_queue_analysis(
                 detail="Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours."
             )
 
+        if returncode == 3:
+            # main.py submitted this item to OpenAI's Batch API (ANALYSIS_MODE=batch).
+            # NOTE: Do NOT remove from queue here — main.py already called
+            # db.enqueue_batch_job() which set status='batch'. It's finished
+            # later by core/batch_processor.check_and_advance_batches().
+            logger.info(f"📦 [{shortcode}] Submitted for batch processing (lower cost, may take up to 24h).")
+            raise HTTPException(
+                status_code=202,
+                detail="Submitted for batch processing (lower cost, may take up to 24h). Check back later or trigger a manual batch check."
+            )
+
         if returncode != 0:
             # Extract last meaningful error line from stdout for the error message
             error_lines = [l.strip() for l in stdout.splitlines() if l.strip() and ('❌' in l or 'Error' in l or 'failed' in l.lower())]
@@ -802,68 +889,135 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 
+def _run_rescan_subprocess(args: list, timeout: int = None) -> tuple:
+    """Run scripts/rescan_post.py with the given argv (after the script
+    path) and return (returncode, stdout, stderr). Blocking — callers on the
+    single-item sync path use asyncio.to_thread() with `timeout` set; the
+    --batch background path (no HTTP caller waiting) calls this directly
+    with timeout=None from inside its own daemon thread."""
+    cmd = [sys.executable, "scripts/rescan_post.py"] + args
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            cwd=str(Path(__file__).parent),
+            timeout=timeout,
+        )
+        return result.returncode, result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        return None, "", f"rescan_post.py timed out after {timeout}s"
+
+
+def _spawn_rescan_batch_background(shortcodes: list):
+    """Fire-and-forget scripts/rescan_post.py --batch <shortcodes> — used by
+    the multi-shortcode branch below so the HTTP response never blocks on a
+    whole version cohort's worth of work."""
+    def _run():
+        try:
+            returncode, stdout, stderr = _run_rescan_subprocess(["--batch", ",".join(shortcodes)])
+            if returncode != 0:
+                logger.error(f"❌ [rescan-batch] --batch subprocess exited {returncode}: "
+                             f"{(stderr or stdout or '')[-500:]}")
+        except Exception as e:
+            logger.error(f"❌ [rescan-batch] --batch subprocess crashed: {e}")
+        finally:
+            # Safety net: scripts/rescan_post.py --batch removes each
+            # shortcode from processing_queue as it finishes one, but if the
+            # subprocess dies before reaching one, don't leave it stuck at
+            # status='processing' forever.
+            db = get_db()
+            still_processing = {p["shortcode"] for p in db.get_processing()}
+            for sc in shortcodes:
+                if sc in still_processing:
+                    db.remove_from_queue(sc)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 @app.post("/reanalyze/bulk", response_model=BulkReanalyzeResponse)
 async def reanalyze_bulk(request: BulkReanalyzeRequest, token: str = Depends(verify_token)):
     """
-    Rescan many posts at once — used to bring a whole cohort of stale
-    `analysis_version` posts up to date rather than one at a time.
+    Rescan one or many posts — the version-gap-aware, non-destructive rescan
+    pipeline (see "Rescan pipeline" in backend/CLAUDE.md and
+    scripts/rescan_post.py). Deliberately separate from first-time analysis:
+    never touches main.py or core/batch_processor.py, and never deletes a
+    row before a replacement is ready — every write goes through
+    db.save_analysis()'s existing upsert, so a rescan that fails partway
+    (Instagram content genuinely gone, an expired OpenAI batch request)
+    always leaves the original row exactly as it was.
 
     For each shortcode:
-    - If it's currently stamped exactly version 7, the gap to current is
-      purely the importance-scoring rubric fix (version 8) — apply that
-      cheap, synchronous, no-re-download fix (core.importance.score_and_stamp_importance,
-      the same helper scripts/score_importance.py uses) and report it under
-      `rescored`. This is the ONLY version for which a cheap fix is
-      sufficient: every earlier version's gap to current also includes
-      version 7's own caption/media-mismatch fix, which has no cheap
-      backfill and requires a full re-analysis regardless.
-    - Otherwise, hard-delete the cached row and queue a full re-analysis via
-      the same _run_or_queue_analysis() helper POST /analyze uses, forced to
-      queue (run_inline=False) rather than run inline so this endpoint's
-      response never blocks on one item's multi-minute subprocess — the
-      background queue_worker() thread processes the queue one item at a
-      time regardless of how it got queued.
-
-    Any shortcode not found in the database, or whose cheap/full attempt
-    fails, is reported under `errors` rather than aborting the whole batch.
+    - Not found -> `errors`.
+    - Stamped exactly version 7 (the one version whose gap to current is
+      purely the importance-scoring rubric fix) -> cheap, synchronous,
+      no-redownload fix via core.importance.score_and_stamp_importance ->
+      `rescored`.
+    - A single non-cheap shortcode -> spawn `scripts/rescan_post.py
+      <shortcode>` and AWAIT it (bounded by RESCAN_SUBPROCESS_TIMEOUT) —
+      individual rescans are always synchronous, so the caller gets an
+      immediate result -> `rescored` on success, `errors` on failure/timeout
+      (the row is never touched on a failure path, so there's nothing to
+      clean up).
+    - Multiple non-cheap shortcodes -> marked `processing` (the existing
+      generic queue primitive, for GET /queue-status visibility) and handed
+      to `scripts/rescan_post.py --batch <shortcodes>` as a background,
+      un-awaited subprocess -> `queued`. Progress is polled via
+      GET /queue-status (`currently_processing` while local analyzer steps
+      run, then `rescan_batch_pending` once submitted to OpenAI under
+      ANALYSIS_MODE=batch).
     """
     db = get_db()
     rescored: List[str] = []
     queued: List[str] = []
     errors: List[BulkReanalyzeError] = []
 
+    cheap, full = [], []
     for shortcode in request.shortcodes:
-        try:
+        row = db.check_cache(shortcode)
+        if not row:
+            errors.append(BulkReanalyzeError(shortcode=shortcode, error="Post not found"))
+            continue
+        if row.get("analysis_version") == 7:
+            cheap.append((shortcode, row))
+        else:
+            full.append(shortcode)
+
+    for shortcode, row in cheap:
+        importance = score_and_stamp_importance(
+            db, shortcode, row.get("title"), row.get("summary"),
+            row.get("tags"), row.get("category"), row.get("username"),
+        )
+        if importance is None:
+            errors.append(BulkReanalyzeError(
+                shortcode=shortcode, error="No parseable importance score returned"
+            ))
+        else:
+            rescored.append(shortcode)
+
+    if len(full) == 1:
+        shortcode = full[0]
+        returncode, stdout, stderr = await asyncio.to_thread(
+            _run_rescan_subprocess, [shortcode], RESCAN_SUBPROCESS_TIMEOUT
+        )
+        if returncode == 0:
+            rescored.append(shortcode)
+        elif returncode == 2:
+            errors.append(BulkReanalyzeError(
+                shortcode=shortcode,
+                error="Rate-limited by Instagram — automatically queued for retry in 24h; existing data untouched",
+            ))
+        else:
+            tail = (stderr or stdout or "").strip()[-300:]
+            reason = f"timed out after {RESCAN_SUBPROCESS_TIMEOUT}s" if returncode is None else f"failed ({tail})"
+            errors.append(BulkReanalyzeError(
+                shortcode=shortcode, error=f"Rescan {reason}; existing data untouched",
+            ))
+    elif full:
+        for shortcode in full:
             row = db.check_cache(shortcode)
-            if not row:
-                errors.append(BulkReanalyzeError(shortcode=shortcode, error="Post not found"))
-                continue
-
-            if row.get("analysis_version") == 7:
-                importance = score_and_stamp_importance(
-                    db, shortcode, row.get("title"), row.get("summary"),
-                    row.get("tags"), row.get("category"), row.get("username"),
-                )
-                if importance is None:
-                    errors.append(BulkReanalyzeError(
-                        shortcode=shortcode, error="No parseable importance score returned"
-                    ))
-                else:
-                    rescored.append(shortcode)
-                continue
-
-            db.hard_delete_post(shortcode)
-            outcome = await _run_or_queue_analysis(
-                shortcode, row.get("url"), row.get("content_type", "instagram"), run_inline=False
-            )
-            # run_inline=False guarantees outcome["status"] == "queued" —
-            # _run_or_queue_analysis only returns "ran" when run_inline=True
-            # and a slot was free.
-            queued.append(shortcode)
-        except HTTPException as e:
-            errors.append(BulkReanalyzeError(shortcode=shortcode, error=str(e.detail)))
-        except Exception as e:
-            errors.append(BulkReanalyzeError(shortcode=shortcode, error=str(e)))
+            db.mark_processing(shortcode, row.get("url"), row.get("content_type", "instagram"))
+        _spawn_rescan_batch_background(full)
+        queued.extend(full)
 
     return BulkReanalyzeResponse(success=True, rescored=rescored, queued=queued, errors=errors)
 
@@ -1573,8 +1727,10 @@ async def queue_status(token: str = Depends(verify_token)):
         db = get_db()
         processing = db.get_processing()
         queue = db.get_queue()
-        
+
         retry_queue = db.get_retry_queue()
+        batch_jobs = db.get_batch_jobs()
+        rescan_batch_jobs = db.get_rescan_batch_jobs()
         return {
             "currently_processing": processing,
             "processing_count": len(processing),
@@ -1582,6 +1738,15 @@ async def queue_status(token: str = Depends(verify_token)):
             "queue_count": len(queue),
             "retry_queue": retry_queue,
             "retry_count": len(retry_queue),
+            "batch_pending": batch_jobs,
+            "batch_count": len(batch_jobs),
+            # In-flight rescan-pipeline batch jobs (core/rescan_batch_processor.py)
+            # — a separate surface from batch_pending above, since a rescan
+            # target is never in processing_queue once it reaches this state
+            # (see enqueue_rescan_batch_job's comment in core/database.py).
+            "rescan_batch_pending": rescan_batch_jobs,
+            "rescan_batch_count": len(rescan_batch_jobs),
+            "analysis_mode": ANALYSIS_MODE,
             "max_concurrent": max_concurrent,
             "available_slots": max(0, max_concurrent - len(processing))
         }
@@ -1591,6 +1756,42 @@ async def queue_status(token: str = Depends(verify_token)):
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+
+@app.post("/batches/check")
+async def check_batches(token: str = Depends(verify_token)):
+    """
+    Manually trigger a check of in-flight OpenAI Batch API jobs
+    (ANALYSIS_MODE=batch): advances completed summary batches to importance+
+    embedding batches, and finalizes items whose scoring batches are done
+    into the `analyses` table. This is the only way (besides the automatic
+    startup check) that batch-pending items make progress — there is no
+    periodic polling. Called by the "Check batches" button in superbrain-web.
+    """
+    try:
+        from core.batch_processor import check_and_advance_batches
+        result = await asyncio.to_thread(check_and_advance_batches)
+        return {"success": True, "analysis_mode": ANALYSIS_MODE, **result}
+    except Exception as e:
+        logger.error(f"Batch check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rescan/batches/check")
+async def check_rescan_batches(token: str = Depends(verify_token)):
+    """
+    Same idea as POST /batches/check, but for the separate rescan pipeline's
+    OpenAI Batch API jobs (core/rescan_batch_processor.py) — see "Rescan
+    pipeline" in backend/CLAUDE.md. Distinct route/function/table from
+    POST /batches/check on purpose; the two pipelines don't share state.
+    """
+    try:
+        from core.rescan_batch_processor import check_and_advance_rescan_batches
+        result = await asyncio.to_thread(check_and_advance_rescan_batches)
+        return {"success": True, "analysis_mode": ANALYSIS_MODE, **result}
+    except Exception as e:
+        logger.error(f"Rescan batch check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/post/{shortcode}")

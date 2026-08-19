@@ -71,6 +71,16 @@ RANKING_WEIGHTS = {
     "provider_trust": 0.10,  # Prefer known providers
 }
 
+# The OpenAI model used for the router's primary "openai" provider slot —
+# text, vision, chat, batch-mode summary requests, and importance scoring
+# (see generate_importance_text()) all resolve to this one value, so
+# switching models is a single config change rather than several. GPT-4.1
+# and GPT-5.6 Luna are both known-good here (both support vision, both
+# handled correctly by _openai_chat_params() below); other OpenAI chat
+# models should work too as long as they accept the same request shape.
+# Override with OPENAI_TEXT_MODEL=gpt-5.6-luna (or similar) to switch.
+OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4.1")
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  MODEL REGISTRY
 #  Each entry defines the key, provider, model ID, task type, and base priority.
@@ -82,10 +92,10 @@ MODELS: List[Dict[str, Any]] = [
     {
         "key": "openai_gpt41",
         "provider": "openai",
-        "model_id": "gpt-4.1",
+        "model_id": OPENAI_TEXT_MODEL,
         "type": "text",
         "base_priority": 0,
-        "desc": "OpenAI GPT-4.1 — primary provider (paid, tried first when configured)",
+        "desc": f"OpenAI {OPENAI_TEXT_MODEL} — primary provider (paid, tried first when configured)",
     },
     {
         "key": "groq_gpt_oss_20b",
@@ -341,10 +351,10 @@ MODELS: List[Dict[str, Any]] = [
     {
         "key": "openai_gpt41_vision",
         "provider": "openai",
-        "model_id": "gpt-4.1",
+        "model_id": OPENAI_TEXT_MODEL,
         "type": "vision",
         "base_priority": 0,
-        "desc": "OpenAI GPT-4.1 Vision — primary provider (paid, tried first when configured)",
+        "desc": f"OpenAI {OPENAI_TEXT_MODEL} Vision — primary provider (paid, tried first when configured)",
     },
     {
         "key": "gemini_25_flash_vision",
@@ -508,11 +518,11 @@ MODELS: List[Dict[str, Any]] = [
     {
         "key": "chat_openai_gpt41",
         "provider": "openai",
-        "model_id": "gpt-4.1",
+        "model_id": OPENAI_TEXT_MODEL,
         "type": "chat",
         "base_priority": 1,
         "key_name": "OPENAI_CHAT_API_KEY",
-        "desc": "OpenAI GPT-4.1 (dedicated chatbot key) — second fallback for RAG chatbot",
+        "desc": f"OpenAI {OPENAI_TEXT_MODEL} (dedicated chatbot key) — second fallback for RAG chatbot",
     },
     {
         "key": "chat_local_qwen3",
@@ -1112,6 +1122,22 @@ class ModelRouter:
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
 
+    @staticmethod
+    def _openai_chat_params(model_id: str, max_tokens: int = 4000) -> Dict:
+        """
+        Build the token-limit/temperature portion of an OpenAI chat-completions
+        request body, accounting for the GPT-5.x family's stricter API surface:
+        those models reject the legacy 'max_tokens' param (need
+        'max_completion_tokens' instead) and reject any non-default
+        'temperature' value. GPT-4.1 and earlier accept 'max_completion_tokens'
+        too, so it's used unconditionally; 'temperature' is only sent for
+        pre-GPT-5 models.
+        """
+        params: Dict[str, Any] = {"max_completion_tokens": max_tokens}
+        if not model_id.startswith("gpt-5"):
+            params["temperature"] = 0.7
+        return params
+
     def _openai_text(self, model_id: str, prompt: str, api_key: Optional[str] = None) -> str:
         import requests
         resp = requests.post(
@@ -1123,8 +1149,7 @@ class ModelRouter:
             json={
                 "model": model_id,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 4000,
-                "temperature": 0.7,
+                **self._openai_chat_params(model_id),
             },
             timeout=60,
         )
@@ -1151,8 +1176,7 @@ class ModelRouter:
             json={
                 "model": model_id,
                 "messages": [{"role": "user", "content": content}],
-                "max_tokens": 4000,
-                "temperature": 0.7,
+                **self._openai_chat_params(model_id),
             },
             timeout=90,
         )
@@ -1232,12 +1256,12 @@ class ModelRouter:
 
     def generate_importance_text(self, prompt: str) -> str:
         """
-        Score a post's importance using OpenAI GPT-4.1 specifically, bypassing
-        the latency-ranked fallback order that generate_text() uses. Importance
-        needs *consistent* judgment across posts more than it needs speed —
-        letting the provider drift to whichever model answers fastest at that
-        moment (as happens for every other field in the combined summary
-        prompt) produced visibly inconsistent scores between posts of
+        Score a post's importance using OPENAI_TEXT_MODEL specifically,
+        bypassing the latency-ranked fallback order that generate_text() uses.
+        Importance needs *consistent* judgment across posts more than it needs
+        speed — letting the provider drift to whichever model answers fastest
+        at that moment (as happens for every other field in the combined
+        summary prompt) produced visibly inconsistent scores between posts of
         comparable depth. Falls back to the standard ranked text order only if
         OpenAI is unavailable or fails, so scoring doesn't hard-break for
         setups without an OpenAI key.
@@ -1245,7 +1269,7 @@ class ModelRouter:
         if self._is_available("openai_gpt41"):
             t0 = time.time()
             try:
-                result = self._openai_text("gpt-4.1", prompt)
+                result = self._openai_text(OPENAI_TEXT_MODEL, prompt)
                 self._record_success("openai_gpt41", time.time() - t0)
                 return result
             except Exception as e:
@@ -1376,6 +1400,134 @@ class ModelRouter:
             return resp.json()["data"][0]["embedding"]
         except Exception as e:
             print(f"  ⚠️  Embedding generation failed: {e}", flush=True)
+            return None
+
+    # ── OpenAI Batch API (ANALYSIS_MODE=batch) ───────────────────────────────────
+    # Batch mode is OpenAI-only by construction — no other configured provider
+    # (Groq/Gemini/OpenRouter/Ollama) has an equivalent async batch endpoint —
+    # so, like generate_importance_text() above, these bypass _ranked_models()
+    # entirely rather than trying to generalize across providers that don't
+    # support this. One JSONL line per submission (one shortcode's request),
+    # not accumulated multi-item batches — simpler, and OpenAI's ~50% batch
+    # discount applies per-request regardless of how many requests share a job.
+
+    def build_batch_chat_request(self, custom_id: str, prompt: str, model_id: str = OPENAI_TEXT_MODEL) -> Dict:
+        """One /v1/chat/completions batch request line, body mirrors _openai_text()."""
+        return {
+            "custom_id": custom_id,
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": model_id,
+                "messages": [{"role": "user", "content": prompt}],
+                **self._openai_chat_params(model_id),
+            },
+        }
+
+    def build_batch_embedding_request(self, custom_id: str, text: str,
+                                       model_id: str = "text-embedding-3-small") -> Dict:
+        """One /v1/embeddings batch request line, body mirrors generate_embedding()."""
+        return {
+            "custom_id": custom_id,
+            "method": "POST",
+            "url": "/v1/embeddings",
+            "body": {"model": model_id, "input": text[:8000]},
+        }
+
+    def submit_openai_batch(self, requests_list: List[Dict], endpoint: str) -> str:
+        """
+        Upload `requests_list` (each built by build_batch_chat_request /
+        build_batch_embedding_request) as a JSONL file and submit it as an
+        OpenAI Batch API job targeting `endpoint` (exactly one of
+        "/v1/chat/completions" or "/v1/embeddings" — a batch job is
+        single-endpoint, mixed request types must be submitted separately).
+        Returns the batch id. Raises RuntimeError on failure — batch mode has
+        no fallback provider to try next.
+        """
+        import requests
+        api_key = self._key("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY not configured — batch mode requires OpenAI.")
+
+        jsonl_body = "\n".join(json.dumps(r) for r in requests_list).encode("utf-8")
+        file_resp = requests.post(
+            "https://api.openai.com/v1/files",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": ("batch_input.jsonl", jsonl_body, "application/jsonl")},
+            data={"purpose": "batch"},
+            timeout=60,
+        )
+        file_resp.raise_for_status()
+        input_file_id = file_resp.json()["id"]
+
+        batch_resp = requests.post(
+            "https://api.openai.com/v1/batches",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "input_file_id": input_file_id,
+                "endpoint": endpoint,
+                "completion_window": "24h",
+            },
+            timeout=30,
+        )
+        batch_resp.raise_for_status()
+        return batch_resp.json()["id"]
+
+    def get_batch_status(self, batch_id: str) -> Dict:
+        """GET /v1/batches/{id} — raw response so callers branch on `status`
+        themselves (validating|in_progress|finalizing|completed|failed|expired|cancelled)."""
+        import requests
+        resp = requests.get(
+            f"https://api.openai.com/v1/batches/{batch_id}",
+            headers={"Authorization": f"Bearer {self._key('OPENAI_API_KEY')}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_batch_results(self, batch_id: str) -> List[Dict]:
+        """
+        For a batch whose status is terminal, fetch and parse its output file
+        (successful requests) and, if present, its error file (per-request
+        failures within an otherwise-completed batch). Returns the raw parsed
+        JSONL rows — each {"custom_id": ..., "response": {...}} or
+        {"custom_id": ..., "error": {...}}. Callers extract endpoint-specific
+        content via extract_batch_chat_text()/extract_batch_embedding().
+        """
+        import requests
+        api_key = self._key("OPENAI_API_KEY")
+        status = self.get_batch_status(batch_id)
+        rows: List[Dict] = []
+        for file_field in ("output_file_id", "error_file_id"):
+            file_id = status.get(file_field)
+            if not file_id:
+                continue
+            resp = requests.get(
+                f"https://api.openai.com/v1/files/{file_id}/content",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=60,
+            )
+            resp.raise_for_status()
+            for line in resp.text.strip().splitlines():
+                if line.strip():
+                    rows.append(json.loads(line))
+        return rows
+
+    def extract_batch_chat_text(self, result_row: Dict) -> Optional[str]:
+        """Pull the chat-completion content out of one get_batch_results() row, or None on error."""
+        try:
+            return result_row["response"]["body"]["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    def extract_batch_embedding(self, result_row: Dict) -> Optional[List[float]]:
+        """Pull the embedding vector out of one get_batch_results() row, or None on error."""
+        try:
+            return result_row["response"]["body"]["data"][0]["embedding"]
+        except (KeyError, IndexError, TypeError):
             return None
 
     # ── Utilities ──────────────────────────────────────────────────────────────

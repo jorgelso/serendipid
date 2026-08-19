@@ -1,5 +1,6 @@
 import { getConfig } from "./config";
 import type {
+  BatchCheckResponse,
   BulkReanalyzeResponse,
   CategoriesResponse,
   ChangelogResponse,
@@ -172,6 +173,27 @@ export async function deletePost(shortcode: string): Promise<DeletePostResponse>
 
 export async function fetchQueueStatus(): Promise<QueueStatusResponse> {
   return request<QueueStatusResponse>("/queue-status");
+}
+
+// Longer timeout than the default — this can involve several OpenAI
+// round-trips server-side (one per in-flight batch job being checked).
+const BATCH_CHECK_TIMEOUT_MS = 60 * 1000;
+
+export async function checkBatches(): Promise<BatchCheckResponse> {
+  return request<BatchCheckResponse>("/batches/check", {
+    method: "POST",
+    timeoutMs: BATCH_CHECK_TIMEOUT_MS,
+  });
+}
+
+// Same idea, but for the separate rescan pipeline's OpenAI batch jobs (see
+// backend/core/rescan_batch_processor.py) — distinct endpoint, distinct
+// table, on purpose.
+export async function checkRescanBatches(): Promise<BatchCheckResponse> {
+  return request<BatchCheckResponse>("/rescan/batches/check", {
+    method: "POST",
+    timeoutMs: BATCH_CHECK_TIMEOUT_MS,
+  });
 }
 
 // Unlike reanalyzePost(), this returns almost immediately — the backend

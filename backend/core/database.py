@@ -328,6 +328,74 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # batch_jobs — resume state for ANALYSIS_MODE=batch (see main.py /
+        # core/batch_processor.py). main.py runs as a subprocess and exits
+        # right after submitting an OpenAI Batch API job, so everything
+        # needed to finish the pipeline later (visual/audio/text extracts,
+        # caption/hashtags, thumbnail, media_files, and — once phase 1
+        # resolves — the parsed title/summary/tags/category) has to be
+        # persisted here rather than kept in memory. Deliberately a separate
+        # table rather than extra columns on processing_queue: every existing
+        # processing_queue caller (add_to_queue, get_queue, mark_processing,
+        # recover_interrupted_items, ...) assumes a small flat row, and this
+        # needs a multi-KB JSON blob plus a two-phase / two-sub-batch-id state
+        # machine. processing_queue still gets one lightweight row per
+        # in-flight item (status='batch', set by enqueue_batch_job below) so
+        # existing queue-status visibility keeps working; that status is
+        # deliberately distinct from 'processing' so recover_interrupted_items()
+        # (which unconditionally resets 'processing' rows back to 'queued' on
+        # every startup) never touches an in-flight batch job.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS batch_jobs (
+                shortcode            TEXT PRIMARY KEY,
+                url                  TEXT,
+                content_type         TEXT DEFAULT 'instagram',
+                phase                TEXT DEFAULT 'summary_pending',
+                summary_batch_id     TEXT,
+                importance_batch_id  TEXT,
+                embedding_batch_id   TEXT,
+                state_json           TEXT,
+                created_at           TEXT,
+                updated_at           TEXT,
+                last_error           TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_batch_jobs_phase ON batch_jobs (phase);
+        """)
+        self._conn.commit()
+
+        # rescan_batch_jobs — same two-phase shape as batch_jobs above, but
+        # for the rescan pipeline (core/rescan_batch_processor.py,
+        # scripts/rescan_post.py --batch), which is deliberately separate
+        # from first-time analysis (see backend/CLAUDE.md's "Rescan
+        # pipeline" section). A SEPARATE table rather than a discriminator
+        # column on batch_jobs: every existing batch_jobs caller
+        # (get_batch_jobs, advance_batch_job, check_and_advance_batches's two
+        # loops) assumes one row per shortcode with a summary_batch_id
+        # unique to it. A rescan of a whole version cohort needs many
+        # shortcodes sharing ONE summary_batch_id (one shared OpenAI batch
+        # job covering the whole cohort, not one job per post) — reusing
+        # batch_jobs would force every existing caller to filter around rows
+        # shaped differently than they expect, exactly what keeping the two
+        # pipelines separate is meant to avoid.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS rescan_batch_jobs (
+                shortcode            TEXT PRIMARY KEY,
+                url                  TEXT,
+                content_type         TEXT DEFAULT 'instagram',
+                phase                TEXT DEFAULT 'summary_pending',
+                summary_batch_id     TEXT,
+                importance_batch_id  TEXT,
+                embedding_batch_id   TEXT,
+                state_json           TEXT,
+                created_at           TEXT,
+                updated_at           TEXT,
+                last_error           TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_rescan_batch_jobs_phase ON rescan_batch_jobs (phase);
+            CREATE INDEX IF NOT EXISTS idx_rescan_batch_jobs_summary_batch_id ON rescan_batch_jobs (summary_batch_id);
+        """)
+        self._conn.commit()
+
         # Collections table
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
@@ -1659,7 +1727,259 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error recovering items: {e}")
             return 0
-    
+
+    # ==================== BATCH PROCESSING (ANALYSIS_MODE=batch) ====================
+
+    def enqueue_batch_job(self, shortcode: str, url: str, content_type: str,
+                           summary_batch_id: str, state_json: str) -> bool:
+        """
+        Record a freshly-submitted OpenAI Batch API job for the combined
+        summary call, and mark the item as in-flight in processing_queue
+        (status='batch') so it's excluded from get_queue()/get_processing()
+        without being lost from view entirely. Single call site for both
+        writes, mirroring queue_for_retry()'s shape.
+        """
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute("""
+                INSERT INTO batch_jobs
+                    (shortcode, url, content_type, phase, summary_batch_id,
+                     state_json, created_at, updated_at)
+                VALUES (?, ?, ?, 'summary_pending', ?, ?, ?, ?)
+                ON CONFLICT(shortcode) DO UPDATE SET
+                    url               = excluded.url,
+                    content_type      = excluded.content_type,
+                    phase             = 'summary_pending',
+                    summary_batch_id  = excluded.summary_batch_id,
+                    importance_batch_id = NULL,
+                    embedding_batch_id  = NULL,
+                    state_json        = excluded.state_json,
+                    updated_at        = excluded.updated_at,
+                    last_error        = NULL
+            """, (shortcode, url, content_type, summary_batch_id, state_json, now, now))
+            self._conn.execute("""
+                INSERT INTO processing_queue
+                    (shortcode, url, content_type, status, position, added_at, started_at, updated_at)
+                VALUES (?, ?, ?, 'batch', 0, ?, ?, ?)
+                ON CONFLICT(shortcode) DO UPDATE SET
+                    status     = 'batch',
+                    started_at = excluded.started_at,
+                    updated_at = excluded.updated_at
+            """, (shortcode, url, content_type, now, now, now))
+            self._conn.commit()
+            print(f"📦 Submitted batch job for {shortcode}: {summary_batch_id}")
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error enqueuing batch job: {e}")
+            return False
+
+    def get_batch_jobs(self, phase: str = None):
+        """Return batch_jobs rows, optionally filtered by phase."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            if phase:
+                cur.execute("SELECT * FROM batch_jobs WHERE phase = ? ORDER BY created_at", (phase,))
+            else:
+                cur.execute("SELECT * FROM batch_jobs ORDER BY created_at")
+            return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting batch jobs: {e}")
+            return []
+
+    def advance_batch_job(self, shortcode: str, phase: str,
+                           importance_batch_id: str = None,
+                           embedding_batch_id: str = None,
+                           state_json: str = None) -> bool:
+        """Move a batch job to a new phase (e.g. 'summary_pending' -> 'scoring_pending'),
+        recording the follow-up batch ids and the enriched resume state."""
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute("""
+                UPDATE batch_jobs
+                SET phase = ?, importance_batch_id = ?, embedding_batch_id = ?,
+                    state_json = COALESCE(?, state_json), updated_at = ?
+                WHERE shortcode = ?
+            """, (phase, importance_batch_id, embedding_batch_id, state_json, now, shortcode))
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error advancing batch job: {e}")
+            return False
+
+    def mark_batch_job_error(self, shortcode: str, error: str) -> bool:
+        """Best-effort observability write — does not change phase."""
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE batch_jobs SET last_error = ?, updated_at = ? WHERE shortcode = ?",
+                (error, now, shortcode)
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error recording batch job error: {e}")
+            return False
+
+    def delete_batch_job(self, shortcode: str) -> bool:
+        """Remove a batch_jobs row on final success or hard failure."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute("DELETE FROM batch_jobs WHERE shortcode = ?", (shortcode,))
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error deleting batch job: {e}")
+            return False
+
+    # ==================== RESCAN BATCH PROCESSING ====================
+    # Mirrors the batch_jobs methods above exactly in shape — see
+    # rescan_batch_jobs's comment in _create_tables for why this is a
+    # separate table rather than a variant of batch_jobs. Unlike
+    # enqueue_batch_job(), this does NOT touch processing_queue: a rescan
+    # never put the shortcode in processing_queue as status='batch' (it
+    # isn't first-analysis machinery), it was there as plain
+    # status='processing' while scripts/rescan_post.py did its local work —
+    # so this instead just removes that row (remove_from_queue), and
+    # GET /queue-status surfaces in-flight rescan batches from
+    # get_rescan_batch_jobs() directly instead.
+
+    def enqueue_rescan_batch_job(self, shortcode: str, url: str, content_type: str,
+                                  summary_batch_id: str, state_json: str) -> bool:
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute("""
+                INSERT INTO rescan_batch_jobs
+                    (shortcode, url, content_type, phase, summary_batch_id,
+                     state_json, created_at, updated_at)
+                VALUES (?, ?, ?, 'summary_pending', ?, ?, ?, ?)
+                ON CONFLICT(shortcode) DO UPDATE SET
+                    url                 = excluded.url,
+                    content_type        = excluded.content_type,
+                    phase               = 'summary_pending',
+                    summary_batch_id    = excluded.summary_batch_id,
+                    importance_batch_id = NULL,
+                    embedding_batch_id  = NULL,
+                    state_json          = excluded.state_json,
+                    updated_at          = excluded.updated_at,
+                    last_error          = NULL
+            """, (shortcode, url, content_type, summary_batch_id, state_json, now, now))
+            self._conn.commit()
+            self.remove_from_queue(shortcode)
+            print(f"📦 Submitted rescan batch job for {shortcode}: {summary_batch_id}")
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error enqueuing rescan batch job: {e}")
+            return False
+
+    def get_rescan_batch_jobs(self, phase: str = None):
+        """Return rescan_batch_jobs rows, optionally filtered by phase."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            if phase:
+                cur.execute("SELECT * FROM rescan_batch_jobs WHERE phase = ? ORDER BY created_at", (phase,))
+            else:
+                cur.execute("SELECT * FROM rescan_batch_jobs ORDER BY created_at")
+            return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting rescan batch jobs: {e}")
+            return []
+
+    def get_rescan_batch_jobs_by_summary_batch_id(self, summary_batch_id: str):
+        """The grouping query core/rescan_batch_processor.py uses to advance
+        every shortcode sharing one OpenAI batch job together, rather than
+        one at a time."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT * FROM rescan_batch_jobs WHERE summary_batch_id = ? ORDER BY created_at",
+                (summary_batch_id,)
+            )
+            return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting rescan batch jobs by summary_batch_id: {e}")
+            return []
+
+    def advance_rescan_batch_job(self, shortcode: str, phase: str,
+                                  importance_batch_id: str = None,
+                                  embedding_batch_id: str = None,
+                                  state_json: str = None) -> bool:
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute("""
+                UPDATE rescan_batch_jobs
+                SET phase = ?, importance_batch_id = ?, embedding_batch_id = ?,
+                    state_json = COALESCE(?, state_json), updated_at = ?
+                WHERE shortcode = ?
+            """, (phase, importance_batch_id, embedding_batch_id, state_json, now, shortcode))
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error advancing rescan batch job: {e}")
+            return False
+
+    def mark_rescan_batch_job_error(self, shortcode: str, error: str) -> bool:
+        """Best-effort observability write — does not change phase."""
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE rescan_batch_jobs SET last_error = ?, updated_at = ? WHERE shortcode = ?",
+                (error, now, shortcode)
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error recording rescan batch job error: {e}")
+            return False
+
+    def delete_rescan_batch_job(self, shortcode: str) -> bool:
+        """Remove a rescan_batch_jobs row on final success or failure. On
+        failure this deliberately does NOT touch the analyses row — see
+        backend/CLAUDE.md's "Rescan pipeline" section for why that's correct
+        here even though delete_batch_job's first-analysis equivalent
+        re-queues a real retry."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute("DELETE FROM rescan_batch_jobs WHERE shortcode = ?", (shortcode,))
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error deleting rescan batch job: {e}")
+            return False
+
+    def get_posts_by_shortcodes(self, shortcodes: list) -> list:
+        """Batch-fetch full analyses rows for a list of shortcodes (used by
+        the rescan endpoints instead of N separate check_cache() calls)."""
+        if not self.is_connected() or not shortcodes:
+            return []
+        try:
+            placeholders = ",".join("?" for _ in shortcodes)
+            cur = self._conn.cursor()
+            cur.execute(f"SELECT * FROM analyses WHERE shortcode IN ({placeholders})", shortcodes)
+            return [self._row_to_dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting posts by shortcodes: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Post management
     # ------------------------------------------------------------------

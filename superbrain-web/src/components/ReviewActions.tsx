@@ -19,7 +19,6 @@ type State = "idle" | "reanalyzing" | "marking" | "done" | "error";
 
 export default function ReviewActions({
   shortcode,
-  url,
   analysisVersion,
   rescanMode = "full",
 }: ReviewActionsProps) {
@@ -50,18 +49,22 @@ export default function ReviewActions({
     setState("reanalyzing");
     setMessage(null);
     try {
-      if (rescanMode === "cheap") {
-        const data = await post("/api/reanalyze/bulk", { shortcodes: [shortcode] }, "Fix failed.");
-        if (data.errors?.length) {
-          throw new Error(data.errors[0]?.error ?? "Fix failed.");
-        }
-        setState("done");
-        setMessage("Fixed — refresh to see the update.");
-      } else {
-        await post("/api/reanalyze", { url }, "Re-analysis failed.");
-        setState("done");
-        setMessage("Re-analyzed — refresh to see the update.");
+      // Both modes now go through the same non-destructive rescan pipeline
+      // (POST /reanalyze/bulk — see backend/CLAUDE.md's "Rescan pipeline"
+      // section) rather than "full" hitting the old POST /analyze
+      // {force:true} path, which used to hard-delete the row before
+      // re-downloading. A single-shortcode call is always handled
+      // synchronously by the backend, so this still returns promptly.
+      const data = await post(
+        "/api/reanalyze/bulk",
+        { shortcodes: [shortcode] },
+        rescanMode === "cheap" ? "Fix failed." : "Re-analysis failed."
+      );
+      if (data.errors?.length) {
+        throw new Error(data.errors[0]?.error ?? (rescanMode === "cheap" ? "Fix failed." : "Re-analysis failed."));
       }
+      setState("done");
+      setMessage(rescanMode === "cheap" ? "Fixed — refresh to see the update." : "Re-analyzed — refresh to see the update.");
     } catch (err) {
       setState("error");
       setMessage(err instanceof Error ? err.message : "Re-analysis failed.");

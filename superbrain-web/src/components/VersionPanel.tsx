@@ -191,8 +191,9 @@ export default function VersionPanel({ summary, filters, isActive, initialPosts,
           <div className="mt-3 rounded-xl bg-yellow-soft px-3 py-2 text-xs font-bold text-yellow-ink">
             Rescanning {queuedShortcodes.length} reel{queuedShortcodes.length === 1 ? "" : "s"}
             {rescoredCount > 0 ? ` (+${rescoredCount} fixed instantly)` : ""} — {finishedCount} of{" "}
-            {queuedShortcodes.length} done so far. Only one reel is processed at a time, so this can take a
-            while; check back later.
+            {queuedShortcodes.length} done so far. This can take a while — reels are processed one at a
+            time, or (if batch mode is enabled on the backend) as a single shared job that may take up to
+            24 hours; check back later.
           </div>
         )}
       </div>
@@ -220,10 +221,13 @@ export default function VersionPanel({ summary, filters, isActive, initialPosts,
         <ConfirmDialog
           title={`Rescan all of version ${summary.version}?`}
           message={
-            `This will re-download and reprocess ${summary.shortcodes.length} reel${
+            `This will reprocess ${summary.shortcodes.length} reel${
               summary.shortcodes.length === 1 ? "" : "s"
-            }. They'll disappear from your feed until each one finishes — this can take a while since only ` +
-            `one reel is processed at a time.` +
+            } using their already-downloaded media where possible — nothing is re-downloaded from ` +
+            `Instagram unless a reel's media is missing locally, and nothing is deleted until the ` +
+            `rescan actually succeeds. They'll disappear from your feed until each one finishes; ` +
+            `depending on how the backend is configured this can take a while (processed one at a ` +
+            `time) or run as a single shared batch job that may take up to 24 hours.` +
             (bulkError ? `\n\n${bulkError}` : "")
           }
           confirmLabel={bulkBusy ? "Starting…" : "Rescan all"}

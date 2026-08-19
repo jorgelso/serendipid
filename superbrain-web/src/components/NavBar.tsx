@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import RefreshButton from "./RefreshButton";
+import CheckBatchesButton from "./CheckBatchesButton";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -43,7 +44,8 @@ export default function NavBar() {
             );
           })}
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <CheckBatchesButton />
           <RefreshButton />
         </div>
       </div>

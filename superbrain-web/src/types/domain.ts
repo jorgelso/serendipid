@@ -129,8 +129,29 @@ export interface QueueStatusResponse {
   queue_count: number;
   retry_queue: unknown[];
   retry_count: number;
+  // ANALYSIS_MODE=batch items in flight (see backend/core/batch_processor.py) —
+  // absent nothing, just an empty list, when running in the default "immediate" mode.
+  batch_pending: unknown[];
+  batch_count: number;
+  // Separate surface for the rescan pipeline's own OpenAI batch jobs (see
+  // backend/core/rescan_batch_processor.py) — a rescan target is never in
+  // currently_processing/queue/batch_pending once it reaches this state.
+  rescan_batch_pending: { shortcode: string; phase: string }[];
+  rescan_batch_count: number;
+  analysis_mode: "immediate" | "batch";
   max_concurrent: number;
   available_slots: number;
+}
+
+// Mirrors backend/api.py's POST /batches/check.
+export interface BatchCheckResponse {
+  success: boolean;
+  analysis_mode: "immediate" | "batch";
+  summary_advanced?: string[];
+  summary_failed?: string[];
+  finalized?: string[];
+  still_waiting?: string[];
+  skipped?: string;
 }
 
 // Mirrors backend/api.py's POST /reanalyze/bulk.

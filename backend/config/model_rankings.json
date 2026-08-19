@@ -1,11 +1,11 @@
 {
   "openai_gpt41": {
     "key": "openai_gpt41",
-    "avg_response_s": 12.905140515965586,
-    "success_count": 2880,
-    "fail_count": 2,
+    "avg_response_s": 3.727034399900318,
+    "success_count": 3042,
+    "fail_count": 3,
     "down_until": null,
-    "last_used": "2026-08-12T15:23:18.809408",
+    "last_used": "2026-08-19T04:44:58.228628",
     "last_error": null,
     "base_priority": 0
   },
@@ -13,28 +13,28 @@
     "key": "groq_gpt_oss_20b",
     "avg_response_s": 15.874512303827693,
     "success_count": 172,
-    "fail_count": 27,
-    "down_until": null,
+    "fail_count": 28,
+    "down_until": "2026-08-19T00:47:48.234908",
     "last_used": "2026-08-12T15:23:16.126406",
-    "last_error": null,
+    "last_error": "No module named 'groq'",
     "base_priority": 0.5
   },
   "groq_llama33_70b": {
     "key": "groq_llama33_70b",
     "avg_response_s": 1.774234490060335,
     "success_count": 141,
-    "fail_count": 39,
-    "down_until": "2026-08-12T15:30:53.399352",
+    "fail_count": 43,
+    "down_until": "2026-08-19T01:37:55.817680",
     "last_used": "2026-08-12T15:00:50.021236",
-    "last_error": "Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kzh8ataten68294v8vsw2nsh` service tier `on_demand` on tokens per day (TPD): Limit",
+    "last_error": "Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}",
     "base_priority": 1
   },
   "groq_llama4_scout": {
     "key": "groq_llama4_scout",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 79,
-    "down_until": "2026-08-12T15:23:30.206673",
+    "fail_count": 83,
+    "down_until": "2026-08-19T01:37:56.031068",
     "last_used": null,
     "last_error": "Error code: 404 - {'error': {'message': 'The model `meta-llama/llama-4-scout-17b-16e-instruct` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_fou",
     "base_priority": 1.5
@@ -43,289 +43,289 @@
     "key": "groq_llama31_8b",
     "avg_response_s": 11.996572756767272,
     "success_count": 2,
-    "fail_count": 9,
-    "down_until": "2026-08-10T19:04:26.842487",
+    "fail_count": 10,
+    "down_until": "2026-08-19T00:47:48.235386",
     "last_used": "2026-08-08T19:13:06.391475",
-    "last_error": "Error code: 413 - {'error': {'message': 'Request too large for model `llama-3.1-8b-instant` in organization `org_01kzh8ataten68294v8vsw2nsh` service tier `on_demand` on tokens per minute (TPM): Limit ",
+    "last_error": "No module named 'groq'",
     "base_priority": 2
   },
   "groq_qwen3_32b": {
     "key": "groq_qwen3_32b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 38,
-    "down_until": "2026-08-12T15:23:30.492526",
+    "fail_count": 40,
+    "down_until": "2026-08-19T00:47:48.232008",
     "last_used": null,
-    "last_error": "Error code: 404 - {'error': {'message': 'The model `qwen/qwen3-32b` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}",
+    "last_error": "No module named 'groq'",
     "base_priority": 2.5
   },
   "groq_gpt_oss_120b": {
     "key": "groq_gpt_oss_120b",
     "avg_response_s": 12.091264065742491,
     "success_count": 4,
-    "fail_count": 8,
-    "down_until": null,
+    "fail_count": 9,
+    "down_until": "2026-08-19T00:47:48.236805",
     "last_used": "2026-08-10T18:36:48.739682",
-    "last_error": null,
+    "last_error": "No module named 'groq'",
     "base_priority": 3
   },
   "groq_gemma2_9b": {
     "key": "groq_gemma2_9b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 23,
-    "down_until": "2026-08-12T15:23:30.784151",
+    "fail_count": 25,
+    "down_until": "2026-08-19T00:47:48.232490",
     "last_used": null,
-    "last_error": "Error code: 400 - {'error': {'message': 'The model `gemma2-9b-it` has been decommissioned and is no longer supported. Please refer to https://console.groq.com/docs/deprecations for a recommendation on",
+    "last_error": "No module named 'groq'",
     "base_priority": 3.5
   },
   "groq_deepseek_r1_32b": {
     "key": "groq_deepseek_r1_32b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 20,
-    "down_until": "2026-08-12T15:23:31.057856",
+    "fail_count": 21,
+    "down_until": "2026-08-19T00:47:48.232979",
     "last_used": null,
-    "last_error": "Error code: 400 - {'error': {'message': 'The model `deepseek-r1-distill-qwen-32b` has been decommissioned and is no longer supported. Please refer to https://console.groq.com/docs/deprecations for a r",
+    "last_error": "No module named 'groq'",
     "base_priority": 3.8
   },
   "gemini_25_flash": {
     "key": "gemini_25_flash",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 17,
-    "down_until": "2026-08-12T15:23:31.883530",
+    "fail_count": 18,
+    "down_until": "2026-08-19T00:47:48.233465",
     "last_used": null,
-    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
+    "last_error": "No module named 'google'",
     "base_priority": 4
   },
   "gemini_25_flash_lite": {
     "key": "gemini_25_flash_lite",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 12,
-    "down_until": "2026-08-12T15:23:32.254155",
+    "fail_count": 13,
+    "down_until": "2026-08-19T00:47:48.233964",
     "last_used": null,
-    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
+    "last_error": "No module named 'google'",
     "base_priority": 4.5
   },
   "gemini_25_pro": {
     "key": "gemini_25_pro",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 11,
-    "down_until": "2026-08-12T15:27:47.986638",
+    "fail_count": 12,
+    "down_until": "2026-08-19T00:47:48.234439",
     "last_used": null,
-    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
+    "last_error": "No module named 'google'",
     "base_priority": 5
   },
   "gemini_3_flash": {
     "key": "gemini_3_flash",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 10,
-    "down_until": "2026-08-10T18:41:21.698578",
+    "fail_count": 11,
+    "down_until": "2026-08-19T00:47:48.235865",
     "last_used": null,
-    "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
+    "last_error": "No module named 'google'",
     "base_priority": 5.5
   },
   "gemini_3_pro": {
     "key": "gemini_3_pro",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 9,
-    "down_until": "2026-08-10T13:15:16.025417",
+    "fail_count": 10,
+    "down_until": "2026-08-19T00:47:48.236339",
     "last_used": null,
-    "last_error": "[Errno 8] nodename nor servname provided, or not known",
+    "last_error": "No module named 'google'",
     "base_priority": 6
   },
   "gemini_31_pro": {
     "key": "gemini_31_pro",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 9,
-    "down_until": "2026-08-10T13:15:46.050867",
+    "fail_count": 10,
+    "down_until": "2026-08-19T00:47:48.237275",
     "last_used": null,
-    "last_error": "[Errno 8] nodename nor servname provided, or not known",
+    "last_error": "No module named 'google'",
     "base_priority": 6.5
   },
   "gemini_20_flash": {
     "key": "gemini_20_flash",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 9,
-    "down_until": "2026-08-10T13:16:16.081121",
+    "fail_count": 10,
+    "down_until": "2026-08-19T00:47:48.237745",
     "last_used": null,
-    "last_error": "[Errno 8] nodename nor servname provided, or not known",
+    "last_error": "No module named 'google'",
     "base_priority": 7
   },
   "gemini_20_flash_lite": {
     "key": "gemini_20_flash_lite",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 8,
-    "down_until": "2026-08-08T04:36:20.856424",
+    "fail_count": 9,
+    "down_until": "2026-08-19T00:47:48.238690",
     "last_used": null,
-    "last_error": "No module named 'google.generativeai'",
+    "last_error": "No module named 'google'",
     "base_priority": 7.5
   },
   "gemini_15_flash": {
     "key": "gemini_15_flash",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 8,
-    "down_until": "2026-08-08T04:36:21.061148",
+    "fail_count": 9,
+    "down_until": "2026-08-19T00:47:48.239631",
     "last_used": null,
-    "last_error": "No module named 'google.generativeai'",
+    "last_error": "No module named 'google'",
     "base_priority": 8
   },
   "openrouter_llama33_70b": {
     "key": "openrouter_llama33_70b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 3,
-    "down_until": "2026-08-08T04:36:20.852258",
+    "fail_count": 4,
+    "down_until": "2026-08-19T00:47:48.238219",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 7
   },
   "openrouter_deepseek_r1_0528": {
     "key": "openrouter_deepseek_r1_0528",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 4,
-    "down_until": "2026-08-08T04:36:21.057321",
+    "fail_count": 5,
+    "down_until": "2026-08-19T00:47:48.239170",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 7.5
   },
   "openrouter_qwen3_235b": {
     "key": "openrouter_qwen3_235b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 4,
-    "down_until": "2026-08-08T04:36:21.276938",
+    "fail_count": 5,
+    "down_until": "2026-08-19T00:47:48.240100",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 8
   },
   "openrouter_hermes3_405b": {
     "key": "openrouter_hermes3_405b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 3,
-    "down_until": "2026-08-08T04:36:21.475112",
+    "fail_count": 4,
+    "down_until": "2026-08-19T00:47:48.240570",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 8.5
   },
   "openrouter_gpt_oss_120b": {
     "key": "openrouter_gpt_oss_120b",
     "avg_response_s": 3.9147901058197023,
     "success_count": 2,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:21.919313",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.241504",
     "last_used": "2026-04-09T17:37:11.262276",
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 9
   },
   "openrouter_gpt_oss_20b": {
     "key": "openrouter_gpt_oss_20b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:21.691056",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.241041",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 9.5
   },
   "openrouter_stepfun_flash": {
     "key": "openrouter_stepfun_flash",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:22.121788",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.241975",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 10
   },
   "openrouter_nemotron_30b": {
     "key": "openrouter_nemotron_30b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:22.333094",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.242439",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 10.5
   },
   "openrouter_qwen3_next_80b": {
     "key": "openrouter_qwen3_next_80b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:22.542078",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.242917",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 11
   },
   "openrouter_gemma3_27b": {
     "key": "openrouter_gemma3_27b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:22.765208",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.243422",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 11.5
   },
   "openrouter_mistral_small31": {
     "key": "openrouter_mistral_small31",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:22.976008",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.243885",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 12
   },
   "openrouter_glm45_air": {
     "key": "openrouter_glm45_air",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:23.230676",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.244375",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 12.5
   },
   "openrouter_dolphin_venice": {
     "key": "openrouter_dolphin_venice",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 2,
-    "down_until": "2026-08-08T04:36:23.437585",
+    "fail_count": 3,
+    "down_until": "2026-08-19T00:47:48.244840",
     "last_used": null,
-    "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
+    "last_error": "No module named 'requests'",
     "base_priority": 13
   },
   "local_qwen3": {
     "key": "local_qwen3",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 8,
-    "down_until": "2026-08-08T04:36:23.441846",
+    "fail_count": 9,
+    "down_until": "2026-08-19T00:47:48.245308",
     "last_used": null,
     "last_error": "No module named 'ollama'",
     "base_priority": 100
   },
   "openai_gpt41_vision": {
     "key": "openai_gpt41_vision",
-    "avg_response_s": 32.1778453425114,
-    "success_count": 2916,
+    "avg_response_s": 9.55997333319818,
+    "success_count": 3602,
     "fail_count": 13,
     "down_until": null,
-    "last_used": "2026-08-12T15:22:26.228037",
+    "last_used": "2026-08-19T04:44:53.365871",
     "last_error": null,
     "base_priority": 0
   },
@@ -333,8 +333,8 @@
     "key": "gemini_25_flash_vision",
     "avg_response_s": 15.284299373626709,
     "success_count": 1,
-    "fail_count": 66,
-    "down_until": "2026-08-12T15:26:59.168972",
+    "fail_count": 68,
+    "down_until": "2026-08-19T00:57:13.006668",
     "last_used": "2026-02-24T06:25:56.490384",
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 1
@@ -343,8 +343,8 @@
     "key": "gemini_25_flash_lite_vision",
     "avg_response_s": 6.709401964075168,
     "success_count": 14,
-    "fail_count": 227,
-    "down_until": "2026-08-12T15:22:40.127188",
+    "fail_count": 240,
+    "down_until": "2026-08-19T04:45:25.717515",
     "last_used": "2026-02-24T09:45:09.831171",
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 1.5
@@ -353,8 +353,8 @@
     "key": "gemini_25_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 310,
-    "down_until": "2026-08-12T15:22:28.762186",
+    "fail_count": 343,
+    "down_until": "2026-08-19T04:49:35.407474",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 2
@@ -363,8 +363,8 @@
     "key": "gemini_3_flash_vision",
     "avg_response_s": 22.28640604019165,
     "success_count": 1,
-    "fail_count": 23,
-    "down_until": "2026-08-12T15:27:12.259408",
+    "fail_count": 24,
+    "down_until": "2026-08-18T21:38:48.690882",
     "last_used": "2026-02-24T07:50:22.906246",
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 2.5
@@ -373,8 +373,8 @@
     "key": "gemini_3_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 239,
-    "down_until": "2026-08-12T15:22:36.347708",
+    "fail_count": 253,
+    "down_until": "2026-08-19T04:45:25.246636",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3
@@ -383,8 +383,8 @@
     "key": "gemini_31_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 191,
-    "down_until": "2026-08-12T15:22:44.042261",
+    "fail_count": 201,
+    "down_until": "2026-08-19T04:40:59.858531",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3.5
@@ -393,8 +393,8 @@
     "key": "gemini_20_flash_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 147,
-    "down_until": "2026-08-12T15:22:47.819715",
+    "fail_count": 153,
+    "down_until": "2026-08-19T04:41:00.536441",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 4
@@ -403,8 +403,8 @@
     "key": "gemini_20_flash_lite_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 118,
-    "down_until": "2026-08-12T15:23:11.878687",
+    "fail_count": 120,
+    "down_until": "2026-08-19T00:57:08.993837",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 4.5
@@ -413,8 +413,8 @@
     "key": "gemini_15_flash_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 106,
-    "down_until": "2026-08-12T15:23:12.900436",
+    "fail_count": 108,
+    "down_until": "2026-08-19T00:57:10.910051",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 4.8
@@ -423,8 +423,8 @@
     "key": "groq_llama4_scout_vision",
     "avg_response_s": 1.528297446591561,
     "success_count": 56,
-    "fail_count": 82,
-    "down_until": "2026-08-12T15:23:14.383894",
+    "fail_count": 84,
+    "down_until": "2026-08-19T00:57:11.494242",
     "last_used": "2026-04-09T18:25:54.184988",
     "last_error": "Error code: 404 - {'error': {'message': 'The model `meta-llama/llama-4-scout-17b-16e-instruct` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_fou",
     "base_priority": 5
@@ -433,8 +433,8 @@
     "key": "groq_vision_11b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 60,
-    "down_until": "2026-08-12T15:27:00.836975",
+    "fail_count": 62,
+    "down_until": "2026-08-19T00:57:13.786874",
     "last_used": null,
     "last_error": "Error code: 400 - {'error': {'message': 'The model `llama-3.2-11b-vision-preview` has been decommissioned and is no longer supported. Please refer to https://console.groq.com/docs/deprecations for a r",
     "base_priority": 5.5
@@ -443,8 +443,8 @@
     "key": "groq_vision_90b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 45,
-    "down_until": "2026-08-12T15:27:02.318140",
+    "fail_count": 47,
+    "down_until": "2026-08-19T00:57:15.036900",
     "last_used": null,
     "last_error": "Error code: 400 - {'error': {'message': 'The model `llama-3.2-90b-vision-preview` has been decommissioned and is no longer supported. Please refer to https://console.groq.com/docs/deprecations for a r",
     "base_priority": 6
@@ -453,8 +453,8 @@
     "key": "openrouter_qwen3_vl_235b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 30,
-    "down_until": "2026-08-12T15:27:03.689956",
+    "fail_count": 31,
+    "down_until": "2026-08-18T21:38:41.536643",
     "last_used": null,
     "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
     "base_priority": 7
@@ -463,8 +463,8 @@
     "key": "openrouter_qwen3_vl_30b",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 27,
-    "down_until": "2026-08-12T15:27:04.940191",
+    "fail_count": 28,
+    "down_until": "2026-08-18T21:38:42.604597",
     "last_used": null,
     "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
     "base_priority": 7.5
@@ -473,8 +473,8 @@
     "key": "openrouter_nvidia_vl",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 23,
-    "down_until": "2026-08-12T15:27:08.647941",
+    "fail_count": 24,
+    "down_until": "2026-08-18T21:38:43.545706",
     "last_used": null,
     "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
     "base_priority": 8
@@ -483,8 +483,8 @@
     "key": "openrouter_gemma3_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 21,
-    "down_until": "2026-08-12T15:27:09.866826",
+    "fail_count": 22,
+    "down_until": "2026-08-18T21:38:45.454785",
     "last_used": null,
     "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
     "base_priority": 8.5
@@ -493,8 +493,8 @@
     "key": "openrouter_mistral_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 20,
-    "down_until": "2026-08-12T15:27:11.096137",
+    "fail_count": 21,
+    "down_until": "2026-08-18T21:38:46.305575",
     "last_used": null,
     "last_error": "401 Client Error: Unauthorized for url: https://openrouter.ai/api/v1/chat/completions",
     "base_priority": 9
@@ -599,6 +599,26 @@
     "last_error": null,
     "base_priority": 23
   },
+  "dyn_dots-studio_dots-3-note-preview_free": {
+    "key": "dyn_dots-studio_dots-3-note-preview_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 24
+  },
+  "dyn_v_dots-studio_dots-3-note-preview_free": {
+    "key": "dyn_v_dots-studio_dots-3-note-preview_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 24
+  },
   "dyn_google_gemma-4-26b-a4b-it_free": {
     "key": "dyn_google_gemma-4-26b-a4b-it_free",
     "avg_response_s": null,
@@ -607,7 +627,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 25
   },
   "dyn_v_google_gemma-4-26b-a4b-it_free": {
     "key": "dyn_v_google_gemma-4-26b-a4b-it_free",
@@ -617,7 +637,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 24
+    "base_priority": 25
   },
   "dyn_google_gemma-4-31b-it_free": {
     "key": "dyn_google_gemma-4-31b-it_free",
@@ -627,20 +647,10 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 25
+    "base_priority": 26
   },
   "dyn_v_google_gemma-4-31b-it_free": {
     "key": "dyn_v_google_gemma-4-31b-it_free",
-    "avg_response_s": null,
-    "success_count": 0,
-    "fail_count": 0,
-    "down_until": null,
-    "last_used": null,
-    "last_error": null,
-    "base_priority": 25
-  },
-  "dyn_inclusionai_ling-3_0-tiny_free": {
-    "key": "dyn_inclusionai_ling-3_0-tiny_free",
     "avg_response_s": null,
     "success_count": 0,
     "fail_count": 0,
@@ -669,6 +679,16 @@
     "last_error": null,
     "base_priority": 28
   },
+  "dyn_z-ai_glm-5_2_free": {
+    "key": "dyn_z-ai_glm-5_2_free",
+    "avg_response_s": null,
+    "success_count": 0,
+    "fail_count": 0,
+    "down_until": null,
+    "last_used": null,
+    "last_error": null,
+    "base_priority": 29
+  },
   "dyn_liquid_lfm-2_5-2_6b_free": {
     "key": "dyn_liquid_lfm-2_5-2_6b_free",
     "avg_response_s": null,
@@ -677,7 +697,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 29
+    "base_priority": 30
   },
   "dyn_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free": {
     "key": "dyn_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free",
@@ -687,7 +707,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 30
+    "base_priority": 31
   },
   "dyn_v_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free": {
     "key": "dyn_v_nvidia_nemotron-3-nano-omni-30b-a3b-reasoning_free",
@@ -697,7 +717,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 30
+    "base_priority": 31
   },
   "dyn_openrouter_free": {
     "key": "dyn_openrouter_free",
@@ -707,7 +727,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 31
+    "base_priority": 32
   },
   "dyn_v_openrouter_free": {
     "key": "dyn_v_openrouter_free",
@@ -717,7 +737,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 31
+    "base_priority": 32
   },
   "dyn_poolside_laguna-s-2_1_free": {
     "key": "dyn_poolside_laguna-s-2_1_free",
@@ -727,7 +747,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 32
+    "base_priority": 33
   },
   "dyn_poolside_laguna-xs-2_1_free": {
     "key": "dyn_poolside_laguna-xs-2_1_free",
@@ -737,7 +757,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 34
+    "base_priority": 35
   },
   "dyn_nvidia_nemotron-3_5-content-safety_free": {
     "key": "dyn_nvidia_nemotron-3_5-content-safety_free",
@@ -747,7 +767,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 35
+    "base_priority": 36
   },
   "dyn_v_nvidia_nemotron-3_5-content-safety_free": {
     "key": "dyn_v_nvidia_nemotron-3_5-content-safety_free",
@@ -757,7 +777,7 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 35
+    "base_priority": 36
   },
   "dyn_nvidia_nemotron-nano-9b-v2_free": {
     "key": "dyn_nvidia_nemotron-nano-9b-v2_free",
@@ -767,6 +787,6 @@
     "down_until": null,
     "last_used": null,
     "last_error": null,
-    "base_priority": 36
+    "base_priority": 37
   }
 }
