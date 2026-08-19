@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -66,6 +67,26 @@ from analyzers.youtube_analyzer import analyze_youtube
 from analyzers.webpage_analyzer import analyze_webpage
 
 RETRYABLE = "__RETRYABLE__"
+
+# Bounded concurrency for the common case — a post whose local media is
+# already downloaded never touches Instagram during a rescan, so there's no
+# ban-risk reason to process those sequentially the way first-time analysis
+# must (max_concurrent=1 in api.py, to protect the Instagram account from
+# concurrent-download traffic). Mirrors main.py's own
+# ThreadPoolExecutor(max_workers=3) precedent for its light-tasks phase —
+# just applied across reels here instead of within one. The rare post that
+# genuinely needs a real Instagram redownload is deliberately excluded from
+# this pool and processed sequentially instead (see _classify_for_dispatch).
+LOCAL_RESOLUTION_CONCURRENCY = int(os.getenv("RESCAN_LOCAL_CONCURRENCY", "4"))
+
+# ANALYSIS_MODE=batch: submit the shared OpenAI batch in chunks of this size
+# as soon as each chunk's local resolution is done, instead of waiting for
+# an entire large cohort to finish before submitting anything. Without
+# chunking, a 100+-reel rescan has zero durable checkpoint (nothing written
+# to rescan_batch_jobs, nothing safe from a backend restart) until the very
+# last reel's local analysis completes — chunking means a batch becomes
+# durable every N resolved reels.
+OPENAI_BATCH_CHUNK_SIZE = int(os.getenv("RESCAN_BATCH_CHUNK_SIZE", "15"))
 
 
 # ── Small local duplicates of main.py's generic helpers ─────────────────────
@@ -245,14 +266,17 @@ def resolve_rescan_inputs(row: dict, plan) -> dict | str | None:
     }
 
     if plan.redo_visual:
+        print(f"  🎬 [{shortcode}] Re-running visual analysis ({len(mp4_files) + len(jpg_files)} file(s))...")
         visual_chunks = []
         for f in mp4_files + jpg_files:
             ok, stdout, _ = run_script("analyzers/visual_analyze.py", [str(f)])
             if ok:
                 visual_chunks.append(_clean_visual(stdout))
         state["visual_text"] = "\n\n".join(c for c in visual_chunks if c)
+        print(f"  ✓ [{shortcode}] Visual analysis done.")
 
     if plan.redo_audio:
+        print(f"  🎙️  [{shortcode}] Re-running audio transcription...")
         audio_path = mp3_files[0] if mp3_files else None
         scratch_audio = None
         if audio_path is None and mp4_files:
@@ -268,6 +292,7 @@ def resolve_rescan_inputs(row: dict, plan) -> dict | str | None:
             ok, stdout, _ = run_script("analyzers/music_identifier.py", [str(audio_path)])
             state["music_text"] = stdout if ok else state["music_text"]
             state["music"] = apply_music_override(state["music"], [{"output": stdout}] if ok else [])
+            print(f"  ✓ [{shortcode}] Audio transcription + music ID done.")
 
     if info_file:
         try:
@@ -424,90 +449,154 @@ def run_single(shortcode: str) -> int:
         db.remove_from_queue(shortcode)
 
 
+def _classify_for_dispatch(shortcodes: list, by_shortcode: dict):
+    """Split shortcodes into (parallel_safe, needs_redownload, missing).
+    Everything except a genuine Instagram redownload is safe to run
+    concurrently — YouTube/webpage posts never touch Instagram at all, and
+    an Instagram post whose local media is already present only makes AI
+    provider calls during a rescan. Only needs_redownload actually hits
+    Instagram, so only that group is kept serialized."""
+    parallel_safe, needs_redownload, missing = [], [], []
+    for sc in shortcodes:
+        row = by_shortcode.get(sc)
+        if row is None:
+            missing.append(sc)
+            continue
+        if row.get("content_type") in ("youtube", "webpage"):
+            parallel_safe.append((sc, row, None))
+            continue
+        plan = decide_rescan_plan(row)
+        (needs_redownload if plan.needs_redownload else parallel_safe).append((sc, row, plan))
+    return parallel_safe, needs_redownload, missing
+
+
+def _resolve_one_for_batch_mode(db, sc: str, row: dict, plan):
+    """ANALYSIS_MODE=batch, local-only resolution for one shortcode (no LLM
+    summary call — that's deferred to the shared batch submission). Returns
+    a (sc, row, plan, state) tuple to be batched, or None if nothing needs
+    batching (cheap/YouTube/webpage/failed/retried — all fully handled here)."""
+    if row.get("content_type") in ("youtube", "webpage"):
+        db.mark_processing(sc, row.get("url"), row.get("content_type"))
+        try:
+            _rescan_youtube_or_webpage_sync(db, row)
+        finally:
+            db.remove_from_queue(sc)
+        return None
+
+    db.mark_processing(sc, row.get("url"), "instagram")
+    try:
+        if plan.cheap_importance_only:
+            score_and_stamp_importance(
+                db, sc, row.get("title"), row.get("summary"),
+                row.get("tags"), row.get("category"), row.get("username"),
+            )
+            return None
+        state = resolve_rescan_inputs(row, plan)
+        if state == RETRYABLE:
+            db.queue_for_retry(sc, row["url"], "instagram", "rescan_instagram_rate_limit", retry_hours=24)
+            return None
+        if state is None:
+            return None
+        return (sc, row, plan, state)
+    except Exception as e:
+        # One shortcode's unexpected failure while resolving local inputs
+        # must not abort the whole cohort — skip it, leave its row
+        # untouched, move on.
+        print(f"❌ [{sc}] Unexpected error resolving local inputs: {e}")
+        return None
+    finally:
+        db.remove_from_queue(sc)
+
+
 def run_batch(shortcodes: list) -> int:
-    """--batch mode: ANALYSIS_MODE=immediate loops synchronously in this one
-    process; ANALYSIS_MODE=batch resolves each shortcode's local inputs
-    synchronously (not OpenAI-batchable) then submits every Instagram
-    shortcode's summary prompt together as ONE shared OpenAI batch job."""
+    """--batch mode: ANALYSIS_MODE=immediate runs the has-local-media cohort
+    concurrently (bounded pool) and the needs-redownload cohort sequentially
+    in this same process; ANALYSIS_MODE=batch does the same split for LOCAL
+    resolution, then submits resolved shortcodes to OpenAI in chunks of
+    OPENAI_BATCH_CHUNK_SIZE as they accumulate, rather than one giant batch
+    at the very end. See LOCAL_RESOLUTION_CONCURRENCY / OPENAI_BATCH_CHUNK_SIZE
+    above."""
     analysis_mode = os.getenv("ANALYSIS_MODE", "immediate").strip().lower()
     db = get_db()
     rows = db.get_posts_by_shortcodes(shortcodes)
     by_shortcode = {r["shortcode"]: r for r in rows}
+    parallel_safe, needs_redownload, missing = _classify_for_dispatch(shortcodes, by_shortcode)
+    for sc in missing:
+        print(f"❌ [{sc}] Not found — skipping.")
+    print(f"➡ {len(parallel_safe)} reel(s) have local media (parallel, up to "
+          f"{LOCAL_RESOLUTION_CONCURRENCY} at once), {len(needs_redownload)} need a real "
+          f"Instagram redownload (sequential).")
 
     if analysis_mode != "batch":
-        for sc in shortcodes:
-            if sc not in by_shortcode:
-                print(f"❌ [{sc}] Not found — skipping.")
-                continue
-            print(f"➡ Rescanning {sc}...")
-            run_single(sc)
-        return 0
-
-    # ANALYSIS_MODE=batch: YouTube/webpage posts are single fast calls that
-    # aren't OpenAI-batch-shaped here — just run them inline. Instagram
-    # posts are grouped into one shared batch submission.
-    to_batch = []  # (shortcode, row, plan, state)
-    for sc in shortcodes:
-        row = by_shortcode.get(sc)
-        if row is None:
-            print(f"❌ [{sc}] Not found — skipping.")
-            continue
-        try:
-            if row.get("content_type") in ("youtube", "webpage"):
-                db.mark_processing(sc, row.get("url"), row.get("content_type"))
+        with ThreadPoolExecutor(max_workers=LOCAL_RESOLUTION_CONCURRENCY) as executor:
+            futures = {executor.submit(run_single, sc): sc for sc, _, _ in parallel_safe}
+            # Runs in this thread while the pool above works through the
+            # rest in the background — protects Instagram from concurrent
+            # download traffic, same reasoning as first-time analysis.
+            for sc, _, _ in needs_redownload:
+                print(f"⬇ Rescanning {sc} (redownload needed)...")
+                run_single(sc)
+            for future in as_completed(futures):
+                sc = futures[future]
                 try:
-                    _rescan_youtube_or_webpage_sync(db, row)
-                finally:
-                    db.remove_from_queue(sc)
-                continue
-
-            plan = decide_rescan_plan(row)
-            db.mark_processing(sc, row.get("url"), "instagram")
-            if plan.cheap_importance_only:
-                score_and_stamp_importance(
-                    db, sc, row.get("title"), row.get("summary"),
-                    row.get("tags"), row.get("category"), row.get("username"),
-                )
-                db.remove_from_queue(sc)
-                continue
-            state = resolve_rescan_inputs(row, plan)
-            if state == RETRYABLE:
-                db.queue_for_retry(sc, row["url"], "instagram", "rescan_instagram_rate_limit", retry_hours=24)
-                db.remove_from_queue(sc)
-                continue
-            if state is None:
-                db.remove_from_queue(sc)
-                continue
-            to_batch.append((sc, row, plan, state))
-        except Exception as e:
-            # One shortcode's unexpected failure while resolving local
-            # inputs must not abort the whole cohort's shared-batch
-            # submission — skip it, leave its row untouched, move on.
-            print(f"❌ [{sc}] Unexpected error resolving local inputs: {e}")
-            db.remove_from_queue(sc)
-
-    if not to_batch:
-        print("Nothing left to submit as a shared batch.")
+                    future.result()
+                except Exception as e:
+                    print(f"❌ [{sc}] Unexpected error: {e}")
+                else:
+                    print(f"✓ [{sc}] done")
         return 0
 
+    # ANALYSIS_MODE=batch ----------------------------------------------------
     from core.model_router import get_router
     router = get_router()
 
-    requests_list = []
-    for sc, row, plan, state in to_batch:
-        prompt = build_rescan_prompt(
-            state["visual_text"], state["audio_text"], state["music_text"], state["text_text"],
-            row["url"], state["caption"], state["source_hashtags"],
-        )
-        requests_list.append(router.build_batch_chat_request(sc, prompt))
+    chunk_buffer = []  # (sc, row, plan, state) awaiting submission
 
-    summary_batch_id = router.submit_openai_batch(requests_list, endpoint="/v1/chat/completions")
-    print(f"📦 Submitted {len(requests_list)} shortcode(s) as ONE shared OpenAI batch: {summary_batch_id}")
+    def _submit_chunk(force: bool = False):
+        while len(chunk_buffer) >= OPENAI_BATCH_CHUNK_SIZE or (chunk_buffer and force):
+            chunk = chunk_buffer[:OPENAI_BATCH_CHUNK_SIZE]
+            del chunk_buffer[:OPENAI_BATCH_CHUNK_SIZE]
+            requests_list = [
+                router.build_batch_chat_request(
+                    sc, build_rescan_prompt(state["visual_text"], state["audio_text"],
+                                             state["music_text"], state["text_text"],
+                                             row["url"], state["caption"], state["source_hashtags"])
+                ) for sc, row, plan, state in chunk
+            ]
+            summary_batch_id = router.submit_openai_batch(requests_list, endpoint="/v1/chat/completions")
+            print(f"📦 Submitted {len(requests_list)} shortcode(s) as one shared OpenAI batch: {summary_batch_id}")
+            for sc, row, plan, state in chunk:
+                state["content_type"] = "instagram"
+                db.enqueue_rescan_batch_job(sc, row["url"], "instagram", summary_batch_id, json.dumps(state))
+            if not chunk_buffer:
+                break
 
-    for sc, row, plan, state in to_batch:
-        state["content_type"] = "instagram"
-        db.enqueue_rescan_batch_job(sc, row["url"], "instagram", summary_batch_id, json.dumps(state))
+    with ThreadPoolExecutor(max_workers=LOCAL_RESOLUTION_CONCURRENCY) as executor:
+        futures = {
+            executor.submit(_resolve_one_for_batch_mode, db, sc, row, plan): sc
+            for sc, row, plan in parallel_safe
+        }
 
+        for sc, row, plan in needs_redownload:
+            resolved = _resolve_one_for_batch_mode(db, sc, row, plan)
+            if resolved:
+                chunk_buffer.append(resolved)
+                print(f"  ✓ [{sc}] locally resolved — buffered ({len(chunk_buffer)}/{OPENAI_BATCH_CHUNK_SIZE})")
+                _submit_chunk()
+
+        for future in as_completed(futures):
+            sc = futures[future]
+            try:
+                resolved = future.result()
+            except Exception as e:
+                print(f"❌ [{sc}] Unexpected error: {e}")
+                resolved = None
+            if resolved:
+                chunk_buffer.append(resolved)
+                print(f"  ✓ [{sc}] locally resolved — buffered ({len(chunk_buffer)}/{OPENAI_BATCH_CHUNK_SIZE})")
+                _submit_chunk()
+
+    _submit_chunk(force=True)  # flush whatever's left as a final, possibly smaller chunk
     return 0
 
 

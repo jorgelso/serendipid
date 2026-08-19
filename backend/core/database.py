@@ -8,6 +8,7 @@ Self-hosted, zero-config, file-based database
 import sqlite3
 import json
 import os
+import threading
 import uuid
 from pathlib import Path
 from datetime import datetime
@@ -85,6 +86,16 @@ class Database:
     def __init__(self):
         self.db_path = DB_PATH
         self._conn = None
+        # Guards execute()+commit() sequences on the shared connection
+        # (check_same_thread=False lets multiple threads use it, but doesn't
+        # by itself make an interleaved execute/commit pair from two threads
+        # safe — a second thread's commit() can land between another
+        # thread's execute() and its own commit(), raising "cannot commit -
+        # no transaction is active"). Only methods actually called
+        # concurrently (by scripts/rescan_post.py's bounded worker pool —
+        # see backend/CLAUDE.md's "Rescan pipeline" section) take this lock;
+        # it's not applied blanket-wide across every method in this class.
+        self._write_lock = threading.Lock()
         self._connect()
 
     def _connect(self):
@@ -845,61 +856,62 @@ class Database:
                 media_files_list = []
             media_files_json = json.dumps(media_files_list)
 
-            self._conn.execute("""
-                INSERT INTO analyses
-                    (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
-                     thumbnail, title, summary, tags, music, category,
-                     visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
-                     analysis_version, language, media_files, importance, model_used, transcription_backend,
-                     caption)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(shortcode) DO UPDATE SET
-                    url                   = excluded.url,
-                    username              = excluded.username,
-                    content_type          = excluded.content_type,
-                    updated_at            = excluded.updated_at,
-                    post_date             = excluded.post_date,
-                    likes                 = excluded.likes,
-                    thumbnail             = excluded.thumbnail,
-                    title                 = excluded.title,
-                    summary               = excluded.summary,
-                    tags                  = excluded.tags,
-                    music                 = excluded.music,
-                    category              = excluded.category,
-                    visual_analysis       = excluded.visual_analysis,
-                    audio_transcription   = excluded.audio_transcription,
-                    text_analysis         = excluded.text_analysis,
-                    source_hashtags       = excluded.source_hashtags,
-                    embedding             = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END,
-                    analysis_version      = excluded.analysis_version,
-                    language              = excluded.language,
-                    media_files           = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END,
-                    importance            = CASE WHEN excluded.importance IS NOT NULL THEN excluded.importance ELSE analyses.importance END,
-                    model_used            = excluded.model_used,
-                    transcription_backend = excluded.transcription_backend,
-                    caption               = CASE WHEN excluded.caption != '' THEN excluded.caption ELSE analyses.caption END
-            """, (shortcode, url, username, content_type, now, now, post_date, likes,
-                  thumbnail, title, summary, tags_json, music, category_json,
-                  visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
-                  version, language_json, media_files_json, importance,
-                  model_used or "", transcription_backend or "", caption or ""))
+            with self._write_lock:
+                self._conn.execute("""
+                    INSERT INTO analyses
+                        (shortcode, url, username, content_type, analyzed_at, updated_at, post_date, likes,
+                         thumbnail, title, summary, tags, music, category,
+                         visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
+                         analysis_version, language, media_files, importance, model_used, transcription_backend,
+                         caption)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(shortcode) DO UPDATE SET
+                        url                   = excluded.url,
+                        username              = excluded.username,
+                        content_type          = excluded.content_type,
+                        updated_at            = excluded.updated_at,
+                        post_date             = excluded.post_date,
+                        likes                 = excluded.likes,
+                        thumbnail             = excluded.thumbnail,
+                        title                 = excluded.title,
+                        summary               = excluded.summary,
+                        tags                  = excluded.tags,
+                        music                 = excluded.music,
+                        category              = excluded.category,
+                        visual_analysis       = excluded.visual_analysis,
+                        audio_transcription   = excluded.audio_transcription,
+                        text_analysis         = excluded.text_analysis,
+                        source_hashtags       = excluded.source_hashtags,
+                        embedding             = CASE WHEN excluded.embedding != '' THEN excluded.embedding ELSE analyses.embedding END,
+                        analysis_version      = excluded.analysis_version,
+                        language              = excluded.language,
+                        media_files           = CASE WHEN excluded.media_files != '[]' THEN excluded.media_files ELSE analyses.media_files END,
+                        importance            = CASE WHEN excluded.importance IS NOT NULL THEN excluded.importance ELSE analyses.importance END,
+                        model_used            = excluded.model_used,
+                        transcription_backend = excluded.transcription_backend,
+                        caption               = CASE WHEN excluded.caption != '' THEN excluded.caption ELSE analyses.caption END
+                """, (shortcode, url, username, content_type, now, now, post_date, likes,
+                      thumbnail, title, summary, tags_json, music, category_json,
+                      visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
+                      version, language_json, media_files_json, importance,
+                      model_used or "", transcription_backend or "", caption or ""))
 
-            # Restore any eloquence score stashed by hard_delete_post() (force
-            # re-analysis) — see that method and eloquence_stash's comment in
-            # _create_tables. No-op for a normal first-time save/UPSERT where
-            # nothing was ever stashed for this shortcode.
-            stashed = self._conn.execute(
-                "SELECT is_eloquent, eloquence_rationale, is_tutorial FROM eloquence_stash WHERE shortcode = ?",
-                (shortcode,)
-            ).fetchone()
-            if stashed:
-                self._conn.execute(
-                    "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ?, is_tutorial = ? WHERE shortcode = ?",
-                    (stashed[0], stashed[1], stashed[2], shortcode),
-                )
-                self._conn.execute("DELETE FROM eloquence_stash WHERE shortcode = ?", (shortcode,))
+                # Restore any eloquence score stashed by hard_delete_post() (force
+                # re-analysis) — see that method and eloquence_stash's comment in
+                # _create_tables. No-op for a normal first-time save/UPSERT where
+                # nothing was ever stashed for this shortcode.
+                stashed = self._conn.execute(
+                    "SELECT is_eloquent, eloquence_rationale, is_tutorial FROM eloquence_stash WHERE shortcode = ?",
+                    (shortcode,)
+                ).fetchone()
+                if stashed:
+                    self._conn.execute(
+                        "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ?, is_tutorial = ? WHERE shortcode = ?",
+                        (stashed[0], stashed[1], stashed[2], shortcode),
+                    )
+                    self._conn.execute("DELETE FROM eloquence_stash WHERE shortcode = ?", (shortcode,))
 
-            self._conn.commit()
+                self._conn.commit()
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True
         except Exception as e:
@@ -949,11 +961,12 @@ class Database:
         if not self.is_connected():
             return False
         try:
-            self._conn.execute(
-                "UPDATE analyses SET importance = ?, analysis_version = ? WHERE shortcode = ?",
-                (importance, CURRENT_ANALYSIS_VERSION, shortcode),
-            )
-            self._conn.commit()
+            with self._write_lock:
+                self._conn.execute(
+                    "UPDATE analyses SET importance = ?, analysis_version = ? WHERE shortcode = ?",
+                    (importance, CURRENT_ANALYSIS_VERSION, shortcode),
+                )
+                self._conn.commit()
             return True
         except Exception as e:
             print(f"[WARNING]  Error updating importance: {e}")
@@ -1481,30 +1494,31 @@ class Database:
             retry_at = (now + timedelta(hours=retry_hours)).isoformat()
             now_str  = now.isoformat()
 
-            # Get current attempts count
-            cur = self._conn.cursor()
-            cur.execute(
-                "SELECT attempts FROM processing_queue WHERE shortcode = ?", (shortcode,)
-            )
-            row = cur.fetchone()
-            attempts = (row["attempts"] or 0) + 1 if row else 1
+            with self._write_lock:
+                # Get current attempts count
+                cur = self._conn.cursor()
+                cur.execute(
+                    "SELECT attempts FROM processing_queue WHERE shortcode = ?", (shortcode,)
+                )
+                row = cur.fetchone()
+                attempts = (row["attempts"] or 0) + 1 if row else 1
 
-            self._conn.execute("""
-                INSERT INTO processing_queue
-                    (shortcode, url, content_type, status, position,
-                     added_at, updated_at, retry_after, attempts, reason)
-                VALUES (?, ?, ?, 'retry', 0, ?, ?, ?, ?, ?)
-                ON CONFLICT(shortcode) DO UPDATE SET
-                    url          = excluded.url,
-                    content_type = excluded.content_type,
-                    status       = 'retry',
-                    updated_at   = excluded.updated_at,
-                    retry_after  = excluded.retry_after,
-                    attempts     = excluded.attempts,
-                    reason       = excluded.reason
-            """, (shortcode, url, content_type, now_str, now_str,
-                  retry_at, attempts, reason))
-            self._conn.commit()
+                self._conn.execute("""
+                    INSERT INTO processing_queue
+                        (shortcode, url, content_type, status, position,
+                         added_at, updated_at, retry_after, attempts, reason)
+                    VALUES (?, ?, ?, 'retry', 0, ?, ?, ?, ?, ?)
+                    ON CONFLICT(shortcode) DO UPDATE SET
+                        url          = excluded.url,
+                        content_type = excluded.content_type,
+                        status       = 'retry',
+                        updated_at   = excluded.updated_at,
+                        retry_after  = excluded.retry_after,
+                        attempts     = excluded.attempts,
+                        reason       = excluded.reason
+                """, (shortcode, url, content_type, now_str, now_str,
+                      retry_at, attempts, reason))
+                self._conn.commit()
             print(f"⏰ Queued for retry in {retry_hours:.0f}h: {shortcode} ({reason})")
             return True
         except Exception as e:
@@ -1662,17 +1676,18 @@ class Database:
         if not self.is_connected():
             return False
         try:
-            now = datetime.utcnow().isoformat()
-            self._conn.execute("""
-                INSERT INTO processing_queue
-                    (shortcode, url, content_type, status, position, added_at, started_at, updated_at)
-                VALUES (?, ?, ?, 'processing', 0, ?, ?, ?)
-                ON CONFLICT(shortcode) DO UPDATE SET
-                    status     = 'processing',
-                    started_at = excluded.started_at,
-                    updated_at = excluded.updated_at
-            """, (shortcode, url or '', content_type or '', now, now, now))
-            self._conn.commit()
+            with self._write_lock:
+                now = datetime.utcnow().isoformat()
+                self._conn.execute("""
+                    INSERT INTO processing_queue
+                        (shortcode, url, content_type, status, position, added_at, started_at, updated_at)
+                    VALUES (?, ?, ?, 'processing', 0, ?, ?, ?)
+                    ON CONFLICT(shortcode) DO UPDATE SET
+                        status     = 'processing',
+                        started_at = excluded.started_at,
+                        updated_at = excluded.updated_at
+                """, (shortcode, url or '', content_type or '', now, now, now))
+                self._conn.commit()
             return True
         except Exception as e:
             print(f"[WARNING]  Error marking as processing: {e}")
@@ -1683,22 +1698,23 @@ class Database:
         if not self.is_connected():
             return False
         try:
-            self._conn.execute(
-                "DELETE FROM processing_queue WHERE shortcode = ?", (shortcode,)
-            )
-            self._conn.commit()
-
-            cur = self._conn.cursor()
-            cur.execute(
-                "SELECT shortcode FROM processing_queue "
-                "WHERE status = 'queued' ORDER BY position"
-            )
-            for idx, item in enumerate(cur.fetchall(), 1):
+            with self._write_lock:
                 self._conn.execute(
-                    "UPDATE processing_queue SET position = ? WHERE shortcode = ?",
-                    (idx, item["shortcode"])
+                    "DELETE FROM processing_queue WHERE shortcode = ?", (shortcode,)
                 )
-            self._conn.commit()
+                self._conn.commit()
+
+                cur = self._conn.cursor()
+                cur.execute(
+                    "SELECT shortcode FROM processing_queue "
+                    "WHERE status = 'queued' ORDER BY position"
+                )
+                for idx, item in enumerate(cur.fetchall(), 1):
+                    self._conn.execute(
+                        "UPDATE processing_queue SET position = ? WHERE shortcode = ?",
+                        (idx, item["shortcode"])
+                    )
+                self._conn.commit()
             return True
         except Exception as e:
             print(f"[WARNING]  Error removing from queue: {e}")

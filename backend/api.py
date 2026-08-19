@@ -891,21 +891,47 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
 
 def _run_rescan_subprocess(args: list, timeout: int = None) -> tuple:
     """Run scripts/rescan_post.py with the given argv (after the script
-    path) and return (returncode, stdout, stderr). Blocking — callers on the
-    single-item sync path use asyncio.to_thread() with `timeout` set; the
-    --batch background path (no HTTP caller waiting) calls this directly
-    with timeout=None from inside its own daemon thread."""
+    path), streaming its stdout live to the logger line-by-line as it runs
+    (rather than only reporting the full output after the fact — that was
+    the entire reason a 100+-reel rescan looked totally silent in the
+    console for its whole duration), and return (returncode, stdout, stderr).
+    Blocking — callers on the single-item sync path use asyncio.to_thread()
+    with `timeout` set; the --batch background path (no HTTP caller waiting)
+    calls this directly with timeout=None from inside its own daemon thread.
+
+    PYTHONUNBUFFERED=1 is required here: without it, a child Python process
+    whose stdout is a pipe (not a TTY) block-buffers, so rescan_post.py's
+    own print() progress lines wouldn't actually reach this pipe until the
+    buffer filled or the process exited — defeating the whole point of
+    streaming.
+    """
     cmd = [sys.executable, "scripts/rescan_post.py"] + args
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"},
+        cwd=str(Path(__file__).parent),
+        bufsize=1,
+    )
+    lines = []
+    start = time.monotonic()
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-            cwd=str(Path(__file__).parent),
-            timeout=timeout,
-        )
-        return result.returncode, result.stdout, result.stderr
+        for line in proc.stdout:
+            lines.append(line)
+            stripped = line.rstrip()
+            if stripped:
+                logger.info(f"[rescan] {stripped}")
+            if timeout is not None and (time.monotonic() - start) > timeout:
+                proc.kill()
+                proc.wait()
+                return None, "".join(lines), f"rescan_post.py timed out after {timeout}s"
+        proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        return None, "", f"rescan_post.py timed out after {timeout}s"
+        proc.kill()
+        proc.wait()
+        return None, "".join(lines), f"rescan_post.py timed out after {timeout}s"
+    return proc.returncode, "".join(lines), proc.stderr.read()
 
 
 def _spawn_rescan_batch_background(shortcodes: list):

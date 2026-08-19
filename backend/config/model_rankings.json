@@ -321,11 +321,11 @@
   },
   "openai_gpt41_vision": {
     "key": "openai_gpt41_vision",
-    "avg_response_s": 8.98762088805085,
-    "success_count": 3937,
+    "avg_response_s": 10.58489174114916,
+    "success_count": 3947,
     "fail_count": 13,
     "down_until": null,
-    "last_used": "2026-08-19T06:34:23.086735",
+    "last_used": "2026-08-19T15:18:53.012678",
     "last_error": null,
     "base_priority": 0
   },
@@ -343,8 +343,8 @@
     "key": "gemini_25_flash_lite_vision",
     "avg_response_s": 6.709401964075168,
     "success_count": 14,
-    "fail_count": 249,
-    "down_until": "2026-08-19T06:31:21.763900",
+    "fail_count": 251,
+    "down_until": "2026-08-19T15:23:07.736687",
     "last_used": "2026-02-24T09:45:09.831171",
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 1.5
@@ -353,8 +353,8 @@
     "key": "gemini_25_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 357,
-    "down_until": "2026-08-19T06:37:28.395012",
+    "fail_count": 359,
+    "down_until": "2026-08-19T15:23:06.717944",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 2
@@ -373,8 +373,8 @@
     "key": "gemini_3_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 262,
-    "down_until": "2026-08-19T06:31:20.997036",
+    "fail_count": 264,
+    "down_until": "2026-08-19T15:23:07.299025",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3
