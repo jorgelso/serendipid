@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Pure parsing helpers for the combined title/summary/tags/music/category/
-language AI output (see main.py's build_final_summary_prompt()).
+Pure parsing/prompt-building helpers for the analysis pipeline's AI calls —
+both building the combined title/summary/tags/music/category/language prompt
+(build_final_summary_prompt()) and parsing its output (parse_summary()).
 
 Lives in core/ (not main.py) specifically so core/batch_processor.py can
 reuse it without importing main.py — api.py deliberately never imports
@@ -13,8 +14,172 @@ resumption logic runs in-process in api.py.
 
 import re
 
-from core.categories import parse_categories, keyword_fallback_categories
-from core.languages import parse_languages
+from core.categories import CATEGORY_PROMPT, parse_categories, keyword_fallback_categories
+from core.languages import LANGUAGE_PROMPT, parse_languages
+
+
+def _extract_section(output: str, marker: str) -> str:
+    """Extract the content after a section marker, stopping at the next divider."""
+    if marker not in output:
+        return output[:2000]
+    after = output.split(marker, 1)[1]
+    lines = after.split("\n")
+    content_lines = []
+    started = False
+    for line in lines:
+        stripped = line.strip('-').strip('=').strip('─').strip()
+        if not started:
+            # Skip blank lines and pure divider lines
+            if stripped:
+                started = True
+                content_lines.append(line)
+        else:
+            # Stop at a divider line (5+ repeated chars)
+            raw = line.strip()
+            if (raw.startswith('─' * 5) or raw.startswith('-' * 5) or
+                    raw.startswith('=' * 5) or raw.startswith('*' * 5)):
+                break
+            content_lines.append(line)
+    return "\n".join(content_lines).strip()
+
+
+def _clean_visual(output: str) -> str:
+    return _extract_section(output, "📝 ANALYSIS:")
+
+
+def _clean_audio(output: str) -> str:
+    return _extract_section(output, "📝 TRANSCRIBED TEXT:")
+
+
+def _clean_text(output: str) -> str:
+    return _extract_section(output, "🔍 ANALYSIS:")
+
+
+def build_final_summary_prompt(results, instagram_url, source_caption="", source_hashtags=None):
+    """Build the combined title/summary/tags/music/category/language prompt
+    from all analysis results. Pure (no I/O) — shared by main.py's immediate
+    pipeline (generate_final_summary()) and core/batch_processor.py's
+    analysis-phase resumption, which submits this exact prompt to a batch
+    job instead of calling the router synchronously."""
+    # Collect all analysis data
+    visual_summary = ""
+    audio_summary = ""
+    music_info = ""
+    text_summary = ""
+
+    # Extract visual analysis
+    if results['visual']:
+        visual_summary = "VISUAL ANALYSIS:\n"
+        for item in results['visual']:
+            output = item['output']
+            clean = _clean_visual(output)
+            if clean:
+                visual_summary += f"- {clean[:600]}\n"
+
+    # Extract audio transcription
+    if results['audio_transcription']:
+        audio_summary = "AUDIO TRANSCRIPTION:\n"
+        for item in results['audio_transcription']:
+            output = item['output']
+            clean = _clean_audio(output)
+            lang = output.split('Detected Language:')[1].split('(')[0].strip() if 'Detected Language:' in output else 'Unknown'
+            audio_summary += f"- Language: {lang}\n"
+            if clean:
+                audio_summary += f"- Content: {clean[:400]}\n"
+
+    # Extract music identification
+    if results['music_identification']:
+        music_info = "MUSIC:\n"
+        for item in results['music_identification']:
+            output = item['output']
+            if 'Song:' in output:
+                song_line = [line for line in output.split('\n') if 'Song:' in line][0]
+                artist_line = [line for line in output.split('\n') if 'Artist:' in line]
+
+                song = song_line.split('Song:')[1].strip()
+                artist = artist_line[0].split('Artist:')[1].strip() if artist_line else 'Unknown'
+                music_info += f"- {song} by {artist}\n"
+            elif 'No match found' in output:
+                music_info += "- No music identified (likely voiceover/no background music)\n"
+
+    # Extract text analysis
+    if results['text']:
+        text_summary = "TEXT ANALYSIS:\n"
+        for item in results['text']:
+            clean = _clean_text(item['output'])
+            if clean:
+                text_summary += f"{clean[:600]}\n"
+
+    # Extract original caption/hashtags (from the source export, if provided)
+    caption_block = ""
+    if source_caption and source_caption.strip():
+        caption_block = f"ORIGINAL POST CAPTION (unverified — may be irrelevant or spam, see instructions below):\n{source_caption.strip()}\n"
+
+    hashtags_block = ""
+    if source_hashtags:
+        hashtags_block = f"ORIGINAL POST HASHTAGS: {' '.join('#' + h.lstrip('#') for h in source_hashtags)}\n"
+
+    # Combine all information
+    combined_info = f"""
+INSTAGRAM POST: {instagram_url}
+
+{caption_block}
+{hashtags_block}
+
+{visual_summary}
+
+{audio_summary}
+
+{music_info}
+
+{text_summary}
+"""
+
+    # Generate structured summary using LLM
+    prompt = f"""Based on the following analysis of an Instagram post, create a detailed structured summary that preserves every concrete, useful detail found below — not just a thematic overview.
+
+{combined_info}
+
+BEFORE YOU WRITE ANYTHING: compare the ORIGINAL POST CAPTION/HASHTAGS above to the VISUAL ANALYSIS / AUDIO TRANSCRIPTION / TEXT ANALYSIS above, and classify the relationship into exactly one of these three cases:
+
+1. CONSISTENT — the caption describes, adds detail to, or is simply narrower/broader than what the media shows (e.g. a 10-second clip of a finished dish while the caption gives the full recipe; a short personal clip with a caption telling the actual story; generic/ambient b-roll — walking, a talking-head, a plain product shot, a static single image — paired with a caption that supplies the real substance). This is extremely common and completely legitimate: plenty of real posts put the actual information in the text and use the video only as illustration or a hook, especially on short clips. Thin, generic, or non-specific media is NOT a sign of mismatch — it's normal, and the caption should be trusted and used normally.
+2. GENUINE MISMATCH — the media itself shows a different, specific, self-contained subject that competes with and contradicts the caption: e.g. a screenshot of a different, identifiable social media post/account, a named person/place/event/object visibly different from what the caption claims, or on-screen text/speech that is clearly about an unrelated topic. The key test is not "does the media lack detail the caption has" — it's "does the media affirmatively show something else specific." This is a known spam pattern (pairing a caption about a trending topic with an unrelated 'hook' video to farm reach) but it is the exception, not the default assumption.
+3. UNCLEAR — the media analysis is too thin/generic to tell either way. Treat this the same as CONSISTENT (trust the caption) — do not treat ambiguity as evidence of a mismatch.
+
+Only for case 2 (GENUINE MISMATCH): build the TITLE, SUMMARY, and TAGS from what the visual/audio/text analysis actually shows, not from the caption, and add one short line at the end of the SUMMARY noting the mismatch plainly, e.g. "Note: this post's caption describes [caption topic], but the video/image itself actually shows [actual content] — caption and media do not match, likely mismatched/bait content." For cases 1 and 3, use the caption normally as you would for any post — do not add a mismatch note or second-guess a caption just because the video accompanying it is short, generic, or low on independently-verifiable detail.
+
+Generate a report in this EXACT format:
+
+📌 TITLE:
+[Create a clear, descriptive title. Use the caption normally unless the classification above is GENUINE MISMATCH, in which case title this from what the media actually shows instead.]
+
+📝 SUMMARY:
+[A detailed summary — as long as it needs to be to capture the real content, not capped at a fixed sentence count. Include:
+- Main content/theme
+- Every specific, concrete detail found in the analysis above: exact ingredients/quantities, step-by-step instructions in order, specific locations/names/prices, tool/product names, numbers, measurements, links. Reproduce these specifics directly — do not paraphrase them away into vague generalities like "key ingredients" or "several steps."
+- If this is a tutorial, recipe, itinerary, or how-to, list out the actual steps/items found in the analysis above, in order, not just a description that steps exist.
+- Important highlights
+- Any actionable items or recommendations
+Only include details that are actually present in the analysis above — do not invent or guess specifics that weren't captured by the visual/audio analysis. If the analysis above is thin (e.g. no clear speech was transcribed and no on-screen text was found), say so plainly rather than padding the summary with generic filler.
+Do not mention the absence of structural elements that were never expected in the first place — e.g. don't say "no instructions were given" or "no steps are provided" for a meme, joke, photo, quote, or other content that isn't a tutorial/recipe/how-to. Only note what's missing when its absence is actually notable (e.g. a recipe video with no visible ingredient list). Never write a sentence whose only purpose is to point out that something isn't present.
+
+Apply the classification from above: for CONSISTENT or UNCLEAR, use the caption normally, including as the primary source of detail when the media itself is thin (a short clip, a single generic shot) — that's a normal post, not a gap to flag. Only for GENUINE MISMATCH, describe what the visual/audio/text analysis actually shows and include the one-line mismatch note described above instead of the caption's claims.]
+
+🏷️ TAGS:
+[Generate 8-12 relevant hashtags/keywords. Use the caption's topic normally unless the classification above is GENUINE MISMATCH, in which case tag what the media actually shows instead.]
+
+🎵 MUSIC:
+[Music/song name if found, or "No background music" or "Voiceover only"]
+
+📂 CATEGORY:
+{CATEGORY_PROMPT}
+
+🌐 LANGUAGE:
+{LANGUAGE_PROMPT}
+
+Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
+
+    return prompt
 
 
 def _parse_field(text: str, emoji: str, label: str) -> str:

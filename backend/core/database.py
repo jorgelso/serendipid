@@ -363,6 +363,18 @@ class Database:
         """)
         self._conn.commit()
 
+        # Migration: analysis_batch_id — the visual+text analysis batch job
+        # (one job per reel, bundling one vision request per video/image
+        # file plus one text-analysis request), a phase added after
+        # batch_jobs' initial ('summary_pending' -> 'scoring_pending')
+        # design. A reel now normally starts at phase='analysis_pending'
+        # (this column set), advancing to 'summary_pending' once resolved.
+        try:
+            self._conn.execute("ALTER TABLE batch_jobs ADD COLUMN analysis_batch_id TEXT")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # rescan_batch_jobs — same two-phase shape as batch_jobs above, but
         # for the rescan pipeline (core/rescan_batch_processor.py,
         # scripts/rescan_post.py --batch), which is deliberately separate
@@ -1730,35 +1742,47 @@ class Database:
 
     # ==================== BATCH PROCESSING (ANALYSIS_MODE=batch) ====================
 
-    def enqueue_batch_job(self, shortcode: str, url: str, content_type: str,
-                           summary_batch_id: str, state_json: str) -> bool:
+    def _enqueue_batch_job_entry(self, shortcode: str, url: str, content_type: str,
+                                  phase: str, batch_id_column: str, batch_id: str,
+                                  state_json: str) -> bool:
         """
-        Record a freshly-submitted OpenAI Batch API job for the combined
-        summary call, and mark the item as in-flight in processing_queue
+        Shared implementation for the two possible entry points into the
+        batch_jobs state machine (enqueue_analysis_batch_job /
+        enqueue_batch_job below) — both record a freshly-submitted OpenAI
+        Batch API job and mark the item as in-flight in processing_queue
         (status='batch') so it's excluded from get_queue()/get_processing()
-        without being lost from view entirely. Single call site for both
-        writes, mirroring queue_for_retry()'s shape.
+        without being lost from view entirely.
         """
         if not self.is_connected():
             return False
+        if batch_id_column not in ("analysis_batch_id", "summary_batch_id"):
+            raise ValueError(f"Invalid entry-point batch id column: {batch_id_column}")
+        # batch_id_column is a fixed, code-controlled value (never user input,
+        # validated above), so it's safe to interpolate as a column name.
+        # analysis_val/summary_val are computed here (not via SQL CASE WHEN)
+        # since batch_id_column is already known in Python at this point.
+        analysis_val = batch_id if batch_id_column == "analysis_batch_id" else None
+        summary_val = batch_id if batch_id_column == "summary_batch_id" else None
         try:
             now = datetime.utcnow().isoformat()
             self._conn.execute("""
                 INSERT INTO batch_jobs
-                    (shortcode, url, content_type, phase, summary_batch_id,
-                     state_json, created_at, updated_at)
-                VALUES (?, ?, ?, 'summary_pending', ?, ?, ?, ?)
+                    (shortcode, url, content_type, phase, analysis_batch_id,
+                     summary_batch_id, state_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
-                    url               = excluded.url,
-                    content_type      = excluded.content_type,
-                    phase             = 'summary_pending',
-                    summary_batch_id  = excluded.summary_batch_id,
-                    importance_batch_id = NULL,
-                    embedding_batch_id  = NULL,
-                    state_json        = excluded.state_json,
-                    updated_at        = excluded.updated_at,
-                    last_error        = NULL
-            """, (shortcode, url, content_type, summary_batch_id, state_json, now, now))
+                    url                  = excluded.url,
+                    content_type         = excluded.content_type,
+                    phase                = excluded.phase,
+                    analysis_batch_id    = excluded.analysis_batch_id,
+                    summary_batch_id     = excluded.summary_batch_id,
+                    importance_batch_id  = NULL,
+                    embedding_batch_id   = NULL,
+                    state_json           = excluded.state_json,
+                    updated_at           = excluded.updated_at,
+                    last_error           = NULL
+            """, (shortcode, url, content_type, phase, analysis_val, summary_val,
+                  state_json, now, now))
             self._conn.execute("""
                 INSERT INTO processing_queue
                     (shortcode, url, content_type, status, position, added_at, started_at, updated_at)
@@ -1769,11 +1793,32 @@ class Database:
                     updated_at = excluded.updated_at
             """, (shortcode, url, content_type, now, now, now))
             self._conn.commit()
-            print(f"📦 Submitted batch job for {shortcode}: {summary_batch_id}")
+            print(f"📦 Submitted batch job for {shortcode} ({phase}): {batch_id}")
             return True
         except Exception as e:
             print(f"[WARNING]  Error enqueuing batch job: {e}")
             return False
+
+    def enqueue_analysis_batch_job(self, shortcode: str, url: str, content_type: str,
+                                    analysis_batch_id: str, state_json: str) -> bool:
+        """Entry point when a reel has video/image files and/or an info.txt
+        to analyze: one bundled batch job (one vision request per file, plus
+        one text-analysis request), phase='analysis_pending'."""
+        return self._enqueue_batch_job_entry(
+            shortcode, url, content_type, "analysis_pending",
+            "analysis_batch_id", analysis_batch_id, state_json
+        )
+
+    def enqueue_batch_job(self, shortcode: str, url: str, content_type: str,
+                           summary_batch_id: str, state_json: str) -> bool:
+        """Entry point for the rare reel with nothing to visually/textually
+        analyze (no media, no info.txt) — skips straight to
+        phase='summary_pending' with empty visual/text content, same as the
+        immediate pipeline would produce for such a post."""
+        return self._enqueue_batch_job_entry(
+            shortcode, url, content_type, "summary_pending",
+            "summary_batch_id", summary_batch_id, state_json
+        )
 
     def get_batch_jobs(self, phase: str = None):
         """Return batch_jobs rows, optionally filtered by phase."""
@@ -1791,21 +1836,33 @@ class Database:
             return []
 
     def advance_batch_job(self, shortcode: str, phase: str,
+                           summary_batch_id: str = None,
                            importance_batch_id: str = None,
                            embedding_batch_id: str = None,
                            state_json: str = None) -> bool:
-        """Move a batch job to a new phase (e.g. 'summary_pending' -> 'scoring_pending'),
-        recording the follow-up batch ids and the enriched resume state."""
+        """Move a batch job to a new phase — either 'analysis_pending' ->
+        'summary_pending' (pass summary_batch_id) or 'summary_pending' ->
+        'scoring_pending' (pass importance_batch_id/embedding_batch_id) —
+        recording whichever follow-up batch id(s) this transition produced
+        and the enriched resume state. Each id column is only touched when
+        explicitly passed (COALESCE against its current value), so advancing
+        to scoring_pending doesn't clobber the summary_batch_id already set
+        by the previous transition."""
         if not self.is_connected():
             return False
         try:
             now = datetime.utcnow().isoformat()
             self._conn.execute("""
                 UPDATE batch_jobs
-                SET phase = ?, importance_batch_id = ?, embedding_batch_id = ?,
-                    state_json = COALESCE(?, state_json), updated_at = ?
+                SET phase = ?,
+                    summary_batch_id = COALESCE(?, summary_batch_id),
+                    importance_batch_id = COALESCE(?, importance_batch_id),
+                    embedding_batch_id = COALESCE(?, embedding_batch_id),
+                    state_json = COALESCE(?, state_json),
+                    updated_at = ?
                 WHERE shortcode = ?
-            """, (phase, importance_batch_id, embedding_batch_id, state_json, now, shortcode))
+            """, (phase, summary_batch_id, importance_batch_id, embedding_batch_id,
+                  state_json, now, shortcode))
             self._conn.commit()
             return True
         except Exception as e:

@@ -12,11 +12,20 @@ minutes to 24h, and this app runs on a laptop that isn't always on.
 Deliberately does NOT import main.py — api.py never imports main.py (see
 backend/CLAUDE.md's subprocess-decoupling note: main.py always runs as a
 spawned subprocess so a crash/hang there can't take down the API process).
-The pure parsing logic this needs (parse_summary, apply_music_override)
-lives in core/summary_parser.py specifically so both main.py and this
-module can share it without crossing that boundary.
+The pure parsing/prompt-building logic this needs (parse_summary,
+apply_music_override, build_final_summary_prompt) lives in
+core/summary_parser.py specifically so both main.py and this module can
+share it without crossing that boundary.
 
-Two-phase lifecycle per shortcode (see batch_jobs table in core/database.py):
+Three-phase lifecycle per shortcode (see batch_jobs table in core/database.py):
+  analysis_pending — one bundled batch job (one vision request per video/
+                      image file, plus one text-analysis request) submitted,
+                      not yet resolved. This is the normal entry point —
+                      visual/text analysis moved to batch mode too, not just
+                      the summary, since both are normally OpenAI calls at
+                      full synchronous price. (Skipped for the rare reel with
+                      no media/info.txt at all — main.py submits straight to
+                      summary_pending for those.)
   summary_pending  — combined-summary batch submitted, not yet resolved.
   scoring_pending  — summary resolved; importance + embedding batches
                       submitted concurrently (two sub-batches, since OpenAI
@@ -30,7 +39,7 @@ import threading
 from core.database import get_db
 from core.model_router import get_router
 from core.importance import build_importance_prompt, parse_importance, apply_trusted_creator_boost
-from core.summary_parser import parse_summary, apply_music_override
+from core.summary_parser import parse_summary, apply_music_override, build_final_summary_prompt
 
 _lock = threading.Lock()
 
@@ -51,8 +60,21 @@ def check_and_advance_batches() -> dict:
         return {"skipped": "a batch check is already running"}
     try:
         db = get_db()
+        analysis_advanced, analysis_failed = [], []
         summary_advanced, summary_failed = [], []
         finalized, still_waiting = [], []
+
+        for job in db.get_batch_jobs(phase="analysis_pending"):
+            shortcode = job["shortcode"]
+            try:
+                if _advance_analysis_phase(db, job):
+                    analysis_advanced.append(shortcode)
+                else:
+                    still_waiting.append(shortcode)
+            except Exception as e:
+                print(f"⚠️  [batch] analysis-phase check failed for {shortcode}: {e}")
+                db.mark_batch_job_error(shortcode, str(e))
+                analysis_failed.append(shortcode)
 
         for job in db.get_batch_jobs(phase="summary_pending"):
             shortcode = job["shortcode"]
@@ -78,6 +100,8 @@ def check_and_advance_batches() -> dict:
                 db.mark_batch_job_error(shortcode, str(e))
 
         return {
+            "analysis_advanced": analysis_advanced,
+            "analysis_failed": analysis_failed,
             "summary_advanced": summary_advanced,
             "summary_failed": summary_failed,
             "finalized": finalized,
@@ -85,6 +109,86 @@ def check_and_advance_batches() -> dict:
         }
     finally:
         _lock.release()
+
+
+def _advance_analysis_phase(db, job: dict) -> bool:
+    """Check one analysis_pending job (bundled vision + text batch).
+    Returns True if it advanced to summary_pending (or was resolved as a
+    failure), False if still waiting on OpenAI."""
+    shortcode = job["shortcode"]
+    router = get_router()
+    status = router.get_batch_status(job["analysis_batch_id"])
+    batch_status = status.get("status")
+
+    if batch_status in _TERMINAL_BAD:
+        print(f"❌ [batch] analysis batch {batch_status} for {shortcode} — queuing for retry")
+        db.queue_for_retry(shortcode, job["url"], job.get("content_type") or "instagram",
+                            "batch_analysis_failed", retry_hours=6)
+        db.delete_batch_job(shortcode)
+        return True
+
+    if batch_status not in _TERMINAL_OK:
+        return False  # still validating/in_progress/finalizing
+
+    raw_results = router.get_batch_results(job["analysis_batch_id"])
+    by_id = {r.get("custom_id"): r for r in raw_results}
+    state = json.loads(job["state_json"] or "{}")
+    visual_files = state.get("visual_files", [])
+
+    visual_texts = []
+    visual_entries = []
+    for i, meta in enumerate(visual_files):
+        row = by_id.get(f"visual__{i}")
+        text = router.extract_batch_chat_text(row) if row else None
+        if text:
+            visual_texts.append(text)
+            visual_entries.append({
+                "file": meta.get("file", ""),
+                "type": meta.get("type", "video"),
+                "output": f"📝 ANALYSIS:\n{'-' * 70}\n{text}\n{'-' * 70}",
+            })
+
+    text_text = ""
+    text_entries = []
+    if state.get("text_file"):
+        row = by_id.get("text")
+        text = router.extract_batch_chat_text(row) if row else None
+        if text:
+            text_text = text
+            text_entries.append({
+                "file": state["text_file"],
+                "output": f"🔍 ANALYSIS:\n{'-' * 70}\n{text}\n{'-' * 70}",
+            })
+
+    audio_entries = []
+    if state.get("audio_text"):
+        audio_entries.append({
+            "file": "",
+            "output": f"📝 TRANSCRIBED TEXT:\n{'-' * 70}\n{state['audio_text']}\n{'-' * 70}",
+        })
+
+    results = {
+        "visual": visual_entries,
+        "audio_transcription": audio_entries,
+        "music_identification": state.get("music_identification", []),
+        "text": text_entries,
+    }
+    prompt = build_final_summary_prompt(
+        results, job["url"], state.get("source_caption", ""), state.get("source_hashtags")
+    )
+    summary_req = router.build_batch_chat_request(shortcode, prompt)
+    summary_batch_id = router.submit_openai_batch([summary_req], endpoint="/v1/chat/completions")
+
+    # Collapse into the same flattened strings the "nothing to analyze"
+    # fallback path (main.py) stores directly — _finalize_scoring_phase()
+    # reads these regardless of which path produced them.
+    state["visual_text"] = "\n\n".join(visual_texts)
+    state["text_text"] = text_text
+
+    db.advance_batch_job(shortcode, phase="summary_pending",
+                          summary_batch_id=summary_batch_id, state_json=json.dumps(state))
+    print(f"📦 [batch] {shortcode}: visual+text analysis resolved, submitted summary batch")
+    return True
 
 
 def _advance_summary_phase(db, job: dict) -> bool:

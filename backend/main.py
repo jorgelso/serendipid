@@ -49,7 +49,10 @@ from core.categories import CATEGORY_PROMPT
 from core.languages import LANGUAGE_PROMPT
 from core.importance import parse_importance, apply_trusted_creator_boost, build_importance_prompt
 from core.media_store import relocate_to_media_store
-from core.summary_parser import parse_summary, apply_music_override
+from core.summary_parser import (
+    parse_summary, apply_music_override, build_final_summary_prompt,
+    _clean_visual, _clean_audio, _clean_text,
+)
 from analyzers.youtube_analyzer import analyze_youtube
 from analyzers.webpage_analyzer import analyze_webpage
 
@@ -93,132 +96,6 @@ def print_section(title):
     print(f"\n{'─' * 80}")
     print(f"  {title}")
     print('─' * 80 + "\n")
-
-def build_final_summary_prompt(results, instagram_url, source_caption="", source_hashtags=None):
-    """Build the combined title/summary/tags/music/category/language prompt
-    from all analysis results. Pure (no I/O) — split out of
-    generate_final_summary() so ANALYSIS_MODE=batch can submit this exact
-    prompt to a batch job instead of calling the router synchronously."""
-    # Collect all analysis data
-    visual_summary = ""
-    audio_summary = ""
-    music_info = ""
-    text_summary = ""
-    
-    # Extract visual analysis
-    if results['visual']:
-        visual_summary = "VISUAL ANALYSIS:\n"
-        for item in results['visual']:
-            output = item['output']
-            clean = _clean_visual(output)
-            if clean:
-                visual_summary += f"- {clean[:600]}\n"
-    
-    # Extract audio transcription
-    if results['audio_transcription']:
-        audio_summary = "AUDIO TRANSCRIPTION:\n"
-        for item in results['audio_transcription']:
-            output = item['output']
-            clean = _clean_audio(output)
-            lang = output.split('Detected Language:')[1].split('(')[0].strip() if 'Detected Language:' in output else 'Unknown'
-            audio_summary += f"- Language: {lang}\n"
-            if clean:
-                audio_summary += f"- Content: {clean[:400]}\n"
-    
-    # Extract music identification
-    if results['music_identification']:
-        music_info = "MUSIC:\n"
-        for item in results['music_identification']:
-            output = item['output']
-            if 'Song:' in output:
-                song_line = [line for line in output.split('\n') if 'Song:' in line][0]
-                artist_line = [line for line in output.split('\n') if 'Artist:' in line]
-                
-                song = song_line.split('Song:')[1].strip()
-                artist = artist_line[0].split('Artist:')[1].strip() if artist_line else 'Unknown'
-                music_info += f"- {song} by {artist}\n"
-            elif 'No match found' in output:
-                music_info += "- No music identified (likely voiceover/no background music)\n"
-    
-    # Extract text analysis
-    if results['text']:
-        text_summary = "TEXT ANALYSIS:\n"
-        for item in results['text']:
-            clean = _clean_text(item['output'])
-            if clean:
-                text_summary += f"{clean[:600]}\n"
-    
-    # Extract original caption/hashtags (from the source export, if provided)
-    caption_block = ""
-    if source_caption and source_caption.strip():
-        caption_block = f"ORIGINAL POST CAPTION (unverified — may be irrelevant or spam, see instructions below):\n{source_caption.strip()}\n"
-
-    hashtags_block = ""
-    if source_hashtags:
-        hashtags_block = f"ORIGINAL POST HASHTAGS: {' '.join('#' + h.lstrip('#') for h in source_hashtags)}\n"
-
-    # Combine all information
-    combined_info = f"""
-INSTAGRAM POST: {instagram_url}
-
-{caption_block}
-{hashtags_block}
-
-{visual_summary}
-
-{audio_summary}
-
-{music_info}
-
-{text_summary}
-"""
-    
-    # Generate structured summary using LLM
-    prompt = f"""Based on the following analysis of an Instagram post, create a detailed structured summary that preserves every concrete, useful detail found below — not just a thematic overview.
-
-{combined_info}
-
-BEFORE YOU WRITE ANYTHING: compare the ORIGINAL POST CAPTION/HASHTAGS above to the VISUAL ANALYSIS / AUDIO TRANSCRIPTION / TEXT ANALYSIS above, and classify the relationship into exactly one of these three cases:
-
-1. CONSISTENT — the caption describes, adds detail to, or is simply narrower/broader than what the media shows (e.g. a 10-second clip of a finished dish while the caption gives the full recipe; a short personal clip with a caption telling the actual story; generic/ambient b-roll — walking, a talking-head, a plain product shot, a static single image — paired with a caption that supplies the real substance). This is extremely common and completely legitimate: plenty of real posts put the actual information in the text and use the video only as illustration or a hook, especially on short clips. Thin, generic, or non-specific media is NOT a sign of mismatch — it's normal, and the caption should be trusted and used normally.
-2. GENUINE MISMATCH — the media itself shows a different, specific, self-contained subject that competes with and contradicts the caption: e.g. a screenshot of a different, identifiable social media post/account, a named person/place/event/object visibly different from what the caption claims, or on-screen text/speech that is clearly about an unrelated topic. The key test is not "does the media lack detail the caption has" — it's "does the media affirmatively show something else specific." This is a known spam pattern (pairing a caption about a trending topic with an unrelated 'hook' video to farm reach) but it is the exception, not the default assumption.
-3. UNCLEAR — the media analysis is too thin/generic to tell either way. Treat this the same as CONSISTENT (trust the caption) — do not treat ambiguity as evidence of a mismatch.
-
-Only for case 2 (GENUINE MISMATCH): build the TITLE, SUMMARY, and TAGS from what the visual/audio/text analysis actually shows, not from the caption, and add one short line at the end of the SUMMARY noting the mismatch plainly, e.g. "Note: this post's caption describes [caption topic], but the video/image itself actually shows [actual content] — caption and media do not match, likely mismatched/bait content." For cases 1 and 3, use the caption normally as you would for any post — do not add a mismatch note or second-guess a caption just because the video accompanying it is short, generic, or low on independently-verifiable detail.
-
-Generate a report in this EXACT format:
-
-📌 TITLE:
-[Create a clear, descriptive title. Use the caption normally unless the classification above is GENUINE MISMATCH, in which case title this from what the media actually shows instead.]
-
-📝 SUMMARY:
-[A detailed summary — as long as it needs to be to capture the real content, not capped at a fixed sentence count. Include:
-- Main content/theme
-- Every specific, concrete detail found in the analysis above: exact ingredients/quantities, step-by-step instructions in order, specific locations/names/prices, tool/product names, numbers, measurements, links. Reproduce these specifics directly — do not paraphrase them away into vague generalities like "key ingredients" or "several steps."
-- If this is a tutorial, recipe, itinerary, or how-to, list out the actual steps/items found in the analysis above, in order, not just a description that steps exist.
-- Important highlights
-- Any actionable items or recommendations
-Only include details that are actually present in the analysis above — do not invent or guess specifics that weren't captured by the visual/audio analysis. If the analysis above is thin (e.g. no clear speech was transcribed and no on-screen text was found), say so plainly rather than padding the summary with generic filler.
-Do not mention the absence of structural elements that were never expected in the first place — e.g. don't say "no instructions were given" or "no steps are provided" for a meme, joke, photo, quote, or other content that isn't a tutorial/recipe/how-to. Only note what's missing when its absence is actually notable (e.g. a recipe video with no visible ingredient list). Never write a sentence whose only purpose is to point out that something isn't present.
-
-Apply the classification from above: for CONSISTENT or UNCLEAR, use the caption normally, including as the primary source of detail when the media itself is thin (a short clip, a single generic shot) — that's a normal post, not a gap to flag. Only for GENUINE MISMATCH, describe what the visual/audio/text analysis actually shows and include the one-line mismatch note described above instead of the caption's claims.]
-
-🏷️ TAGS:
-[Generate 8-12 relevant hashtags/keywords. Use the caption's topic normally unless the classification above is GENUINE MISMATCH, in which case tag what the media actually shows instead.]
-
-🎵 MUSIC:
-[Music/song name if found, or "No background music" or "Voiceover only"]
-
-📂 CATEGORY:
-{CATEGORY_PROMPT}
-
-🌐 LANGUAGE:
-{LANGUAGE_PROMPT}
-
-Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
-
-    return prompt
-
 
 def generate_final_summary(results, instagram_url, source_caption="", source_hashtags=None):
     """Generate comprehensive summary using all analysis results via ModelRouter."""
@@ -370,49 +247,12 @@ def run_analysis_task(task_name, script_name, file_path, task_type="light"):
     
     return result
 
-def _extract_section(output: str, marker: str) -> str:
-    """Extract the content after a section marker, stopping at the next divider."""
-    if marker not in output:
-        return output[:2000]
-    after = output.split(marker, 1)[1]
-    lines = after.split("\n")
-    content_lines = []
-    started = False
-    for line in lines:
-        stripped = line.strip('-').strip('=').strip('─').strip()
-        if not started:
-            # Skip blank lines and pure divider lines
-            if stripped:
-                started = True
-                content_lines.append(line)
-        else:
-            # Stop at a divider line (5+ repeated chars)
-            raw = line.strip()
-            if (raw.startswith('─' * 5) or raw.startswith('-' * 5) or
-                    raw.startswith('=' * 5) or raw.startswith('*' * 5)):
-                break
-            content_lines.append(line)
-    return "\n".join(content_lines).strip()
-
-
-def _clean_visual(output: str) -> str:
-    return _extract_section(output, "📝 ANALYSIS:")
-
-
-def _clean_audio(output: str) -> str:
-    return _extract_section(output, "📝 TRANSCRIBED TEXT:")
-
-
 def _audio_backend(output: str) -> str:
     """Extract which backend actually produced the transcript, e.g. 'Groq
     Whisper API' or 'Local Whisper (base)' — printed by
     analyzers/audio_transcribe.py on success."""
     m = re.search(r'🔧 Backend:\s*(.+)', output)
     return m.group(1).strip() if m else ""
-
-
-def _clean_text(output: str) -> str:
-    return _extract_section(output, "🔍 ANALYSIS:")
 
 
 def _jpg_to_thumbnail(jpg_path) -> str:
@@ -787,7 +627,11 @@ def main():
         analysis_start = time.time()
     
         # === PHASE 1: Visual Analysis (HEAVY) - Run alone ===
-        if mp4_files or jpg_files:
+        # In ANALYSIS_MODE=batch, visual analysis is deferred to the
+        # analysis-batch submission below (bundled with text analysis into
+        # one OpenAI Batch API job) instead of running synchronously here —
+        # skip this phase entirely in that mode.
+        if ANALYSIS_MODE != "batch" and (mp4_files or jpg_files):
             print(f"\n🎬 Phase 1: Visual Analysis (Heavy Task)")
         
             for video in mp4_files:
@@ -845,10 +689,13 @@ def main():
         # Add music identification tasks
         for audio in mp3_files:
             light_tasks.append(('music', 'analyzers/music_identifier.py', str(audio)))
-    
-        # Add text analysis tasks
-        for info_file in info_files:
-            light_tasks.append(('text', 'analyzers/text_analyzer.py', str(info_file)))
+
+        # Add text analysis tasks — deferred to the analysis-batch submission
+        # below in ANALYSIS_MODE=batch (bundled with visual analysis into one
+        # OpenAI Batch API job), same reasoning as Phase 1 above.
+        if ANALYSIS_MODE != "batch":
+            for info_file in info_files:
+                light_tasks.append(('text', 'analyzers/text_analyzer.py', str(info_file)))
     
         if light_tasks:
             # Run light tasks in parallel (max 3 concurrent)
@@ -885,13 +732,114 @@ def main():
         analysis_elapsed = time.time() - analysis_start
         print(f"\n⏱️  Total Analysis Time: {analysis_elapsed:.1f}s")
 
-        # === ANALYSIS_MODE=batch: submit the combined-summary call to
-        # OpenAI's Batch API (~50% cheaper, up to 24h turnaround) instead of
-        # calling it synchronously, persist everything needed to finish the
-        # pipeline later, and exit. This subprocess won't be alive when the
-        # batch completes — resumption happens in-process in api.py via
-        # core/batch_processor.check_and_advance_batches(), called on backend
-        # startup and from POST /batches/check, not from here.
+        # === ANALYSIS_MODE=batch: submit visual + text analysis to OpenAI's
+        # Batch API too, not just the summary — both are normally OpenAI
+        # vision/text calls at full synchronous price (audio transcription
+        # is Groq/local Whisper and music ID is Shazam, neither ever touches
+        # OpenAI, so Phases 2-3 above still ran those synchronously as
+        # usual). Bundles one vision request per video/image file plus one
+        # text-analysis request into a SINGLE batch job (all
+        # /v1/chat/completions), mirroring visual_analyze.py's/
+        # text_analyzer.py's own prompt-building exactly so results parse
+        # identically once the batch resolves (see core/batch_processor.py's
+        # _advance_analysis_phase()).
+        if ANALYSIS_MODE == "batch" and (mp4_files or jpg_files or info_files):
+            print_header("📦 SUBMITTING TO OPENAI BATCH (visual + text analysis)")
+            from core.model_router import get_router as _get_router
+            from analyzers.visual_analyze import (
+                extract_frames, image_to_b64, VISION_PROMPT,
+                _get_duration_s, _frame_count_for_duration,
+            )
+            from analyzers.text_analyzer import build_text_analysis_prompt
+
+            router = _get_router()
+            analysis_requests = []
+            visual_files_meta = []  # [{"file":..., "type":...}, ...] in submission order
+
+            for video in mp4_files:
+                duration = _get_duration_s(str(video))
+                max_frames = _frame_count_for_duration(duration)
+                print(f"🎥 Extracting frames from {video.name}... (~{duration}s → {max_frames} frame(s))")
+                frames = extract_frames(str(video), max_frames=max_frames)
+                if frames:
+                    custom_id = f"visual__{len(visual_files_meta)}"
+                    analysis_requests.append(
+                        router.build_batch_vision_request(custom_id, VISION_PROMPT, frames)
+                    )
+                    visual_files_meta.append({"file": video.name, "type": "video"})
+                else:
+                    print(f"⚠️  Could not extract any frames from {video.name} — skipping")
+
+            for img in jpg_files:
+                try:
+                    frame = image_to_b64(str(img))
+                except Exception as e:
+                    print(f"⚠️  Could not load image {img.name}: {e}")
+                    continue
+                custom_id = f"visual__{len(visual_files_meta)}"
+                analysis_requests.append(
+                    router.build_batch_vision_request(custom_id, VISION_PROMPT, [frame])
+                )
+                visual_files_meta.append({"file": img.name, "type": "image"})
+
+            text_file_name = None
+            if info_files:
+                try:
+                    with open(info_files[0], 'r', encoding='utf-8') as f:
+                        info_content = f.read().strip()
+                except Exception as e:
+                    info_content = ""
+                    print(f"⚠️  Could not read {info_files[0].name}: {e}")
+                if info_content:
+                    text_prompt = build_text_analysis_prompt(info_content)
+                    analysis_requests.append(router.build_batch_chat_request("text", text_prompt))
+                    text_file_name = info_files[0].name
+
+            if analysis_requests:
+                analysis_batch_id = router.submit_openai_batch(analysis_requests, endpoint="/v1/chat/completions")
+
+                instagram_thumbnail = extract_instagram_thumbnail(jpg_files, mp4_files)
+                _info = parse_info_txt(info_files)
+                media_files = relocate_to_media_store(download_folder, shortcode)
+                audio_text = "\n\n".join([_clean_audio(r['output']) for r in results['audio_transcription']])
+                transcription_backend = (
+                    _audio_backend(results['audio_transcription'][0]['output'])
+                    if results['audio_transcription'] else ""
+                )
+
+                state = {
+                    "source_caption": source_caption,
+                    "source_hashtags": source_hashtags,
+                    "username": _info["username"],
+                    "likes": _info["likes"],
+                    "post_date": _info["post_date"],
+                    "caption": _info["caption"],
+                    "media_files": media_files,
+                    "visual_files": visual_files_meta,
+                    "text_file": text_file_name,
+                    "audio_text": audio_text,
+                    "transcription_backend": transcription_backend,
+                    "thumbnail": instagram_thumbnail,
+                    "music_identification": results.get('music_identification', []),
+                    "content_type": "instagram",
+                }
+                db.enqueue_analysis_batch_job(shortcode, instagram_url, "instagram", analysis_batch_id, json.dumps(state))
+                print(f"📦 Submitted to OpenAI batch (visual+text analysis): {analysis_batch_id}")
+                sys.exit(BATCH_EXIT_CODE)
+            # else: nothing extractable (e.g. all files corrupt/unreadable) —
+            # fall through to the summary-only batch path below with empty
+            # visual/text content, same as the "no media at all" case.
+
+        # === ANALYSIS_MODE=batch fallback: reached only when there was
+        # nothing for the analysis-batch block above to submit (no video/
+        # image files AND no info.txt — rare) or `analysis_requests` ended
+        # up empty (all files corrupt/unreadable). Submits the combined
+        # summary directly with whatever's actually available (results
+        # still has empty visual/text lists in this case), same as the
+        # immediate pipeline would produce for such a post. This subprocess
+        # won't be alive when the batch completes — resumption happens
+        # in-process in api.py via core/batch_processor.check_and_advance_batches(),
+        # called on backend startup and from POST /batches/check, not here.
         if ANALYSIS_MODE == "batch":
             print_header("📦 SUBMITTING TO OPENAI BATCH (summary)")
             from core.model_router import get_router as _get_router

@@ -14,6 +14,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.model_router import get_router
 
 
+def build_text_analysis_prompt(content: str) -> str:
+    """Pure prompt-builder, split out of analyze_text() so ANALYSIS_MODE=batch
+    (main.py) can build the same prompt to submit as a batch request instead
+    of calling analyze_text()'s synchronous router.generate_text()."""
+    return f"""You are analyzing an Instagram post's metadata. Read the following information and provide insights.
+
+POST INFORMATION:
+{content}
+
+TASK: Analyze this post and provide:
+1. Main topic / theme
+2. Content type (travel guide, vlog, educational, product review, etc.)
+3. Key highlights and takeaways
+4. Notable details (locations, products, people, links, tips mentioned)
+5. Target audience
+
+Be specific and concise. Max 300 words."""
+
+
 def analyze_text(file_path: str) -> dict:
     """
     Analyze a text file using the best available AI model.
@@ -38,19 +57,7 @@ def analyze_text(file_path: str) -> dict:
     if not content:
         return {"success": False, "error": "File is empty"}
 
-    prompt = f"""You are analyzing an Instagram post's metadata. Read the following information and provide insights.
-
-POST INFORMATION:
-{content}
-
-TASK: Analyze this post and provide:
-1. Main topic / theme
-2. Content type (travel guide, vlog, educational, product review, etc.)
-3. Key highlights and takeaways
-4. Notable details (locations, products, people, links, tips mentioned)
-5. Target audience
-
-Be specific and concise. Max 300 words."""
+    prompt = build_text_analysis_prompt(content)
 
     print("🔄 Generating text analysis...")
 

@@ -1,5 +1,5 @@
 {
-  "cached_at": "2026-08-19T00:03:55.364461",
+  "cached_at": "2026-08-19T14:48:02.497408",
   "models": [
     {
       "id": "nvidia/nemotron-3.5-lightning:free",
@@ -132,7 +132,7 @@
           {
             "arena": "models",
             "category": "codecategories",
-            "elo": 1150,
+            "elo": 1149,
             "win_rate": 36,
             "rank": 77
           },
@@ -771,7 +771,7 @@
           {
             "arena": "models",
             "category": "codecategories",
-            "elo": 1326,
+            "elo": 1325,
             "win_rate": 56.3,
             "rank": 6
           },

@@ -926,7 +926,7 @@ def _spawn_rescan_batch_background(shortcodes: list):
             # subprocess dies before reaching one, don't leave it stuck at
             # status='processing' forever.
             db = get_db()
-            still_processing = {p["shortcode"] for p in db.get_processing()}
+            still_processing = set(db.get_processing())  # already a list of shortcodes, not rows
             for sc in shortcodes:
                 if sc in still_processing:
                     db.remove_from_queue(sc)

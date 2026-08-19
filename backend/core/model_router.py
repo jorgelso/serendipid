@@ -1424,6 +1424,29 @@ class ModelRouter:
             },
         }
 
+    def build_batch_vision_request(self, custom_id: str, prompt: str, images_b64: List[str],
+                                    model_id: str = "gpt-4.1") -> Dict:
+        """One /v1/chat/completions batch request line for a vision call,
+        body mirrors _openai_vision() (multimodal content: images + text)."""
+        content: List[Dict] = []
+        for b64 in images_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            })
+        content.append({"type": "text", "text": prompt})
+        return {
+            "custom_id": custom_id,
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": model_id,
+                "messages": [{"role": "user", "content": content}],
+                "max_tokens": 4000,
+                "temperature": 0.7,
+            },
+        }
+
     def build_batch_embedding_request(self, custom_id: str, text: str,
                                        model_id: str = "text-embedding-3-small") -> Dict:
         """One /v1/embeddings batch request line, body mirrors generate_embedding()."""
