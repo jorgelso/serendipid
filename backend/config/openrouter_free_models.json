@@ -1,5 +1,5 @@
 {
-  "cached_at": "2026-08-19T14:48:02.497408",
+  "cached_at": "2026-08-19T20:48:09.408317",
   "models": [
     {
       "id": "nvidia/nemotron-3.5-lightning:free",
@@ -1121,7 +1121,7 @@
       },
       "supported_voices": null,
       "knowledge_cutoff": null,
-      "expiration_date": null,
+      "expiration_date": "2026-08-24",
       "links": {
         "details": "/api/v1/models/nvidia/nemotron-3-nano-30b-a3b/endpoints"
       },
@@ -1291,7 +1291,7 @@
       },
       "supported_voices": null,
       "knowledge_cutoff": "2025-03-31",
-      "expiration_date": null,
+      "expiration_date": "2026-08-24",
       "links": {
         "details": "/api/v1/models/nvidia/nemotron-nano-9b-v2/endpoints"
       },

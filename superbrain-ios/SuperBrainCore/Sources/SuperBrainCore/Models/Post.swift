@@ -54,11 +54,19 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
     public let enjoyment_rating: String?
     public let perceived_importance_rating: String?
     /// AI-judged oratory eloquence, independent of topic (`core/eloquence.py`).
-    /// `nil` = not yet scored — never treat that as "not eloquent."
-    public let is_eloquent: Bool?
-    /// Only meaningful when `is_eloquent == true`: whether the delivery reads
-    /// as tutorial-style instruction vs. speech/commentary.
-    public let is_tutorial: Bool?
+    /// The backend passes this straight through from a SQLite INTEGER column
+    /// (`database.py`'s `_row_to_dict()` does no bool conversion, unlike
+    /// `needs_review`) — `/export` serializes it as a JSON *number*, not a
+    /// bool, exactly like the web app's `domain.ts` (`0 | 1 | null`). Must
+    /// stay `Int?` here too: declaring this `Bool?` throws a
+    /// `DecodingError.typeMismatch` on every post, since `JSONDecoder` never
+    /// coerces a number into a `Bool`. `1` = eloquent, `0` = not, `nil` = not
+    /// yet scored — never treat `nil` as "not eloquent."
+    public let is_eloquent: Int?
+    /// Only meaningful when `is_eloquent == 1`: whether the delivery reads
+    /// as tutorial-style instruction (`1`) vs. speech/commentary (`0`). Same
+    /// raw-integer wire format as `is_eloquent` above.
+    public let is_tutorial: Int?
     public let eloquence_rationale: String?
 
     public init(
@@ -70,7 +78,7 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
         is_hidden: Int, source_hashtags: [String], media_files: [String],
         media_urls: [String], analysis_version: Int, needs_review: Bool, embedding: String?,
         enjoyment_rating: String? = nil, perceived_importance_rating: String? = nil,
-        is_eloquent: Bool? = nil, is_tutorial: Bool? = nil, eloquence_rationale: String? = nil
+        is_eloquent: Int? = nil, is_tutorial: Int? = nil, eloquence_rationale: String? = nil
     ) {
         self.shortcode = shortcode
         self.url = url

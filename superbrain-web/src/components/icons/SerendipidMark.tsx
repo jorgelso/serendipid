@@ -1,0 +1,20 @@
+export default function SerendipidMark({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 28 28"
+      className={className}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M15 3.5c.4 4.3 1.4 7 3.1 8.1s4.3 1.7 8.4 1.9c-4.1.4-6.8 1.3-8.4 2.6-1.6 1.4-2.6 3.9-3.1 7.4-.5-3.5-1.5-6-3.1-7.4-1.6-1.3-4.3-2.2-8.4-2.6 4.1-.2 6.8-.8 8.4-1.9S14.6 7.8 15 3.5Z"
+        fill="var(--color-coral)"
+      />
+      <path
+        d="M6.5 1c.2 1.9.7 3.1 1.4 3.6s1.8.8 3.6.9c-1.8.2-3 .6-3.6 1.1S6.7 8 6.5 9.9C6.3 8 5.8 6.8 5.1 6.3S3.3 5.5 1.5 5.4c1.8-.1 3-.4 3.6-.9S6.3 2.9 6.5 1Z"
+        fill="var(--color-lavender)"
+      />
+    </svg>
+  );
+}

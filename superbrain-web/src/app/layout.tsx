@@ -15,7 +15,7 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "SuperBrain — your saved reels, worth scrolling again",
+  title: "Serendipid — your saved reels, worth scrolling again",
   description: "Everything you've saved on Instagram, turned into a feed worth scrolling.",
 };
 

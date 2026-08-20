@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import RefreshButton from "./RefreshButton";
 import CheckBatchesButton from "./CheckBatchesButton";
+import SerendipidMark from "./icons/SerendipidMark";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -23,8 +24,8 @@ export default function NavBar() {
     <header className="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur-md">
       <div className="mx-auto max-w-6xl px-5 py-3.5 flex items-center gap-6">
         <Link href="/" className="flex items-center gap-2 shrink-0">
-          <span className="text-2xl">🧠</span>
-          <span className="font-display font-bold text-xl tracking-tight">SuperBrain</span>
+          <SerendipidMark className="w-7 h-7" />
+          <span className="font-display font-bold text-xl tracking-tight">Serendipid</span>
         </Link>
         <nav className="flex items-center gap-1">
           {LINKS.map((link) => {

@@ -70,7 +70,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       );
     }
     throw new SuperBrainApiError(
-      `Could not reach the SuperBrain backend at ${config.apiUrl}. ` +
+      `Could not reach the backend at ${config.apiUrl}. ` +
         "Check that it's running and that SUPERBRAIN_API_URL is correct."
     );
   } finally {

@@ -90,11 +90,11 @@ final class BrowseViewModel {
             case nil:
                 break
             case .eloquentOnly:
-                if post.is_eloquent != true { return false }
+                if post.is_eloquent != 1 { return false }
             case .tutorialOnly:
-                if post.is_eloquent != true || post.is_tutorial != true { return false }
+                if post.is_eloquent != 1 || post.is_tutorial != 1 { return false }
             case .speechOnly:
-                if post.is_eloquent != true || post.is_tutorial != false { return false }
+                if post.is_eloquent != 1 || post.is_tutorial != 0 { return false }
             }
             return true
         }

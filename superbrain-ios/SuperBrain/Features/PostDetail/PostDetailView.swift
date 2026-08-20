@@ -126,9 +126,9 @@ struct PostDetailView: View {
             if let importanceBadge = ImportanceBadge(importance: post.importance) {
                 importanceBadge
             }
-            if post.is_eloquent == true {
+            if post.is_eloquent == 1 {
                 PillBadge(
-                    post.is_tutorial == true ? "🎙 tutorial" : "🎙 eloquent",
+                    post.is_tutorial == 1 ? "🎙 tutorial" : "🎙 eloquent",
                     background: BrightPulse.tealSoft, foreground: BrightPulse.tealInk, uppercase: false
                 )
             }

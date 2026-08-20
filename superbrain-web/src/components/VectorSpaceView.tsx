@@ -33,6 +33,11 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
   // "both active" state.
   const [legendSelection, setLegendSelection] = useState<string | null>(null);
   const [searchShortcodes, setSearchShortcodes] = useState<Set<string> | null>(null);
+  // Clicking a point isolates it (dims every other point, same mechanism as
+  // the legend/search highlight) so it stays visually findable even after
+  // FocusOrbit re-centers the camera on it and the cursor is no longer over
+  // it. Clicking the same point again clears it — same toggle as the legend.
+  const [pointSelection, setPointSelection] = useState<string | null>(null);
   const [selectedPost, setSelectedPost] = useState<ClientPost | null>(null);
   const [loadingShortcode, setLoadingShortcode] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -52,19 +57,30 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
     return matches;
   }, [points, legendSelection]);
 
-  const highlightedShortcodes = searchShortcodes ?? legendHighlight;
+  const pointHighlight = useMemo(
+    () => (pointSelection ? new Set([pointSelection]) : null),
+    [pointSelection]
+  );
+
+  const highlightedShortcodes = searchShortcodes ?? legendHighlight ?? pointHighlight;
 
   function handleSelectTheme(key: string | null) {
     setSearchShortcodes(null);
+    setPointSelection(null);
     setLegendSelection(key);
   }
 
   function handleSearchResults(shortcodes: Set<string> | null) {
     setLegendSelection(null);
+    setPointSelection(null);
     setSearchShortcodes(shortcodes);
   }
 
   async function handleSelect(shortcode: string) {
+    setLegendSelection(null);
+    setSearchShortcodes(null);
+    setPointSelection((prev) => (prev === shortcode ? null : shortcode));
+
     setLoadingShortcode(shortcode);
     setLoadError(null);
     try {
@@ -101,7 +117,12 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
           </div>
           <button
             type="button"
-            onClick={() => sceneRef.current?.resetCamera()}
+            onClick={() => {
+              sceneRef.current?.resetCamera();
+              setLegendSelection(null);
+              setSearchShortcodes(null);
+              setPointSelection(null);
+            }}
             title="Reset view"
             className="rounded-2xl border border-line bg-surface/90 px-3 py-2.5 text-xs font-bold text-ink-muted shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md transition-colors hover:text-ink"
           >
