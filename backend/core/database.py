@@ -419,6 +419,27 @@ class Database:
         """)
         self._conn.commit()
 
+        # eloquence_batch_jobs — resume state for scripts/score_eloquence.py
+        # --batch under ANALYSIS_MODE=batch (core/eloquence_batch_processor.py).
+        # Single-phase, unlike batch_jobs/rescan_batch_jobs' two-phase shape:
+        # eloquence scoring is one LLM call per post with nothing downstream
+        # (no importance/embedding follow-up), so there's only "submitted" ->
+        # "resolved", tracked by presence/absence of the row rather than a
+        # phase column. Many shortcodes share one batch_id (one shared OpenAI
+        # batch job per chunk, same rationale as rescan_batch_jobs above) —
+        # that's why this is its own table rather than a column on analyses.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS eloquence_batch_jobs (
+                shortcode   TEXT PRIMARY KEY,
+                batch_id    TEXT,
+                created_at  TEXT,
+                updated_at  TEXT,
+                last_error  TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_eloquence_batch_jobs_batch_id ON eloquence_batch_jobs (batch_id);
+        """)
+        self._conn.commit()
+
         # Collections table
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
@@ -1032,6 +1053,79 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error getting eloquence-scoring candidates: {e}")
             return []
+
+    # ── eloquence_batch_jobs (scripts/score_eloquence.py --batch, ANALYSIS_MODE=batch) ──
+    # See eloquence_batch_jobs' comment in _create_tables for why this is a
+    # single-phase table with many shortcodes sharing one batch_id.
+
+    def enqueue_eloquence_batch_jobs(self, shortcodes: list, batch_id: str) -> bool:
+        """Record one shared OpenAI batch job covering all of `shortcodes`."""
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.executemany("""
+                INSERT INTO eloquence_batch_jobs (shortcode, batch_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(shortcode) DO UPDATE SET
+                    batch_id   = excluded.batch_id,
+                    updated_at = excluded.updated_at,
+                    last_error = NULL
+            """, [(sc, batch_id, now, now) for sc in shortcodes])
+            self._conn.commit()
+            print(f"📦 Submitted eloquence batch job for {len(shortcodes)} post(s): {batch_id}")
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error enqueuing eloquence batch jobs: {e}")
+            return False
+
+    def get_eloquence_batch_jobs(self, batch_id: str = None):
+        """Return eloquence_batch_jobs rows, optionally filtered to one shared batch_id
+        (the grouping query core/eloquence_batch_processor.py uses to advance every
+        shortcode sharing one OpenAI batch job together)."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            if batch_id:
+                cur.execute("SELECT * FROM eloquence_batch_jobs WHERE batch_id = ? ORDER BY created_at", (batch_id,))
+            else:
+                cur.execute("SELECT * FROM eloquence_batch_jobs ORDER BY created_at")
+            return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting eloquence batch jobs: {e}")
+            return []
+
+    def mark_eloquence_batch_job_error(self, shortcode: str, error: str) -> bool:
+        """Best-effort observability write — does not delete the row."""
+        if not self.is_connected():
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE eloquence_batch_jobs SET last_error = ?, updated_at = ? WHERE shortcode = ?",
+                (error, now, shortcode)
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error recording eloquence batch job error: {e}")
+            return False
+
+    def delete_eloquence_batch_job(self, shortcode: str) -> bool:
+        """Remove an eloquence_batch_jobs row on final success or failure. On
+        failure this deliberately does NOT touch the analyses row — is_eloquent
+        stays NULL, so the post is simply picked up again as an unscored
+        candidate on the next scripts/score_eloquence.py run."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute("DELETE FROM eloquence_batch_jobs WHERE shortcode = ?", (shortcode,))
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error deleting eloquence batch job: {e}")
+            return False
 
     def get_posts_missing_importance(self, include_scored: bool = False):
         """Return [{shortcode, username, title, summary, tags, category}, ...]

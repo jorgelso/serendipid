@@ -137,6 +137,17 @@ def build_eloquence_prompt(transcript: str) -> str:
 {ELOQUENCE_PROMPT}"""
 
 
+def build_eloquence_batch_request(shortcode: str, transcript: str) -> dict:
+    """One /v1/chat/completions batch request line for scripts/score_eloquence.py
+    --batch (core/eloquence_batch_processor.py), pinned to "gpt-4.1" to match
+    score_and_stamp_eloquence()'s immediate-call model exactly."""
+    from core.model_router import get_router
+
+    return get_router().build_batch_chat_request(
+        shortcode, build_eloquence_prompt(transcript), model_id="gpt-4.1"
+    )
+
+
 def parse_eloquence(raw: str):
     """Parse the model's raw output into
     (is_eloquent: bool | None, is_tutorial: bool | None, rationale: str).

@@ -269,6 +269,19 @@ def _startup_rescan_batch_check():
 
 threading.Thread(target=_startup_rescan_batch_check, daemon=True).start()
 
+# Same idea, for scripts/score_eloquence.py --batch's batch pipeline
+# (core/eloquence_batch_processor.py) — also its own distinct check, not a
+# call into either check above.
+def _startup_eloquence_batch_check():
+    try:
+        from core.eloquence_batch_processor import check_and_advance_eloquence_batches
+        result = check_and_advance_eloquence_batches()
+        logger.info(f"📦 Startup eloquence-batch check: {result}")
+    except Exception as e:
+        logger.error(f"Startup eloquence-batch check failed: {e}")
+
+threading.Thread(target=_startup_eloquence_batch_check, daemon=True).start()
+
 # Background worker to process queue
 def queue_worker():
     """Background thread that processes queued items automatically"""
@@ -1817,6 +1830,23 @@ async def check_rescan_batches(token: str = Depends(verify_token)):
         return {"success": True, "analysis_mode": ANALYSIS_MODE, **result}
     except Exception as e:
         logger.error(f"Rescan batch check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/eloquence/batches/check")
+async def check_eloquence_batches(token: str = Depends(verify_token)):
+    """
+    Same idea as POST /batches/check, but for scripts/score_eloquence.py
+    --batch's OpenAI Batch API jobs (core/eloquence_batch_processor.py).
+    Distinct route/function/table from the other two batch-check endpoints —
+    the eloquence backfill doesn't share state with first-analysis or rescan.
+    """
+    try:
+        from core.eloquence_batch_processor import check_and_advance_eloquence_batches
+        result = await asyncio.to_thread(check_and_advance_eloquence_batches)
+        return {"success": True, "analysis_mode": ANALYSIS_MODE, **result}
+    except Exception as e:
+        logger.error(f"Eloquence batch check failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
