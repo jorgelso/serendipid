@@ -74,7 +74,14 @@ export function filterPosts(
   posts: Post[],
   collections: Collection[],
   options: {
-    category?: string;
+    // A post's categories must all be within this set ("exact"/subset match,
+    // the default) — or just overlap it at all ("any"/union match) when
+    // categoryMatch is explicitly "any". Subset match is what keeps a
+    // "Books"-only browse from pulling in a post also tagged Humor & Memes;
+    // "any" exists as an explicit broaden-out escape hatch for when subset
+    // match returns too little (see the Browse page's fallback hint).
+    category?: string[];
+    categoryMatch?: "exact" | "any";
     language?: string;
     collectionId?: string;
     sort?: "recent" | "importance";
@@ -89,8 +96,12 @@ export function filterPosts(
   }
 ): Post[] {
   let filtered = options.sort === "importance" ? sortPostsByImportance(posts) : sortPostsByRecency(posts);
-  if (options.category) {
-    filtered = filtered.filter((p) => p.category.includes(options.category!));
+  if (options.category && options.category.length > 0) {
+    const selected = new Set(options.category);
+    filtered =
+      options.categoryMatch === "any"
+        ? filtered.filter((p) => p.category.some((c) => selected.has(c)))
+        : filtered.filter((p) => p.category.length > 0 && p.category.every((c) => selected.has(c)));
   }
   if (options.language) {
     filtered = filtered.filter((p) => p.language.includes(options.language!));
@@ -171,7 +182,10 @@ export function filterVersionPosts(
   return filterPosts(
     posts.filter((p) => p.analysis_version === version),
     [],
-    options
+    // categoryMatch "any": version filtering is a single-select, unrelated
+    // to Browse's exact/subset matching — keep its original "contains this
+    // category" behavior unchanged.
+    { ...options, category: options.category ? [options.category] : undefined, categoryMatch: "any" }
   );
 }
 

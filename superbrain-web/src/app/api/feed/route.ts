@@ -16,7 +16,9 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const offset = Math.max(0, Number(searchParams.get("offset") ?? 0) || 0);
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(searchParams.get("limit") ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
-  const category = searchParams.get("category") || undefined;
+  const categoryParam = searchParams.get("category");
+  const category = categoryParam ? categoryParam.split(",").filter(Boolean) : undefined;
+  const categoryMatch = searchParams.get("categoryMode") === "any" ? "any" : "exact";
   const language = searchParams.get("language") || undefined;
   const collectionId = searchParams.get("collection") || undefined;
   const sort = searchParams.get("sort") === "importance" ? "importance" : "recent";
@@ -34,6 +36,7 @@ export async function GET(request: NextRequest) {
 
     const filtered = filterPosts(posts, collections, {
       category,
+      categoryMatch,
       language,
       collectionId,
       sort,
