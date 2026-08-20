@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface BrowseFiltersProps {
@@ -32,6 +33,26 @@ export default function BrowseFilters({
   importance,
 }: BrowseFiltersProps) {
   const router = useRouter();
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const categoryRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!categoryOpen) return;
+    function onPointerDown(e: MouseEvent) {
+      if (categoryRef.current && !categoryRef.current.contains(e.target as Node)) {
+        setCategoryOpen(false);
+      }
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setCategoryOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [categoryOpen]);
 
   function update(next: {
     category?: string[];
@@ -65,30 +86,54 @@ export default function BrowseFilters({
     update({ importance: next });
   }
 
+  function toggleCategory(c: string) {
+    const next = category.includes(c) ? category.filter((v) => v !== c) : [...category, c];
+    update({ category: next });
+  }
+
   const selectClass =
     "rounded-full border border-line bg-surface px-4 py-2 text-sm font-bold text-ink focus:outline-none focus:ring-2 focus:ring-coral cursor-pointer";
 
+  const categoryLabel =
+    category.length === 0
+      ? "All categories"
+      : category.length === 1
+        ? category[0]
+        : `${category.length} categories`;
+
   return (
-    <div className="flex flex-wrap items-start gap-3">
-      <div className="flex flex-col gap-1">
-        <select
-          multiple
-          size={Math.min(6, Math.max(2, categories.length))}
-          value={category}
-          onChange={(e) =>
-            update({ category: Array.from(e.target.selectedOptions, (o) => o.value) })
-          }
-          className="w-44 rounded-2xl border border-line bg-surface px-3 py-2 text-sm font-bold text-ink focus:outline-none focus:ring-2 focus:ring-coral cursor-pointer"
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="relative" ref={categoryRef}>
+        <button
+          type="button"
+          onClick={() => setCategoryOpen((v) => !v)}
+          aria-expanded={categoryOpen}
+          className={`${selectClass} flex items-center gap-1.5`}
         >
-          {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        <span className="pl-1 text-[11px] text-ink-muted">
-          ⌘/Ctrl-click for multiple · none selected = all
-        </span>
+          <span className="max-w-40 truncate">{categoryLabel}</span>
+          <span className="text-xs text-ink-muted">▾</span>
+        </button>
+        {categoryOpen && (
+          <div className="absolute z-10 mt-2 max-h-72 w-64 overflow-y-auto rounded-2xl border border-line bg-surface p-2 shadow-lg">
+            <p className="px-2 pb-1 text-[11px] text-ink-muted">
+              Check to include · none checked = all
+            </p>
+            {categories.map((c) => (
+              <label
+                key={c}
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink hover:bg-line/40"
+              >
+                <input
+                  type="checkbox"
+                  checked={category.includes(c)}
+                  onChange={() => toggleCategory(c)}
+                  className="h-4 w-4 cursor-pointer accent-coral"
+                />
+                {c}
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <select
