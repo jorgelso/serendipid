@@ -27,7 +27,13 @@ function mulberry32(seed: number): () => number {
 }
 
 const UMAP_SEED = 0x53757065; // "Supe" — arbitrary, just fixed
-const TARGET_RADIUS = 24;
+// The whole cloud's bounding radius after normalizeLayout's uniform
+// rescale. Bigger means every theme's centroid sits proportionally further
+// from its neighbors, giving declutter()'s MAX_DISPLACEMENT leash more
+// absolute room to spread a crowded cluster into before it risks reaching
+// a neighboring theme's territory. 24 was cramped for this library's
+// largest themes (300+ posts) once decluttered with real separation.
+const TARGET_RADIUS = 34;
 
 interface ThemeAssignment {
   colorSlot: VectorSpaceColorSlot;
@@ -144,17 +150,41 @@ function normalizeLayout(raw: number[][]): [number, number, number][] {
 // pull to keep them apart) — great for measuring similarity, bad for a
 // scene where you need to see and click individual points. A few rounds of
 // simple pairwise repulsion (push apart any pair closer than MIN_SEPARATION,
-// same idea as d3-force's collide) gives every point real breathing room
-// without materially changing the overall cluster shape. O(n^2) per pass —
-// fine at personal-library scale (a few hundred to low thousands of posts,
-// computed once and cached alongside the rest of this layout); capped for
-// safety if a library ever gets huge enough for that to matter.
-const MIN_SEPARATION = 1.4;
-const DECLUTTER_ITERATIONS = 6;
+// same idea as d3-force's collide) gives every point real breathing room.
+//
+// MIN_SEPARATION is set relative to VectorSpaceScene's small interactive
+// CORE_RADIUS (0.35, kept in sync manually — the two files don't share a
+// constant since one is a pure layout module and the other is a
+// client-only r3f component): 2.4 leaves a real dark gap between cores so
+// individual points stay distinct up close. The much bigger OUTER_RADIUS
+// glow layer is deliberately sized to still overlap at this separation —
+// that's what makes a theme read as one cohesive cluster shape from a
+// distance instead of a scatter of disconnected specks; only the small
+// core needs the clear gap.
+//
+// Pure pairwise repulsion has no counter-force pulling a group back toward
+// its original UMAP position, so its "personal space" demand isn't free: a
+// big theme (a few hundred posts) needs a packed-sphere radius that grows
+// with the cube root of its size once every member is forced this far
+// apart from every other member. Left unconstrained (tried and reverted —
+// see git history), a large cluster's demanded radius grows past however
+// much clear room actually separated it from its neighbors in UMAP's own
+// output and visibly bleeds into them — several previously-distinct theme
+// blobs fuse into one blended mass, which is worse than the within-cluster
+// crowding this was meant to fix. MAX_DISPLACEMENT is a leash: after each
+// iteration's pushes, every point is clamped back to within this distance
+// of where UMAP+normalizeLayout originally put it, re-centered on its own
+// theme rather than free to wander. A cluster too dense to fully resolve
+// within its leash keeps some residual internal crowding — an intentional
+// trade: bounded local crowding beats unbounded cross-theme bleed.
+const MIN_SEPARATION = 2.4;
+const DECLUTTER_ITERATIONS = 18;
+const MAX_DISPLACEMENT = 4.5;
 const DECLUTTER_MAX_POINTS = 4000;
 
 function declutter(positions: [number, number, number][]): [number, number, number][] {
   if (positions.length > DECLUTTER_MAX_POINTS) return positions;
+  const original = positions.map((p) => [...p] as [number, number, number]);
   const pts = positions.map((p) => [...p] as [number, number, number]);
   const random = mulberry32(UMAP_SEED ^ 0x9e3779b9);
 
@@ -188,6 +218,21 @@ function declutter(positions: [number, number, number][]): [number, number, numb
         pts[j][1] += ny;
         pts[j][2] += nz;
       }
+    }
+
+    for (let i = 0; i < pts.length; i++) {
+      const ox = original[i][0];
+      const oy = original[i][1];
+      const oz = original[i][2];
+      const dx = pts[i][0] - ox;
+      const dy = pts[i][1] - oy;
+      const dz = pts[i][2] - oz;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist <= MAX_DISPLACEMENT) continue;
+      const scale = MAX_DISPLACEMENT / dist;
+      pts[i][0] = ox + dx * scale;
+      pts[i][1] = oy + dy * scale;
+      pts[i][2] = oz + dz * scale;
     }
   }
 

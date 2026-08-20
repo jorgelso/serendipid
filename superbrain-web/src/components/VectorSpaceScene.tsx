@@ -117,17 +117,37 @@ function FocusOrbit({
 // outer bloom. Sized so the glow, not the core, dominates the silhouette —
 // a flat-lit single sphere reads as "an opaque ball" no matter how large its
 // halo is, since the sphere itself has zero internal falloff.
-const CORE_RADIUS = 0.4;
-const MID_RADIUS = 0.6;
-const OUTER_RADIUS = 1;
+//
+// The core and the outer glow are doing two different, opposed jobs, so
+// they're sized on purpose to *not* match vectorSpace.ts's MIN_SEPARATION
+// (2.4) the same way: CORE_RADIUS stays small so individual points inside a
+// cluster stay visually distinct (and clickable) instead of fusing into one
+// blob. OUTER_RADIUS is deliberately bigger than half of MIN_SEPARATION —
+// once points are properly spaced out (leash-based declutter, see
+// vectorSpace.ts), a small enough outer glow stops overlapping its
+// same-cluster neighbors at all, and a theme reads as a scatter of
+// disconnected specks instead of one cohesive shape. A generous outer glow
+// re-blends those halos (additive, low opacity) into a visible cluster
+// silhouette while the small core underneath still reads as separate dots
+// up close. 1.4 was tried and reverted — in a large theme (250+ posts) the
+// additively-blended halos of a dozen-plus overlapping neighbors saturate
+// to a flat white wash, destroying exactly the per-point definition this
+// whole effort is about; 1.0 (with GlowLayer's outer opacity also trimmed,
+// see below) still blends into a cluster silhouette from a normal viewing
+// distance without blowing out once you're close enough to a dense pocket
+// to make out individual points.
+const CORE_RADIUS = 0.35;
+const MID_RADIUS = 0.45;
+const OUTER_RADIUS = 1.0;
 const HOVER_SCALE = 1.6;
 
 const SCENE_BACKGROUND = "#050506";
 const DIMMED_COLOR = "#3a3a3d";
 
-// Matches vectorSpace.ts's TARGET_RADIUS (24) with a bit of headroom so the
-// bounding box/starfield visibly frame the point cloud instead of clipping.
-const HALF_EXTENT = 32;
+// Matches vectorSpace.ts's TARGET_RADIUS (34) plus its declutter leash
+// (MAX_DISPLACEMENT=4.5) with a bit of headroom so the bounding
+// box/starfield visibly frame the point cloud instead of clipping.
+const HALF_EXTENT = 48;
 
 function lightenColor(hex: string, amount: number): string {
   return `#${new THREE.Color(hex).lerp(new THREE.Color("#ffffff"), amount).getHexString()}`;
@@ -325,6 +345,41 @@ function colorFor(isDimmed: boolean, layerColor: string): string {
   return isDimmed ? DIMMED_COLOR : layerColor;
 }
 
+interface DimState {
+  dimmed: boolean;
+  // 1 (untouched) unless the legend/search filter itself excludes this
+  // point — hover never shrinks anything, only recolors.
+  scale: number;
+}
+
+// Two independent dimming mechanisms, layered rather than one overriding
+// the other:
+//
+// The legend/search filter (highlightedShortcodes) is a hard exclusion —
+// a point outside it is grayed out AND shrunk (0.35x), and hover has no
+// opinion about it at all; it stays exactly as the filter left it.
+//
+// Hovering is a spotlight *within* whatever's currently active (the
+// filtered set, or the whole cloud when no filter is on): the hovered
+// point stays full brightness, every other point still in play dims in
+// color only — no shrink, since these points are still legitimately part
+// of the current selection and shrinking every one of them as the cursor
+// sweeps across a dense cluster just adds visual jitter on top of the
+// color change, not clarity. An earlier version let hover override the
+// filter outright (dimming/lighting the *entire* scene regardless of an
+// active legend/search selection) — that fought the filter instead of
+// working inside it.
+function dimStateFor(
+  shortcode: string,
+  highlightedShortcodes: Set<string> | null,
+  hoveredShortcode: string | null
+): DimState {
+  const excludedByFilter = highlightedShortcodes !== null && !highlightedShortcodes.has(shortcode);
+  if (excludedByFilter) return { dimmed: true, scale: 0.35 };
+  if (hoveredShortcode !== null && shortcode !== hoveredShortcode) return { dimmed: true, scale: 1 };
+  return { dimmed: false, scale: 1 };
+}
+
 // "Unclustered"/"other" points (see vectorSpace.ts) are usually most of the
 // library and share one neutral gray — their glow is what actually melts
 // into an indistinct mass when dense, since there's no color variation to
@@ -365,16 +420,16 @@ function GlowLayer({
         toneMapped={false}
       />
       {colored.map(({ point, color, slot }) => {
-        const isDimmed = highlightedShortcodes !== null && !highlightedShortcodes.has(point.shortcode);
+        const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode);
         const isHovered = hoveredShortcode === point.shortcode;
         const neutralScale = isNeutralSlot(slot) ? NEUTRAL_GLOW_SCALE : 1;
         return (
           <Instance
             key={point.shortcode}
             position={point.position}
-            color={colorFor(isDimmed, color)}
-            // scale={(isHovered ? HOVER_SCALE : 1) * (isDimmed ? 0.35 : 1) * point.glowScale} // density-based glow, disabled
-            scale={(isHovered ? HOVER_SCALE : 1) * (isDimmed ? 0.35 : 1) * neutralScale}
+            color={colorFor(dim.dimmed, color)}
+            // scale={(isHovered ? HOVER_SCALE : 1) * dim.scale * point.glowScale} // density-based glow, disabled
+            scale={(isHovered ? HOVER_SCALE : 1) * dim.scale * neutralScale}
           />
         );
       })}
@@ -403,14 +458,14 @@ function CoreLayer({
       <sphereGeometry args={[CORE_RADIUS, 16, 16]} />
       <meshBasicMaterial toneMapped={false} />
       {colored.map(({ point, coreColor }) => {
-        const isDimmed = highlightedShortcodes !== null && !highlightedShortcodes.has(point.shortcode);
+        const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode);
         const isHovered = hoveredShortcode === point.shortcode;
         return (
           <Instance
             key={point.shortcode}
             position={point.position}
-            color={colorFor(isDimmed, coreColor)}
-            scale={(isHovered ? HOVER_SCALE : 1) * (isDimmed ? 0.35 : 1)}
+            color={colorFor(dim.dimmed, coreColor)}
+            scale={(isHovered ? HOVER_SCALE : 1) * dim.scale}
             onPointerOver={(e: ThreeEvent<PointerEvent>) => {
               e.stopPropagation();
               onHover(point.shortcode);
@@ -499,7 +554,7 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
       <GlowLayer
         colored={colored}
         radius={OUTER_RADIUS}
-        opacity={0.07}
+        opacity={0.045}
         highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
       />
