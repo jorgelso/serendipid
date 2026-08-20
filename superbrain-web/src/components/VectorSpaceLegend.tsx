@@ -2,7 +2,14 @@
 
 import { useMemo } from "react";
 import type { Theme, VectorSpaceColorSlot } from "@/types/domain";
-import { LEGEND_VISIBLE_CAP, colorForSlot, useVizPalette } from "@/lib/useVizPalette";
+import {
+  LEGEND_VISIBLE_CAP,
+  colorForSlot,
+  computeDualHuePairs,
+  dualHueSlotsForSlot,
+  useVizPalette,
+  vividColorForSlot,
+} from "@/lib/useVizPalette";
 
 // Sentinel for the "no theme" bucket, safe to compare against real theme ids
 // since computeThemes() (src/lib/clustering.ts) always ids themes "theme-N".
@@ -66,6 +73,18 @@ function LegendRow({
   onClick: () => void;
 }) {
   const palette = useVizPalette();
+  // Matches VectorSpaceScene's CoreLayer/DualCoreLayer split: a theme rank
+  // that reuses one of the 8 base hues (see dualHueSlotsForSlot) renders in
+  // 3D as a two-tone sphere, not a flat repeat of an already-used color —
+  // the legend swatch mirrors that with a two-color split circle instead of
+  // a solid dot, so the two stay recognizable as the same theme.
+  const dualHuePairs = useMemo(() => computeDualHuePairs(palette), [palette]);
+  const dualHues = dualHueSlotsForSlot(entry.colorSlot, dualHuePairs);
+  const swatchStyle = dualHues
+    ? {
+        background: `linear-gradient(135deg, ${vividColorForSlot(palette, dualHues[0])} 50%, ${vividColorForSlot(palette, dualHues[1])} 50%)`,
+      }
+    : { backgroundColor: colorForSlot(palette, entry.colorSlot) };
   return (
     <button
       type="button"
@@ -74,10 +93,7 @@ function LegendRow({
         isActive ? "bg-surface-2" : "hover:bg-surface-2"
       } ${isDimmed ? "opacity-40" : ""}`}
     >
-      <span
-        className="h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ backgroundColor: colorForSlot(palette, entry.colorSlot) }}
-      />
+      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={swatchStyle} />
       <span className="flex-1 truncate">{entry.label}</span>
       <span className="text-ink-muted">{entry.count}</span>
     </button>

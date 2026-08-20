@@ -6,7 +6,15 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber"
 import { Html, Instance, Instances, Line, OrbitControls, Stars } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { VectorSpaceColorSlot, VectorSpacePoint } from "@/types/domain";
-import { LEGEND_VISIBLE_CAP, colorForSlot, seriesIndex, useVizPalette } from "@/lib/useVizPalette";
+import {
+  LEGEND_VISIBLE_CAP,
+  colorForSlot,
+  computeDualHuePairs,
+  dualHueSlotsForSlot,
+  seriesIndex,
+  useVizPalette,
+  vividColorForSlot,
+} from "@/lib/useVizPalette";
 import HoverPreviewCard from "./HoverPreviewCard";
 
 interface VectorSpaceSceneProps {
@@ -487,11 +495,170 @@ function CoreLayer({
   );
 }
 
+interface DualColoredPoint {
+  point: VectorSpacePoint;
+  colorA: string;
+  colorB: string;
+}
+
+// Slots 8-23 (see useVizPalette's dualHueSlotsForSlot) reuse one of the 8
+// base hues, so they render here as a genuine two-tone split sphere instead
+// of a flat repeat of an already-used color. drei's <Instances>/<Instance>
+// only carries one color per instance, so this is a raw InstancedMesh with
+// a hand-populated instanceColorA/instanceColorB/instanceDim buffer —
+// patched into MeshBasicMaterial's own compiled shader via onBeforeCompile
+// (rather than a ShaderMaterial written from scratch) specifically so
+// instancing, tone mapping, and output color space conversion all stay on
+// the exact same code path every other layer in this scene already trusts;
+// only diffuseColor's source is replaced.
+function DualCoreLayer({
+  colored,
+  maxCount,
+  highlightedShortcodes,
+  hoveredShortcode,
+  onHover,
+  onSelect,
+}: {
+  colored: DualColoredPoint[];
+  maxCount: number;
+  highlightedShortcodes: Set<string> | null;
+  hoveredShortcode: string | null;
+  onHover: (shortcode: string | null) => void;
+  onSelect: (shortcode: string) => void;
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const capacity = Math.max(maxCount, 1);
+
+  const geometry = useMemo(() => {
+    const geo = new THREE.SphereGeometry(CORE_RADIUS, 16, 16);
+    geo.setAttribute("instanceColorA", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
+    geo.setAttribute("instanceColorB", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
+    geo.setAttribute("instanceDim", new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
+    return geo;
+  }, [capacity]);
+
+  const material = useMemo(() => {
+    const dimmed = new THREE.Color(DIMMED_COLOR);
+    const mat = new THREE.MeshBasicMaterial({ toneMapped: false });
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          "#include <common>",
+          `attribute vec3 instanceColorA;
+attribute vec3 instanceColorB;
+attribute float instanceDim;
+varying vec3 vColorA;
+varying vec3 vColorB;
+varying float vDim;
+varying vec3 vViewOffset;
+#include <common>`
+        )
+        .replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>
+vColorA = instanceColorA;
+vColorB = instanceColorB;
+vDim = instanceDim;
+// Direction from the sphere's own center to this vertex, in camera space
+// (w=0 drops translation, keeping only the instance's scale/rotation and
+// the camera's own rotation) — NOT a fixed world-space axis. A fixed axis
+// looks edge-on (a solid single-colored disc) from whatever viewing angle
+// happens to line up with it — straight down/up, for a mostly-vertical
+// axis. Splitting on camera-space X instead means the boundary is always
+// perpendicular to the current view direction, so every dual-color sphere
+// reads as half-and-half from any angle, orbit included.
+vViewOffset = (modelViewMatrix * instanceMatrix * vec4(position, 0.0)).xyz;`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          `varying vec3 vColorA;
+varying vec3 vColorB;
+varying float vDim;
+varying vec3 vViewOffset;
+#include <common>`
+        )
+        .replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+float side = normalize(vViewOffset).x;
+float t = smoothstep(-0.08, 0.08, side);
+vec3 splitColor = mix(vColorB, vColorA, t);
+diffuseColor.rgb = mix(splitColor, vec3(${dimmed.r.toFixed(6)}, ${dimmed.g.toFixed(6)}, ${dimmed.b.toFixed(6)}), vDim);`
+        );
+    };
+    return mat;
+  }, []);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+
+    const n = colored.length;
+    mesh.count = n;
+
+    const colorAAttr = geometry.getAttribute("instanceColorA") as THREE.InstancedBufferAttribute;
+    const colorBAttr = geometry.getAttribute("instanceColorB") as THREE.InstancedBufferAttribute;
+    const dimAttr = geometry.getAttribute("instanceDim") as THREE.InstancedBufferAttribute;
+    const matrix = new THREE.Matrix4();
+    const tmpColor = new THREE.Color();
+
+    for (let i = 0; i < n; i++) {
+      const { point, colorA, colorB } = colored[i];
+      const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode);
+      const isHovered = hoveredShortcode === point.shortcode;
+      const scale = (isHovered ? HOVER_SCALE : 1) * dim.scale;
+
+      matrix.makeScale(scale, scale, scale);
+      matrix.setPosition(point.position[0], point.position[1], point.position[2]);
+      mesh.setMatrixAt(i, matrix);
+
+      tmpColor.set(colorA);
+      colorAAttr.setXYZ(i, tmpColor.r, tmpColor.g, tmpColor.b);
+      tmpColor.set(colorB);
+      colorBAttr.setXYZ(i, tmpColor.r, tmpColor.g, tmpColor.b);
+      dimAttr.setX(i, dim.dimmed ? 1 : 0);
+    }
+
+    mesh.instanceMatrix.needsUpdate = true;
+    colorAAttr.needsUpdate = true;
+    colorBAttr.needsUpdate = true;
+    dimAttr.needsUpdate = true;
+  }, [colored, highlightedShortcodes, hoveredShortcode, geometry]);
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, capacity]}
+      onPointerOver={(e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation();
+        if (e.instanceId === undefined || e.instanceId >= colored.length) return;
+        onHover(colored[e.instanceId].point.shortcode);
+        document.body.style.cursor = "pointer";
+      }}
+      onPointerOut={(e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation();
+        onHover(null);
+        document.body.style.cursor = "auto";
+      }}
+      onClick={(e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation();
+        if (e.instanceId === undefined || e.instanceId >= colored.length) return;
+        onSelect(colored[e.instanceId].point.shortcode);
+      }}
+    />
+  );
+}
+
 const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProps>(function VectorSpaceScene(
   { points, highlightedShortcodes, onSelect, legendExpanded },
   ref
 ) {
   const palette = useVizPalette();
+  // Computed once per palette (not per point/slot) — dualHueSlotsForSlot
+  // isn't a hook itself since every call site below needs to invoke it from
+  // inside a .map(), where hooks aren't allowed.
+  const dualHuePairs = useMemo(() => computeDualHuePairs(palette), [palette]);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const [hoveredShortcode, setHoveredShortcode] = useState<string | null>(null);
   const resetFnRef = useRef<() => void>(() => {});
@@ -504,7 +671,18 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
     () =>
       points.map((point) => {
         const slot = effectiveSlot(point.colorSlot, legendExpanded);
-        const baseColor = colorForSlot(palette, slot);
+        // A theme rank that reuses one of the 8 base hues (dualHueSlotsForSlot,
+        // slots 8-23) renders its CORE as a true two-tone split further down
+        // (see DualCoreLayer) — but the glow layers stay single-color for
+        // every point regardless, so their base here is the flat 50/50
+        // average of the pair rather than a literal split. Uses the vivid
+        // (not the restrained palette) hues so a dual theme's glow still
+        // reads as more saturated/eye-catching than a muted single-hue
+        // glow, even though the glow itself can't show two distinct colors.
+        const dualHues = dualHueSlotsForSlot(slot, dualHuePairs);
+        const baseColor = dualHues
+          ? mixColor(vividColorForSlot(palette, dualHues[0]), vividColorForSlot(palette, dualHues[1]), 0.5)
+          : colorForSlot(palette, slot);
         const blendSlot = point.blendColorSlot && effectiveSlot(point.blendColorSlot, legendExpanded);
         const color =
           blendSlot && point.blendWeight
@@ -512,8 +690,33 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
             : baseColor;
         return { point, color, coreColor: lightenColor(color, 0.18), slot };
       }),
-    [points, palette, legendExpanded]
+    [points, palette, legendExpanded, dualHuePairs]
   );
+
+  // Splits the core layer (not the glow, which stays single-color for every
+  // point) into the plain single-hue instances drei's <Instances> renders
+  // (soloCoreColored) and the two-tone repeat-hue slots DualCoreLayer's raw
+  // shader renders instead (dualCoreColored).
+  const { soloCoreColored, dualCoreColored } = useMemo(() => {
+    const solo: ColoredPoint[] = [];
+    const dual: DualColoredPoint[] = [];
+    for (const cp of colored) {
+      const dualHues = dualHueSlotsForSlot(cp.slot, dualHuePairs);
+      if (dualHues) {
+        // Vivid, not lightened-toward-white like the solo cores' "hot" look
+        // — lightening here would wash out exactly the saturation/contrast
+        // boost vividColorForSlot exists to provide.
+        dual.push({
+          point: cp.point,
+          colorA: vividColorForSlot(palette, dualHues[0]),
+          colorB: vividColorForSlot(palette, dualHues[1]),
+        });
+      } else {
+        solo.push(cp);
+      }
+    }
+    return { soloCoreColored: solo, dualCoreColored: dual };
+  }, [colored, palette, dualHuePairs]);
 
   const hoveredPoint = useMemo(
     () => (hoveredShortcode ? points.find((p) => p.shortcode === hoveredShortcode) : null),
@@ -566,7 +769,15 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
         hoveredShortcode={hoveredShortcode}
       />
       <CoreLayer
-        colored={colored}
+        colored={soloCoreColored}
+        highlightedShortcodes={highlightedShortcodes}
+        hoveredShortcode={hoveredShortcode}
+        onHover={setHoveredShortcode}
+        onSelect={onSelect}
+      />
+      <DualCoreLayer
+        colored={dualCoreColored}
+        maxCount={points.length}
         highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
         onHover={setHoveredShortcode}
