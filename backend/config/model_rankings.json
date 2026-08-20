@@ -1,11 +1,11 @@
 {
   "openai_gpt41": {
     "key": "openai_gpt41",
-    "avg_response_s": 3.4552856361449713,
-    "success_count": 3051,
+    "avg_response_s": 2.4306549171767693,
+    "success_count": 3102,
     "fail_count": 3,
     "down_until": null,
-    "last_used": "2026-08-19T17:52:26.511569",
+    "last_used": "2026-08-20T15:15:51.319863",
     "last_error": null,
     "base_priority": 0
   },
@@ -321,11 +321,11 @@
   },
   "openai_gpt41_vision": {
     "key": "openai_gpt41_vision",
-    "avg_response_s": 6.939955141943345,
-    "success_count": 3827,
+    "avg_response_s": 8.390768808471801,
+    "success_count": 3632,
     "fail_count": 13,
     "down_until": null,
-    "last_used": "2026-08-20T02:20:42.515691",
+    "last_used": "2026-08-19T04:55:06.883839",
     "last_error": null,
     "base_priority": 0
   },
@@ -343,8 +343,8 @@
     "key": "gemini_25_flash_lite_vision",
     "avg_response_s": 6.709401964075168,
     "success_count": 14,
-    "fail_count": 244,
-    "down_until": "2026-08-20T02:12:00.778121",
+    "fail_count": 241,
+    "down_until": "2026-08-19T04:58:21.444242",
     "last_used": "2026-02-24T09:45:09.831171",
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 1.5
@@ -353,8 +353,8 @@
     "key": "gemini_25_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 358,
-    "down_until": "2026-08-20T02:23:06.123398",
+    "fail_count": 345,
+    "down_until": "2026-08-19T04:59:53.901894",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 2
@@ -373,8 +373,8 @@
     "key": "gemini_3_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 257,
-    "down_until": "2026-08-20T02:11:59.961997",
+    "fail_count": 254,
+    "down_until": "2026-08-19T04:58:19.124367",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3
@@ -383,8 +383,8 @@
     "key": "gemini_31_pro_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 204,
-    "down_until": "2026-08-20T01:55:20.155332",
+    "fail_count": 202,
+    "down_until": "2026-08-19T04:58:23.902009",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 3.5
@@ -393,8 +393,8 @@
     "key": "gemini_20_flash_vision",
     "avg_response_s": null,
     "success_count": 0,
-    "fail_count": 155,
-    "down_until": "2026-08-20T01:24:19.824002",
+    "fail_count": 154,
+    "down_until": "2026-08-19T04:58:26.074559",
     "last_used": null,
     "last_error": "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT', 'details': [{'@type': 'type.googleapis.com/google.rpc.ErrorInf",
     "base_priority": 4

@@ -110,6 +110,23 @@ export interface ChangelogResponse {
   history: ChangelogEntry[];
 }
 
+// Mirrors backend/api.py's GET /eloquence/overrides (backend/core/database.py's
+// eloquence_overrides table) — an audit log of manual "mark as not eloquent"
+// corrections made from /eloquent, keeping the AI's original verdict/rationale
+// so it can be reviewed later to refine ELOQUENCE_PROMPT (backend/core/eloquence.py).
+export interface EloquenceOverride {
+  id: number;
+  shortcode: string;
+  ai_rationale: string | null;
+  ai_was_tutorial: 0 | 1 | null;
+  overridden_at: string;
+}
+
+export interface EloquenceOverridesResponse {
+  success: boolean;
+  overrides: EloquenceOverride[];
+}
+
 export interface CategoriesResponse {
   success: boolean;
   categories: { id: string; name: string; count: number }[];

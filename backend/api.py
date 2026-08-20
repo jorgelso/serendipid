@@ -1850,6 +1850,53 @@ async def check_eloquence_batches(token: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/eloquence/override")
+async def override_eloquence(payload: dict, token: str = Depends(verify_token)):
+    """
+    Manual human correction for one or more posts the AI eloquence judge
+    (core/eloquence.py) got wrong — flips is_eloquent to False so a false
+    positive from scripts/score_eloquence.py drops out of the /eloquent
+    page. db.override_eloquence_not_eloquent() logs each post's prior
+    AI verdict/rationale to eloquence_overrides before overwriting it, so
+    GET /eloquence/overrides can later be reviewed to refine
+    ELOQUENCE_PROMPT — that's also why a shortcode that was already not
+    eloquent is bucketed separately rather than counted as 'updated': it's
+    not a fresh correction worth logging again.
+    """
+    shortcodes = payload.get("shortcodes")
+    if not isinstance(shortcodes, list) or not shortcodes or not all(isinstance(s, str) for s in shortcodes):
+        raise HTTPException(status_code=400, detail="shortcodes must be a non-empty list of strings")
+
+    db = get_db()
+    updated, already_not_eloquent, not_found = [], [], []
+    for shortcode in shortcodes:
+        result = db.override_eloquence_not_eloquent(shortcode)
+        if result == "overridden":
+            updated.append(shortcode)
+        elif result == "already_not_eloquent":
+            already_not_eloquent.append(shortcode)
+        else:
+            not_found.append(shortcode)
+
+    logger.info(f"✅ Manually marked not eloquent: {updated}")
+    return {
+        "success": True,
+        "updated": updated,
+        "already_not_eloquent": already_not_eloquent,
+        "not_found": not_found,
+    }
+
+
+@app.get("/eloquence/overrides")
+async def list_eloquence_overrides(token: str = Depends(verify_token)):
+    """Audit log of manual eloquence corrections (POST /eloquence/override) —
+    each entry keeps the AI's original verdict/rationale so a cluster of
+    similar overrides can point at what to fix in ELOQUENCE_PROMPT
+    (core/eloquence.py)."""
+    db = get_db()
+    return {"success": True, "overrides": db.get_eloquence_overrides()}
+
+
 @app.delete("/post/{shortcode}")
 async def delete_post(shortcode: str, token: str = Depends(verify_token)):
     """Delete a post by shortcode, killing any active analysis subprocess"""

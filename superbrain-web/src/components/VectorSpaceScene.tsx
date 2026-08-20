@@ -377,11 +377,22 @@ interface DimState {
 // filter outright (dimming/lighting the *entire* scene regardless of an
 // active legend/search selection) — that fought the filter instead of
 // working inside it.
+//
+// legendExpanded turns this whole gray/shrink treatment off — with the
+// legend collapsed, only the top 8 themes have their own color to begin
+// with, and per direct testing the "gray everything else out" spotlight
+// read as actively worse there than just leaving every point's normal
+// (translucent) look alone. Collapsed-legend emphasis instead comes from
+// OpaqueBoostLayer painting a solid, fully-opaque highlight on top of
+// whatever's active — an additive layer, not a change to how everything
+// else renders.
 function dimStateFor(
   shortcode: string,
   highlightedShortcodes: Set<string> | null,
-  hoveredShortcode: string | null
+  hoveredShortcode: string | null,
+  legendExpanded: boolean
 ): DimState {
+  if (!legendExpanded) return { dimmed: false, scale: 1 };
   const excludedByFilter = highlightedShortcodes !== null && !highlightedShortcodes.has(shortcode);
   if (excludedByFilter) return { dimmed: true, scale: 0.35 };
   if (hoveredShortcode !== null && shortcode !== hoveredShortcode) return { dimmed: true, scale: 1 };
@@ -410,12 +421,14 @@ function GlowLayer({
   opacity,
   highlightedShortcodes,
   hoveredShortcode,
+  legendExpanded,
 }: {
   colored: ColoredPoint[];
   radius: number;
   opacity: number;
   highlightedShortcodes: Set<string> | null;
   hoveredShortcode: string | null;
+  legendExpanded: boolean;
 }) {
   return (
     <Instances limit={colored.length || 1} range={colored.length}>
@@ -428,7 +441,7 @@ function GlowLayer({
         toneMapped={false}
       />
       {colored.map(({ point, color, slot }) => {
-        const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode);
+        const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode, legendExpanded);
         const isHovered = hoveredShortcode === point.shortcode;
         const neutralScale = isNeutralSlot(slot) ? NEUTRAL_GLOW_SCALE : 1;
         return (
@@ -452,12 +465,14 @@ function CoreLayer({
   colored,
   highlightedShortcodes,
   hoveredShortcode,
+  legendExpanded,
   onHover,
   onSelect,
 }: {
   colored: ColoredPoint[];
   highlightedShortcodes: Set<string> | null;
   hoveredShortcode: string | null;
+  legendExpanded: boolean;
   onHover: (shortcode: string | null) => void;
   onSelect: (shortcode: string) => void;
 }) {
@@ -466,7 +481,7 @@ function CoreLayer({
       <sphereGeometry args={[CORE_RADIUS, 16, 16]} />
       <meshBasicMaterial toneMapped={false} />
       {colored.map(({ point, coreColor }) => {
-        const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode);
+        const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode, legendExpanded);
         const isHovered = hoveredShortcode === point.shortcode;
         return (
           <Instance
@@ -516,6 +531,7 @@ function DualCoreLayer({
   maxCount,
   highlightedShortcodes,
   hoveredShortcode,
+  legendExpanded,
   onHover,
   onSelect,
 }: {
@@ -523,6 +539,7 @@ function DualCoreLayer({
   maxCount: number;
   highlightedShortcodes: Set<string> | null;
   hoveredShortcode: string | null;
+  legendExpanded: boolean;
   onHover: (shortcode: string | null) => void;
   onSelect: (shortcode: string) => void;
 }) {
@@ -605,7 +622,7 @@ diffuseColor.rgb = mix(splitColor, vec3(${dimmed.r.toFixed(6)}, ${dimmed.g.toFix
 
     for (let i = 0; i < n; i++) {
       const { point, colorA, colorB } = colored[i];
-      const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode);
+      const dim = dimStateFor(point.shortcode, highlightedShortcodes, hoveredShortcode, legendExpanded);
       const isHovered = hoveredShortcode === point.shortcode;
       const scale = (isHovered ? HOVER_SCALE : 1) * dim.scale;
 
@@ -624,7 +641,7 @@ diffuseColor.rgb = mix(splitColor, vec3(${dimmed.r.toFixed(6)}, ${dimmed.g.toFix
     colorAAttr.needsUpdate = true;
     colorBAttr.needsUpdate = true;
     dimAttr.needsUpdate = true;
-  }, [colored, highlightedShortcodes, hoveredShortcode, geometry]);
+  }, [colored, highlightedShortcodes, hoveredShortcode, legendExpanded, geometry]);
 
   return (
     <instancedMesh
@@ -647,6 +664,43 @@ diffuseColor.rgb = mix(splitColor, vec3(${dimmed.r.toFixed(6)}, ${dimmed.g.toFix
         onSelect(colored[e.instanceId].point.shortcode);
       }}
     />
+  );
+}
+
+// With the legend collapsed, dimStateFor's usual gray-out-everyone-else
+// spotlight is disabled entirely (see its comment) — every point keeps its
+// normal look, translucent glow included. This is what provides emphasis
+// in that mode instead: a purely additive, non-interactive overlay of
+// solid, fully-opaque spheres for whichever shortcodes are currently
+// active — the hovered point, or an entire legend-selected theme.
+// depthTest is off and renderOrder is high so it always paints on top
+// regardless of draw order; the layers underneath are completely
+// untouched, this just visually fills them in for the point(s) that need
+// to pop.
+//
+// Sized to MID_RADIUS, not OUTER_RADIUS — OUTER_RADIUS=1.0 needs 2.0
+// between two points' centers to avoid touching, and vectorSpace.ts's
+// MIN_SEPARATION=2.4 is only a soft *target* from a leash-constrained
+// declutter pass, not a hard guarantee for large/dense clusters (see its
+// comment) — plenty of pairs in a big theme end up closer than that. Making
+// them opaque at OUTER_RADIUS made a selected cluster visibly fuse into
+// one blob. MID_RADIUS=0.45 only needs 0.9 apart, safely under even the
+// worst-case spacing, so the boosted "main body" of each point stays
+// distinct from its neighbors.
+function OpaqueBoostLayer({ colored, activeShortcodes }: { colored: ColoredPoint[]; activeShortcodes: Set<string> }) {
+  const active = useMemo(
+    () => colored.filter((cp) => activeShortcodes.has(cp.point.shortcode)),
+    [colored, activeShortcodes]
+  );
+  if (active.length === 0) return null;
+  return (
+    <Instances limit={active.length} range={active.length} renderOrder={10}>
+      <sphereGeometry args={[MID_RADIUS, 16, 16]} />
+      <meshBasicMaterial toneMapped={false} depthTest={false} />
+      {active.map(({ point, color }) => (
+        <Instance key={point.shortcode} position={point.position} color={color} />
+      ))}
+    </Instances>
   );
 }
 
@@ -718,6 +772,15 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
     return { soloCoreColored: solo, dualCoreColored: dual };
   }, [colored, palette, dualHuePairs]);
 
+  // Only meaningful with the legend collapsed (see dimStateFor/
+  // OpaqueBoostLayer) — hover wins over an active legend/search filter,
+  // same precedence as the expanded-legend spotlight above.
+  const boostShortcodes = useMemo(() => {
+    if (legendExpanded) return null;
+    if (hoveredShortcode) return new Set([hoveredShortcode]);
+    return highlightedShortcodes;
+  }, [legendExpanded, hoveredShortcode, highlightedShortcodes]);
+
   const hoveredPoint = useMemo(
     () => (hoveredShortcode ? points.find((p) => p.shortcode === hoveredShortcode) : null),
     [points, hoveredShortcode]
@@ -760,6 +823,7 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
         opacity={0.045}
         highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
+        legendExpanded={legendExpanded}
       />
       <GlowLayer
         colored={colored}
@@ -767,11 +831,13 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
         opacity={0.28}
         highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
+        legendExpanded={legendExpanded}
       />
       <CoreLayer
         colored={soloCoreColored}
         highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
+        legendExpanded={legendExpanded}
         onHover={setHoveredShortcode}
         onSelect={onSelect}
       />
@@ -780,9 +846,13 @@ const VectorSpaceScene = forwardRef<VectorSpaceSceneHandle, VectorSpaceSceneProp
         maxCount={points.length}
         highlightedShortcodes={highlightedShortcodes}
         hoveredShortcode={hoveredShortcode}
+        legendExpanded={legendExpanded}
         onHover={setHoveredShortcode}
         onSelect={onSelect}
       />
+      {boostShortcodes && boostShortcodes.size > 0 && (
+        <OpaqueBoostLayer colored={colored} activeShortcodes={boostShortcodes} />
+      )}
       {hoveredPoint && (
         <Html position={hoveredPoint.position} style={{ pointerEvents: "none" }} zIndexRange={[100, 0]}>
           <div style={{ transform: "translate(24px, -50%)" }}>

@@ -12,9 +12,23 @@ interface InfiniteFeedProps {
   // Extra query params (category/collection filters) forwarded to /api/feed
   // when loading further pages, so "Load more" respects active filters.
   params?: Record<string, string>;
+  // Multi-select passthrough to PostCard, owned by the caller (e.g.
+  // EloquentFeed.tsx) — selection state has to survive "Load more" adding
+  // fresh posts, so it can't live inside this component's own state.
+  selectable?: boolean;
+  selectedShortcodes?: Set<string>;
+  onToggleSelect?: (shortcode: string) => void;
 }
 
-export default function InfiniteFeed({ initialPosts, total, pageSize, params = {} }: InfiniteFeedProps) {
+export default function InfiniteFeed({
+  initialPosts,
+  total,
+  pageSize,
+  params = {},
+  selectable,
+  selectedShortcodes,
+  onToggleSelect,
+}: InfiniteFeedProps) {
   const [posts, setPosts] = useState(initialPosts);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +73,13 @@ export default function InfiniteFeed({ initialPosts, total, pageSize, params = {
     <div>
       <MasonryGrid>
         {posts.map((post) => (
-          <PostCard key={post.shortcode} post={post} />
+          <PostCard
+            key={post.shortcode}
+            post={post}
+            selectable={selectable}
+            selected={selectedShortcodes?.has(post.shortcode)}
+            onToggleSelect={onToggleSelect ? () => onToggleSelect(post.shortcode) : undefined}
+          />
         ))}
       </MasonryGrid>
 

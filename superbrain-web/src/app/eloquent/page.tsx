@@ -3,8 +3,9 @@ import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { filterPosts, toDisplayPost } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
+import Link from "next/link";
 import EloquenceFilters from "@/components/EloquenceFilters";
-import InfiniteFeed from "@/components/InfiniteFeed";
+import EloquentFeed from "@/components/EloquentFeed";
 
 const PAGE_SIZE = 24;
 
@@ -46,12 +47,20 @@ export default async function EloquentPage(props: PageProps<"/eloquent">) {
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-8">
-      <div className="mb-6">
-        <h1 className="font-display font-semibold text-3xl">Eloquent</h1>
-        <p className="mt-1 text-ink-muted text-sm">
-          Posts judged eloquent in the oratory sense — clear, well-spoken, and rhetorically skilled,
-          independent of topic. Filter between speeches/commentary and tutorial-style delivery.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display font-semibold text-3xl">Eloquent</h1>
+          <p className="mt-1 text-ink-muted text-sm">
+            Posts judged eloquent in the oratory sense — clear, well-spoken, and rhetorically skilled,
+            independent of topic. Filter between speeches/commentary and tutorial-style delivery.
+          </p>
+        </div>
+        <Link
+          href="/eloquent/overrides"
+          className="shrink-0 mt-1 text-sm text-ink-muted hover:text-coral-ink transition-colors whitespace-nowrap"
+        >
+          Review overrides →
+        </Link>
       </div>
 
       <div className="mb-6">
@@ -71,9 +80,9 @@ export default async function EloquentPage(props: PageProps<"/eloquent">) {
       )}
 
       {data && data.total > 0 && (
-        <InfiniteFeed
+        <EloquentFeed
           // Same remount-on-filter-change trick as /browse — see its comment.
-          key={`eloquent|${tutorial}`}
+          feedKey={`eloquent|${tutorial}`}
           initialPosts={data.posts}
           total={data.total}
           pageSize={PAGE_SIZE}

@@ -440,6 +440,29 @@ class Database:
         """)
         self._conn.commit()
 
+        # eloquence_overrides — append-only audit log of human corrections
+        # made from superbrain-web's /eloquent page ("Select" -> "Mark as not
+        # eloquent"): every time a post the AI judge scored eloquent gets
+        # manually flipped to not-eloquent, the AI's original rationale is
+        # kept here (not overwritten) specifically so these can be reviewed
+        # later — a cluster of overrides with a similar rationale pattern is
+        # a signal that ELOQUENCE_PROMPT (core/eloquence.py) needs
+        # refinement, not just that individual posts were wrong. Insert-only,
+        # never updated/deleted; multiple rows for the same shortcode are
+        # possible in principle (re-scored eloquent again, overridden again)
+        # and are all kept.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS eloquence_overrides (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                shortcode        TEXT NOT NULL,
+                ai_rationale     TEXT,
+                ai_was_tutorial  INTEGER,
+                overridden_at    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_eloquence_overrides_shortcode ON eloquence_overrides (shortcode);
+        """)
+        self._conn.commit()
+
         # Collections table
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS collections (
@@ -1004,20 +1027,71 @@ class Database:
             return False
         try:
             if is_tutorial is None:
-                self._conn.execute(
+                cur = self._conn.execute(
                     "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ? WHERE shortcode = ?",
                     (1 if is_eloquent else 0, rationale, shortcode),
                 )
             else:
-                self._conn.execute(
+                cur = self._conn.execute(
                     "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ?, is_tutorial = ? WHERE shortcode = ?",
                     (1 if is_eloquent else 0, rationale, 1 if is_tutorial else 0, shortcode),
                 )
             self._conn.commit()
-            return True
+            return cur.rowcount > 0
         except Exception as e:
             print(f"[WARNING]  Error updating eloquence: {e}")
             return False
+
+    # ── eloquence_overrides (manual human corrections — see the table's
+    # comment in _create_tables for why this log exists) ──
+
+    def override_eloquence_not_eloquent(self, shortcode: str) -> str:
+        """Flip one post's is_eloquent to False as a manual human correction,
+        logging the AI's prior verdict/rationale to eloquence_overrides
+        first. Only logs (and only updates) when the post was actually
+        eloquent — calling this on a post that's already not eloquent is a
+        genuine no-op, not a fresh "correction" worth logging again.
+
+        Returns 'overridden', 'already_not_eloquent', or 'not_found'.
+        """
+        if not self.is_connected():
+            return "not_found"
+        try:
+            row = self._conn.execute(
+                "SELECT is_eloquent, eloquence_rationale, is_tutorial FROM analyses WHERE shortcode = ?",
+                (shortcode,)
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            if row["is_eloquent"] != 1:
+                return "already_not_eloquent"
+
+            self._conn.execute(
+                "INSERT INTO eloquence_overrides (shortcode, ai_rationale, ai_was_tutorial, overridden_at) "
+                "VALUES (?, ?, ?, ?)",
+                (shortcode, row["eloquence_rationale"], row["is_tutorial"], datetime.utcnow().isoformat()),
+            )
+            self._conn.execute(
+                "UPDATE analyses SET is_eloquent = 0, eloquence_rationale = ? WHERE shortcode = ?",
+                ("Manually overridden: marked not eloquent from the web UI.", shortcode),
+            )
+            self._conn.commit()
+            return "overridden"
+        except Exception as e:
+            print(f"[WARNING]  Error overriding eloquence for {shortcode}: {e}")
+            return "not_found"
+
+    def get_eloquence_overrides(self):
+        """All logged manual eloquence corrections, newest first — for
+        reviewing AI false positives to refine ELOQUENCE_PROMPT."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.execute("SELECT * FROM eloquence_overrides ORDER BY overridden_at DESC")
+            return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error fetching eloquence overrides: {e}")
+            return []
 
     def update_is_tutorial(self, shortcode, is_tutorial: bool) -> bool:
         """Set whether an eloquent post is delivered as a tutorial/how-to vs.

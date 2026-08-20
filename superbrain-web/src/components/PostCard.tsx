@@ -26,15 +26,25 @@ interface PostCardProps {
   // the /versions page omits this and keeps the existing full-reanalysis
   // behavior.
   rescanMode?: "full" | "cheap";
+  // Multi-select support for /eloquent's "mark as not eloquent" toolbar
+  // (EloquentFeed.tsx). Every other caller omits these and gets the
+  // existing unselectable card unchanged.
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }
 
-export default function PostCard({ post, rescanMode }: PostCardProps) {
+export default function PostCard({ post, rescanMode, selectable, selected, onToggleSelect }: PostCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const missingVideo = isMissingVideo(post);
   const changelog = useChangelog();
 
   return (
-    <article className="self-start rounded-3xl bg-surface border border-line overflow-hidden shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] transition-transform duration-200 hover:-translate-y-1 hover:rotate-[-0.3deg]">
+    <article
+      className={`self-start rounded-3xl bg-surface border overflow-hidden shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] transition-transform duration-200 hover:-translate-y-1 hover:rotate-[-0.3deg] ${
+        selected ? "border-ink ring-2 ring-ink" : "border-line"
+      }`}
+    >
       {post.thumbnail && (
         <div className="relative w-full group/thumb">
           {/* Only wraps the image itself — the version badges below include
@@ -89,9 +99,20 @@ export default function PostCard({ post, rescanMode }: PostCardProps) {
 
       <div className="p-4">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="font-display font-semibold text-[15px] leading-snug">
-            {post.title || "Untitled reel"}
-          </h3>
+          <div className="flex items-start gap-2 min-w-0">
+            {selectable && (
+              <input
+                type="checkbox"
+                checked={!!selected}
+                onChange={onToggleSelect}
+                aria-label={selected ? "Deselect post" : "Select post"}
+                className="mt-1.5 h-4 w-4 shrink-0 accent-ink cursor-pointer"
+              />
+            )}
+            <h3 className="font-display font-semibold text-[15px] leading-snug">
+              {post.title || "Untitled reel"}
+            </h3>
+          </div>
           <DeletePostButton shortcode={post.shortcode} title={post.title} />
         </div>
 

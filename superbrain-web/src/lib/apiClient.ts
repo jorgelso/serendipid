@@ -7,6 +7,7 @@ import type {
   ChatMessageExchange,
   ChatThread,
   ChatThreadDetail,
+  EloquenceOverridesResponse,
   ExportPayload,
   QueueStatusResponse,
   RatingTier,
@@ -238,6 +239,27 @@ export async function updatePost(shortcode: string, edits: PostEdits): Promise<U
     method: "PUT",
     body: edits,
   });
+}
+
+export interface EloquenceOverrideResponse {
+  success: boolean;
+  updated: string[];
+  already_not_eloquent: string[];
+  not_found: string[];
+}
+
+// Bulk human correction for AI eloquence-judge false positives — the
+// /eloquent page's multi-select toolbar. Backend: POST /eloquence/override.
+export async function overrideEloquence(shortcodes: string[]): Promise<EloquenceOverrideResponse> {
+  return request<EloquenceOverrideResponse>("/eloquence/override", {
+    method: "POST",
+    body: { shortcodes },
+  });
+}
+
+// Audit log of the overrides above — see EloquenceOverride in domain.ts.
+export async function fetchEloquenceOverrides(): Promise<EloquenceOverridesResponse> {
+  return request<EloquenceOverridesResponse>("/eloquence/overrides");
 }
 
 interface ChatThreadsResponse {
