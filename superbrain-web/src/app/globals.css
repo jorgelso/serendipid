@@ -14,11 +14,11 @@
   --color-ink-muted: #6b6b6b;
   --color-line: #f0e2cd;
 
-  /* Scrapbook "paper" tone (PaperCutout.tsx) — a distinct physical
-     scrap sitting ON the board (--color-surface-2); --color-surface
-     alone doesn't guarantee that (in dark mode surface is actually
-     darker than surface-2, the opposite of light mode, so a card built
-     from bare --color-surface nearly vanishes against the board
+  /* Scrapbook "paper" tone (PolaroidThumb.tsx, TypewriterTag.tsx) — a
+     distinct physical scrap sitting ON the board (--color-surface-2);
+     --color-surface alone doesn't guarantee that (in dark mode surface is
+     actually darker than surface-2, the opposite of light mode, so a card
+     built from bare --color-surface nearly vanishes against the board
      there). */
   --paper-bg: #fffdf8;
 

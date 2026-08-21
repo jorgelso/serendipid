@@ -1,6 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
+import WashiTape from "./WashiTape";
+import type { TapeColor } from "@/lib/collage";
 
 // A wide, varied set of hand-drawn-style marks scattered across the WHOLE
 // page as background ephemera — not confined to one component's box. Mix
@@ -26,6 +28,30 @@ const EPHEMERA: { top: string; left: string; rot: number; size: string; glyph: s
   { top: "85%", left: "8%", rot: 14, size: "text-3xl", glyph: "✦", opacity: 0.26 },
   { top: "92%", left: "60%", rot: -10, size: "text-xl", glyph: "❤", opacity: 0.2 },
   { top: "95%", left: "40%", rot: 6, size: "text-2xl", glyph: "★", opacity: 0.22 },
+  // Extra pass — pushes density up further so the base layer itself reads
+  // as cluttered/collaged rather than a sparse plain backdrop.
+  { top: "6%", left: "32%", rot: 20, size: "text-xl", glyph: "✂", opacity: 0.2 },
+  { top: "11%", left: "65%", rot: -18, size: "text-2xl", glyph: "✦", opacity: 0.22 },
+  { top: "20%", left: "10%", rot: 9, size: "text-lg", glyph: "✱", opacity: 0.2 },
+  { top: "33%", left: "48%", rot: -6, size: "text-xl", glyph: "❤", opacity: 0.18 },
+  { top: "36%", left: "82%", rot: 14, size: "text-lg", glyph: "★", opacity: 0.2 },
+  { top: "48%", left: "24%", rot: -20, size: "text-2xl", glyph: "✎", opacity: 0.2 },
+  { top: "55%", left: "70%", rot: 8, size: "text-xl", glyph: "✂", opacity: 0.2 },
+  { top: "66%", left: "45%", rot: -9, size: "text-lg", glyph: "✱", opacity: 0.18 },
+  { top: "75%", left: "60%", rot: 16, size: "text-2xl", glyph: "✦", opacity: 0.22 },
+  { top: "82%", left: "20%", rot: -12, size: "text-xl", glyph: "❤", opacity: 0.18 },
+  { top: "88%", left: "78%", rot: 6, size: "text-lg", glyph: "★", opacity: 0.2 },
+];
+
+// A handful of loose, unattached tape scraps left lying on the page itself
+// (not pinning anything down) — more "found material" clutter so the base
+// layer reads as a messy pile before any content cards land on top of it.
+const TAPE_SCRAPS: { top: string; left: string; rot: number; color: TapeColor }[] = [
+  { top: "5%", left: "18%", rot: -30, color: "teal" },
+  { top: "17%", left: "76%", rot: 24, color: "rose" },
+  { top: "44%", left: "6%", rot: 40, color: "sky" },
+  { top: "61%", left: "88%", rot: -20, color: "mint" },
+  { top: "80%", left: "40%", rot: 18, color: "lavender" },
 ];
 
 // A couple of long, loose hand-drawn squiggle strokes (SVG, not glyphs) for
@@ -69,6 +95,15 @@ function PageEphemera() {
       <Squiggle top="20%" left="40%" rot={-4} width={110} />
       <Squiggle top="68%" left="18%" rot={8} width={130} />
       <Squiggle top="46%" left="80%" rot={-10} width={90} />
+
+      {TAPE_SCRAPS.map((t, i) => (
+        // WashiTape positions itself relative to its own parent (left-1/2,
+        // -top-3), so each scrap gets its own zero-size anchor at the
+        // scattered page coordinate rather than being placed directly.
+        <div key={i} className="absolute" style={{ top: t.top, left: t.left }}>
+          <WashiTape color={t.color} rotation={t.rot} className="opacity-70" />
+        </div>
+      ))}
     </div>
   );
 }
