@@ -4,7 +4,12 @@ import { fetchStudyGuide, fetchStudyGuideCollection, SuperBrainApiError } from "
 import LazyPostList from "@/components/LazyPostList";
 import DeleteStudyGuideButton from "@/components/DeleteStudyGuideButton";
 import WashiTape from "@/components/WashiTape";
-import { seededTapeColor } from "@/lib/collage";
+import PushPin from "@/components/PushPin";
+import CutoutChip from "@/components/CutoutChip";
+import TypewriterTag from "@/components/TypewriterTag";
+import StickerLabel from "@/components/StickerLabel";
+import ScrapbookPage from "@/components/ScrapbookPage";
+import { seededRotation, seededTapeColor } from "@/lib/collage";
 
 const ROLE_LABEL: Record<string, string> = {
   final: "Final",
@@ -34,83 +39,106 @@ export default async function StudyGuideDetailPage(props: PageProps<"/study-guid
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-8">
-      {errorMessage && (
-        <div className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-coral-ink">
-          {errorMessage}
-        </div>
-      )}
+    <ScrapbookPage>
+      <div className="mx-auto max-w-4xl px-5 py-8 sm:px-10">
+        <Link
+          href="/study-guides"
+          className="font-hand text-ink-muted hover:text-coral-ink relative z-10 mb-6 inline-block text-sm transition-colors"
+        >
+          ← back to the corkboard
+        </Link>
 
-      {guide && (
-        <>
-          <Link href="/study-guides" className="font-hand text-ink-muted hover:text-coral-ink mb-3 inline-block text-sm transition-colors">
-            ← back to the corkboard
-          </Link>
+        {errorMessage && (
+          <div className="border-danger/30 bg-danger-soft text-coral-ink relative z-10 mb-6 rounded-2xl border px-4 py-3 text-sm">
+            {errorMessage}
+          </div>
+        )}
 
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <p className="font-hand text-2xl leading-tight">{guide.title ?? "Untitled study guide"}</p>
-              <p className="text-xs font-bold uppercase tracking-wide text-ink-muted mt-1">
-                {ROLE_LABEL[guide.role] ?? guide.role} · {guide.source_label ?? "Study guide"} ·{" "}
-                {new Date(guide.created_at).toLocaleString()}
-                {guide.model ? ` · ${guide.model}` : ""}
-              </p>
-              <p className="mt-1 text-xs text-ink-muted">
-                {guide.shortcodes.length} source{guide.shortcodes.length === 1 ? "" : "s"}
-              </p>
+        {guide && (
+          <>
+            {/* Title + metadata — a cutout headline chip with a typewritten strip beneath it, same materials as the corkboard cards */}
+            <div className="relative z-10 mb-6 flex flex-wrap items-end gap-3">
+              <CutoutChip seed={guide.id} size="md" rotationRange={4} className="max-w-full text-xl">
+                {guide.title ?? "Untitled study guide"}
+              </CutoutChip>
+              <div style={{ transform: `rotate(${seededRotation(guide.id + 4, 3)}deg)` }}>
+                <TypewriterTag>
+                  {ROLE_LABEL[guide.role] ?? guide.role} · {guide.source_label ?? "Study guide"} ·{" "}
+                  {new Date(guide.created_at).toLocaleDateString()}
+                  {guide.model ? ` · ${guide.model}` : ""}
+                </TypewriterTag>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+
+            {/* Sibling chips + actions — sticker tabs to jump between a generation's guides, plus the raw-pdf/delete escape hatches */}
+            <div className="relative z-10 mb-8 flex flex-wrap items-center gap-2">
+              {siblings &&
+                siblings.length > 1 &&
+                siblings.map((s) => {
+                  const isCurrent = s.id === guide.id;
+                  const color = seededTapeColor(s.id);
+                  const chunkIndex =
+                    s.role === "chunk" ? siblings!.filter((x) => x.role === "chunk").findIndex((x) => x.id === s.id) + 1 : null;
+                  return (
+                    <Link key={s.id} href={`/study-guides/${s.id}`} className="relative inline-block">
+                      {isCurrent && <PushPin color={`var(--color-${color})`} />}
+                      <StickerLabel
+                        color={color}
+                        rotation={seededRotation(s.id, 4)}
+                        className={isCurrent ? "ring-ink/60 ring-2" : "opacity-60 transition-opacity hover:opacity-100"}
+                      >
+                        {ROLE_LABEL[s.role] ?? s.role}
+                        {chunkIndex ? ` ${chunkIndex}` : ""}
+                      </StickerLabel>
+                    </Link>
+                  );
+                })}
+
+              <span className="font-hand text-ink-muted ml-auto text-xs">
+                {guide.shortcodes.length} source{guide.shortcodes.length === 1 ? "" : "s"}
+              </span>
               <a
                 href={`/api/study-guides/${guide.id}/pdf`}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 text-xs font-bold text-ink-muted hover:text-coral-ink transition-colors"
+                className="font-hand text-ink-muted hover:text-coral-ink shrink-0 text-xs font-bold transition-colors"
               >
-                ↗ Open PDF
+                ↗ raw pdf
               </a>
               <DeleteStudyGuideButton id={guide.id} />
             </div>
-          </div>
 
-          {siblings && siblings.length > 1 && (
-            <div className="mb-4 flex flex-wrap gap-2">
-              {siblings.map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/study-guides/${s.id}`}
-                  className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
-                    s.id === guide.id
-                      ? "border-ink bg-ink text-bg"
-                      : "border-line text-ink-muted hover:bg-surface-2 hover:text-ink"
-                  }`}
-                >
-                  {ROLE_LABEL[s.role] ?? s.role}
-                  {s.role === "chunk" ? ` ${siblings.filter((x) => x.role === "chunk").findIndex((x) => x.id === s.id) + 1}` : ""}
-                </Link>
-              ))}
+            {/* The guide itself, pinned up like a photocopy rather than framed as an app window — the browser's native PDF toolbar/sidebar is suppressed via the URL fragment so it reads as a document, not a viewer chrome */}
+            <div className="relative z-10 mx-auto mb-8 max-w-3xl">
+              <div className="relative bg-white p-3 pb-5 shadow-[0_20px_36px_-18px_rgba(0,0,0,0.55)]">
+                <PushPin color={`var(--color-${seededTapeColor(guide.id)})`} />
+                <WashiTape color={seededTapeColor(guide.id + 2)} rotation={seededRotation(guide.id + 2, 8)} />
+                <iframe
+                  src={`/api/study-guides/${guide.id}/pdf#toolbar=0&navpanes=0&scrollbar=0`}
+                  title={guide.title ?? "Study guide PDF"}
+                  className="h-[75vh] w-full border-0"
+                />
+              </div>
             </div>
-          )}
 
-          <div className="relative rounded-3xl border border-line bg-surface overflow-hidden">
-            <WashiTape color={seededTapeColor(guide.id)} rotation={-5} />
-            <iframe
-              src={`/api/study-guides/${guide.id}/pdf`}
-              title={guide.title ?? "Study guide PDF"}
-              className="h-[80vh] w-full"
-            />
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-line bg-surface px-4">
-            <LazyPostList label="Sources" shortcodes={guide.shortcodes} />
-          </div>
-
-          {guide.excluded_shortcodes.length > 0 && (
-            <div className="mt-2 rounded-2xl border border-line bg-surface px-4">
-              <LazyPostList label="Excluded (low importance)" shortcodes={guide.excluded_shortcodes} />
+            <div
+              style={{ transform: `rotate(${seededRotation(guide.id + 6, 1)}deg)`, backgroundColor: "var(--paper-bg)" }}
+              className="border-line relative z-10 mb-3 rounded-[2px] border px-4 shadow-[0_10px_20px_-14px_rgba(0,0,0,0.4)]"
+            >
+              <LazyPostList label="Sources" shortcodes={guide.shortcodes} />
             </div>
-          )}
-        </>
-      )}
-    </div>
+
+            {guide.excluded_shortcodes.length > 0 && (
+              <div
+                style={{ transform: `rotate(${seededRotation(guide.id + 8, 1)}deg)`, backgroundColor: "var(--paper-bg)" }}
+                className="border-line relative z-10 rounded-[2px] border px-4 shadow-[0_10px_20px_-14px_rgba(0,0,0,0.4)]"
+              >
+                <LazyPostList label="Excluded (low importance)" shortcodes={guide.excluded_shortcodes} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </ScrapbookPage>
   );
 }
