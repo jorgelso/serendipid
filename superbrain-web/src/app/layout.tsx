@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Fredoka, Kalam, Nunito } from "next/font/google";
+import { Anton, Fredoka, Kalam, Nunito } from "next/font/google";
 import "./globals.css";
 import NavBar from "@/components/NavBar";
 
@@ -23,6 +23,15 @@ const kalam = Kalam({
   weight: ["400", "700"],
 });
 
+// Bold condensed "magazine cutout" headline face — scoped to the study
+// guides collage the same way kalam is, for the mag/foil PaperTicket
+// variants (src/components/PaperTicket.tsx).
+const anton = Anton({
+  variable: "--font-anton",
+  subsets: ["latin"],
+  weight: ["400"],
+});
+
 export const metadata: Metadata = {
   title: "Serendipid — your saved reels, worth scrolling again",
   description: "Everything you've saved on Instagram, turned into a feed worth scrolling.",
@@ -30,7 +39,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${fredoka.variable} ${nunito.variable} ${kalam.variable} h-full antialiased`}>
+    <html lang="en" className={`${fredoka.variable} ${nunito.variable} ${kalam.variable} ${anton.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-bg text-ink">
         <NavBar />
         <main className="flex-1">{children}</main>

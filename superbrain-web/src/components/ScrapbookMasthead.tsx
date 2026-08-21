@@ -1,27 +1,17 @@
-import WashiTape from "./WashiTape";
-import CutoutChip from "./CutoutChip";
-import { seededRotation } from "@/lib/collage";
-
-const WORDS = ["Study", "guides"];
+import PaperTicket from "./PaperTicket";
 
 export default function ScrapbookMasthead({ subtitle }: { subtitle: string }) {
   return (
-    <div className="relative flex flex-wrap items-start gap-1 pb-2">
-      <div className="relative z-20 flex flex-wrap gap-1">
-        {WORDS.map((w, i) => (
-          <CutoutChip key={w} seed={i + 11} size="lg">
-            {w}
-          </CutoutChip>
-        ))}
-      </div>
-
-      <div
-        style={{ transform: `rotate(${seededRotation(3, 4)}deg)`, marginTop: "10px", marginLeft: "-8px" }}
-        className="bg-surface border-line relative z-10 max-w-sm rounded-[2px] border px-4 py-3 shadow-[0_8px_16px_-8px_rgba(0,0,0,0.4)]"
-      >
-        <WashiTape color="yellow" rotation={-7} />
-        <p className="font-hand text-ink text-base leading-snug">{subtitle}</p>
-      </div>
+    <div className="relative mb-3" style={{ height: 190 }}>
+      <PaperTicket kind="mag" left={0} top={0} width={230} height={92} fontSize={54} color="#161207" maskColor="var(--color-yellow)" rotation={-4} z={2}>
+        Study
+      </PaperTicket>
+      <PaperTicket kind="foil" left={215} top={38} width={230} height={86} fontSize={44} rotation={3} z={3}>
+        Guides
+      </PaperTicket>
+      <PaperTicket kind="hand" left={455} top={26} width={340} fontSize={17} color="#221a12" rotation={-1} z={1}>
+        {subtitle}
+      </PaperTicket>
     </div>
   );
 }

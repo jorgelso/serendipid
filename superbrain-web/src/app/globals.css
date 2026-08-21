@@ -14,13 +14,22 @@
   --color-ink-muted: #6b6b6b;
   --color-line: #f0e2cd;
 
-  /* Scrapbook "paper" tone (PolaroidThumb.tsx, TypewriterTag.tsx) — a
-     distinct physical scrap sitting ON the board (--color-surface-2);
-     --color-surface alone doesn't guarantee that (in dark mode surface is
-     actually darker than surface-2, the opposite of light mode, so a card
-     built from bare --color-surface nearly vanishes against the board
-     there). */
+  /* Scrapbook "paper" tone (PaperTicket.tsx) — a distinct physical scrap
+     sitting ON the board (--color-surface-2); --color-surface alone doesn't
+     guarantee that (in dark mode surface is actually darker than surface-2,
+     the opposite of light mode, so a card built from bare --color-surface
+     nearly vanishes against the board there). */
   --paper-bg: #fffdf8;
+
+  /* Collage found-object illustrations (StudyGuideCorkboard.tsx) — dark-ink
+     line art (camera, rose, cat, spiderweb, guitar) reads fine as-is on this
+     light page, so no filter; overridden below for dark mode, where the
+     same dark strokes would vanish against a dark page and need inverting
+     to read as light etching instead. Real colored photos/objects (vinyl,
+     key, flowers, car) only need a small edge-visibility boost, not a
+     theme swap, since their own color already carries them in both themes. */
+  --ill-line-filter: none;
+  --ill-photo-filter: none;
 
   --color-coral: #ff5a5f;
   --color-coral-soft: #ffe1de;
@@ -123,6 +132,9 @@
     --color-sky-ink: #7fd6fc;
     --color-danger-soft: #4a231f;
 
+    --ill-line-filter: invert(1) sepia(0.2) saturate(1.2) brightness(1.4);
+    --ill-photo-filter: brightness(1.15) contrast(1.05);
+
     --viz-series-1: #3987e5;
     --viz-series-2: #d95926;
     --viz-series-3: #199e70;
@@ -158,6 +170,8 @@
   --color-ink-muted: #b8a891;
   --color-line: #3a2f22;
   --paper-bg: #4d3c29;
+  --ill-line-filter: invert(1) sepia(0.2) saturate(1.2) brightness(1.4);
+  --ill-photo-filter: brightness(1.15) contrast(1.05);
 
   --color-coral-soft: #4a231f;
   --color-coral-ink: #ff8f83;
@@ -238,6 +252,9 @@
   /* Handwritten/marker voice for the study guides "corkboard" collage
      (src/app/study-guides) only — see layout.tsx's kalam font. */
   --font-hand: var(--font-kalam), cursive;
+  /* Bold condensed "magazine cutout" headline voice, same collage-only
+     scoping as --font-hand — see layout.tsx's anton font. */
+  --font-mag: var(--font-anton), sans-serif;
 }
 
 body {
