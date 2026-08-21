@@ -1,0 +1,26 @@
+import { NextRequest, NextResponse } from "next/server";
+import { fetchStudyGuideAsset, SuperBrainApiError } from "@/lib/apiClient";
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  try {
+    const { body, contentType } = await fetchStudyGuideAsset(id, "thumbnail");
+    return new NextResponse(body, {
+      headers: {
+        "Content-Type": contentType,
+        // A guide's content never changes after generation, so its
+        // rendered thumbnail is safe to cache aggressively — same
+        // reasoning as /api/thumbnail/[shortcode] for post thumbnails.
+        "Cache-Control": "private, max-age=31536000, immutable",
+      },
+    });
+  } catch (err) {
+    if (err instanceof SuperBrainApiError) {
+      return NextResponse.json({ error: err.message }, { status: err.status ?? 502 });
+    }
+    return NextResponse.json({ error: "Unexpected error." }, { status: 500 });
+  }
+}

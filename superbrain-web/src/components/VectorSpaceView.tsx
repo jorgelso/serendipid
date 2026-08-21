@@ -3,9 +3,11 @@
 import { useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { ClientPost, Theme, VectorSpacePoint } from "@/types/domain";
+import { useStudyGuideSelection } from "@/lib/useStudyGuideSelection";
 import type { VectorSpaceSceneHandle } from "./VectorSpaceScene";
 import VectorSpaceLegend, { UNCLUSTERED_SELECTION } from "./VectorSpaceLegend";
 import VectorSpaceSearch from "./VectorSpaceSearch";
+import StudyGuideToolbar from "./StudyGuideToolbar";
 import PostModal from "./PostModal";
 
 // react-three-fiber's <Canvas> needs a real WebGL context, so it can't be
@@ -47,6 +49,15 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
   const [legendExpanded, setLegendExpanded] = useState(true);
   const sceneRef = useRef<VectorSpaceSceneHandle>(null);
 
+  // Study-guide multi-select: same shared hook/toolbar as the home feed and
+  // search results (see useStudyGuideSelection.ts), just repurposed here so
+  // clicking a point toggles it into the selection instead of opening the
+  // post modal — see handleSelect below. sg.selecting takes over
+  // highlightedShortcodes entirely while active (mutually exclusive with
+  // legend/search/single-point selection, same as those three already are
+  // with each other).
+  const sg = useStudyGuideSelection("3D space selection");
+
   const legendHighlight = useMemo(() => {
     if (legendSelection === null) return null;
     const matches = new Set<string>();
@@ -62,7 +73,19 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
     [pointSelection]
   );
 
-  const highlightedShortcodes = searchShortcodes ?? legendHighlight ?? pointHighlight;
+  // The active legend theme's micro-clusters, for GenerateStudyGuideButton's
+  // chunk-packing hint (see VectorSpaceLegend's activeGroups doc comment) —
+  // null for the "Unclustered" bucket (UNCLUSTERED_SELECTION isn't a real
+  // theme id, has no micro-cluster structure) or when nothing is selected.
+  const legendGroups = useMemo(() => {
+    if (legendSelection === null) return null;
+    const theme = themes.find((t) => t.id === legendSelection);
+    return theme ? theme.microClusters.map((mc) => mc.postShortcodes) : null;
+  }, [themes, legendSelection]);
+
+  const highlightedShortcodes = sg.selecting
+    ? (sg.selected.size > 0 ? sg.selected : null)
+    : (searchShortcodes ?? legendHighlight ?? pointHighlight);
 
   function handleSelectTheme(key: string | null) {
     setSearchShortcodes(null);
@@ -76,7 +99,23 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
     setSearchShortcodes(shortcodes);
   }
 
+  function handleToggleSelectMode() {
+    if (sg.selecting) {
+      sg.stopSelecting();
+      return;
+    }
+    setLegendSelection(null);
+    setSearchShortcodes(null);
+    setPointSelection(null);
+    sg.setSelecting(true);
+  }
+
   async function handleSelect(shortcode: string) {
+    if (sg.selecting) {
+      sg.toggleSelect(shortcode);
+      return;
+    }
+
     setLegendSelection(null);
     setSearchShortcodes(null);
     setPointSelection((prev) => (prev === shortcode ? null : shortcode));
@@ -122,22 +161,42 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
               setLegendSelection(null);
               setSearchShortcodes(null);
               setPointSelection(null);
+              sg.stopSelecting();
             }}
             title="Reset view"
             className="rounded-2xl border border-line bg-surface/90 px-3 py-2.5 text-xs font-bold text-ink-muted shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md transition-colors hover:text-ink"
           >
             ↺ Reset view
           </button>
-          <VectorSpaceSearch onResults={handleSearchResults} />
+          {!sg.selecting && <VectorSpaceSearch onResults={handleSearchResults} />}
+          <div className="[&>div]:mb-0 rounded-2xl border border-line bg-surface/90 px-3 py-2 shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
+            <StudyGuideToolbar
+              selecting={sg.selecting}
+              selectedCount={sg.selected.size}
+              generateState={sg.generateState}
+              message={sg.message}
+              onToggleSelecting={handleToggleSelectMode}
+              onGenerate={sg.generate}
+            />
+          </div>
+          {sg.selecting && sg.selected.size === 0 && (
+            <div className="rounded-2xl border border-line bg-surface/90 px-3 py-2.5 text-xs text-ink-muted shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
+              Click points below to select them
+            </div>
+          )}
         </div>
-        <VectorSpaceLegend
-          themes={themes}
-          unclusteredCount={unclusteredCount}
-          activeSelection={legendSelection}
-          onSelect={handleSelectTheme}
-          expanded={legendExpanded}
-          onExpandedChange={setLegendExpanded}
-        />
+        {!sg.selecting && (
+          <VectorSpaceLegend
+            themes={themes}
+            unclusteredCount={unclusteredCount}
+            activeSelection={legendSelection}
+            onSelect={handleSelectTheme}
+            expanded={legendExpanded}
+            onExpandedChange={setLegendExpanded}
+            activeShortcodes={legendHighlight ? Array.from(legendHighlight) : null}
+            activeGroups={legendGroups}
+          />
+        )}
       </div>
 
       {loadingShortcode && (

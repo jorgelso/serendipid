@@ -1138,7 +1138,8 @@ class ModelRouter:
             params["temperature"] = 0.7
         return params
 
-    def _openai_text(self, model_id: str, prompt: str, api_key: Optional[str] = None) -> str:
+    def _openai_text(self, model_id: str, prompt: str, api_key: Optional[str] = None,
+                      max_tokens: int = 4000, timeout: int = 60) -> str:
         import requests
         resp = requests.post(
             "https://api.openai.com/v1/chat/completions",
@@ -1149,9 +1150,9 @@ class ModelRouter:
             json={
                 "model": model_id,
                 "messages": [{"role": "user", "content": prompt}],
-                **self._openai_chat_params(model_id),
+                **self._openai_chat_params(model_id, max_tokens),
             },
-            timeout=60,
+            timeout=timeout,
         )
         if resp.status_code == 429:
             raise Exception(f"429 rate limit: {resp.text[:200]}")
@@ -1277,6 +1278,42 @@ class ModelRouter:
                 self._record_failure("openai_gpt41", str(e), status_code=status)
                 print("  ✗ [openai_gpt41] importance scoring failed, falling back to ranked order …", flush=True)
         return self.generate_text(prompt)
+
+    def generate_openai_only_text(self, prompt: str, model: str, max_tokens: int = 4000, timeout: int = 60) -> str:
+        """
+        Call OpenAI's chat-completions API directly with a specific model,
+        bypassing everything else in this router — no ranked-fallback list,
+        no Groq/Gemini/OpenRouter/Ollama, and not even OPENAI_TEXT_MODEL's
+        configured default. Built for core/study_guide.py's multi-call
+        pipeline: the user explicitly wants that pipeline pinned to OpenAI
+        (specifically GPT-5.6 Luna) with zero fallback, so a partial
+        pipeline (some chunks on one model, others on a fallback) never
+        silently mixes quality across chunks/full/merge/final. Deliberately
+        does not call _record_success/_record_failure — mixing this
+        model's stats into "openai_gpt41"'s ranking entry (which tracks
+        whatever OPENAI_TEXT_MODEL actually resolves to) would misattribute
+        them to a different model.
+
+        max_tokens/timeout are exposed (not hardcoded) because GPT-5-family
+        models spend part of max_completion_tokens on invisible reasoning
+        before writing anything — a real incident here was a merge call
+        whose reasoning alone consumed the entire default 4000-token budget
+        (finish_reason "length", reasoning_tokens 4000, empty content), so
+        core/study_guide.py's merge/reconcile calls need real headroom, and
+        a much larger token budget needs a correspondingly longer timeout
+        than this router's normal quick calls.
+
+        Raises RuntimeError immediately (no retry, no fallback) if
+        OPENAI_API_KEY isn't configured or the call fails.
+        """
+        if not self._key("OPENAI_API_KEY"):
+            raise RuntimeError(
+                "OPENAI_API_KEY not configured — this feature is pinned to OpenAI specifically, no fallback."
+            )
+        try:
+            return self._openai_text(model, prompt, max_tokens=max_tokens, timeout=timeout)
+        except Exception as e:
+            raise RuntimeError(f"OpenAI ({model}) call failed: {e}") from e
 
     def generate_chat_text(self, prompt: str) -> str:
         """

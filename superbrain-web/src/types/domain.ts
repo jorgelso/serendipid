@@ -302,6 +302,90 @@ export interface RecommendationsResponse {
   posts: ClientPost[];
 }
 
+// Mirrors backend/core/database.py's study_guides table (backend/core/
+// study_guide.py generates the content). shortcodes are the posts actually
+// synthesized into `content`; excluded_shortcodes are ones dropped by the
+// importance floor before generation (see MIN_STUDY_GUIDE_IMPORTANCE).
+//
+// role/position: every guide belongs to a collection (see
+// StudyGuideCollection below). "final" (position 0) is the one the user
+// reads first; at or under MAX_STUDY_GUIDE_POSTS it's the only guide in the
+// collection. Above that cap, the pipeline also persists "full" (position
+// 1, the whole-selection pass), "merge" (position 2, the combined chunk
+// guides), and "chunk" (position 3+, one per chunk) — see
+// backend/core/study_guide.py's generate_study_guide_pipeline().
+export interface StudyGuide {
+  id: number;
+  title: string | null;
+  content: string;
+  shortcodes: string[];
+  excluded_shortcodes: string[];
+  source_label: string | null;
+  created_at: string;
+  collection_id: number | null;
+  role: "final" | "full" | "merge" | "chunk";
+  position: number;
+  // The exact OpenAI model that generated this guide (e.g. "gpt-5.6-luna")
+  // — null for guides saved before this column existed.
+  model: string | null;
+}
+
+export interface StudyGuideResponse {
+  success: boolean;
+  data: StudyGuide;
+}
+
+export interface StudyGuidesResponse {
+  success: boolean;
+  count: number;
+  data: StudyGuide[];
+}
+
+// Mirrors backend/core/database.py's study_guide_collections table — one
+// per generation request, guides already attached and ordered (final,
+// full, merge, then chunks) by GET /study-guide-collections[/{id}].
+//
+// POST /api/study-guide now returns a collection in status "generating"
+// with an empty (or partial) `guides` array — the backend runs the actual
+// pipeline in a background thread and persists each guide the instant it's
+// generated, so the frontend has to poll GET /study-guide-collections[/{id}]
+// to watch it fill in rather than trusting the POST response to be final.
+// "interrupted" means the backend process died mid-generation (see the
+// startup sweep in backend/core/database.py) — whatever guides had already
+// been saved are kept, but nothing is still actively generating.
+export interface StudyGuideCollection {
+  id: number;
+  source_label: string | null;
+  created_at: string;
+  status: "generating" | "complete" | "failed" | "interrupted";
+  error: string | null;
+  expected_guide_count: number | null;
+  guides: StudyGuide[];
+}
+
+export interface StudyGuideCollectionResponse {
+  success: boolean;
+  data: StudyGuideCollection;
+}
+
+export interface StudyGuideCollectionsResponse {
+  success: boolean;
+  count: number;
+  data: StudyGuideCollection[];
+}
+
+// A recurring idea surfaced by src/lib/ideas.ts's v1 tag-frequency
+// aggregation — see that file's module comment for why this is tag-based,
+// not the real semantic claim-clustering planned as a v2. Computed entirely
+// client/server-side from the cached /export payload; never returned by the
+// backend.
+export interface Idea {
+  tag: string;
+  label: string;
+  count: number;
+  shortcodes: string[];
+}
+
 export interface VectorSpacePoint {
   shortcode: string;
   position: [number, number, number];

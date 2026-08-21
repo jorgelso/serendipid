@@ -10,6 +10,7 @@ import {
   useVizPalette,
   vividColorForSlot,
 } from "@/lib/useVizPalette";
+import GenerateStudyGuideButton from "./GenerateStudyGuideButton";
 
 // Sentinel for the "no theme" bucket, safe to compare against real theme ids
 // since computeThemes() (src/lib/clustering.ts) always ids themes "theme-N".
@@ -32,6 +33,17 @@ interface VectorSpaceLegendProps {
   // "shrink the legend" and "points lose their color" are the same toggle.
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  // The shortcodes belonging to activeSelection, already computed by
+  // VectorSpaceView (it needs the same set for the scene's highlight) — lets
+  // the header offer "Generate study guide" for whichever cluster is
+  // currently selected without this component needing `points` itself.
+  activeShortcodes: string[] | null;
+  // The active theme's micro-clusters (each a shortcode list), when
+  // activeSelection is a real theme (not the "Unclustered" bucket, which
+  // has no micro-cluster structure) — passed to GenerateStudyGuideButton so
+  // an over-cap generation chunks along semantic boundaries instead of an
+  // arbitrary positional split. See ThemeAccordion.tsx for the same idea.
+  activeGroups: string[][] | null;
 }
 
 // The first 24 themes (already largest-first from computeThemes()) get their
@@ -107,6 +119,8 @@ export default function VectorSpaceLegend({
   onSelect,
   expanded,
   onExpandedChange,
+  activeShortcodes,
+  activeGroups,
 }: VectorSpaceLegendProps) {
   const entries = useMemo(() => buildEntries(themes, unclusteredCount), [themes, unclusteredCount]);
 
@@ -114,6 +128,7 @@ export default function VectorSpaceLegend({
 
   const primary = entries.slice(0, LEGEND_VISIBLE_CAP);
   const rest = entries.slice(LEGEND_VISIBLE_CAP);
+  const activeEntry = activeSelection !== null ? entries.find((e) => e.key === activeSelection) : undefined;
 
   return (
     <div className="pointer-events-auto flex max-h-[70vh] w-56 flex-col gap-1 overflow-y-auto rounded-2xl border border-line bg-surface/90 p-3 shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
@@ -131,6 +146,16 @@ export default function VectorSpaceLegend({
           </button>
         )}
       </div>
+      {activeEntry && activeShortcodes && activeShortcodes.length > 0 && (
+        <div className="px-1 pb-1">
+          <GenerateStudyGuideButton
+            shortcodes={activeShortcodes}
+            groups={activeGroups ?? undefined}
+            sourceLabel={`Cluster: "${activeEntry.label}"`}
+            className="w-full rounded-xl border border-line text-ink text-xs font-bold px-2 py-1.5 hover:bg-surface-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          />
+        </div>
+      )}
       {primary.map((entry) => (
         <LegendRow
           key={entry.key}

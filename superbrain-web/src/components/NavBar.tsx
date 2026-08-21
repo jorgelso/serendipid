@@ -15,6 +15,8 @@ const LINKS = [
   { href: "/insights", label: "Insights" },
   { href: "/versions", label: "Versions" },
   { href: "/space", label: "Space" },
+  { href: "/ideas", label: "Ideas" },
+  { href: "/study-guides", label: "Study guides" },
 ];
 
 export default function NavBar() {

@@ -13,6 +13,10 @@ import type {
   RatingTier,
   SearchHistoryEntry,
   SearchSemanticResponse,
+  StudyGuideCollectionResponse,
+  StudyGuideCollectionsResponse,
+  StudyGuideResponse,
+  StudyGuidesResponse,
   ViewHistoryEntry,
 } from "@/types/domain";
 
@@ -313,6 +317,80 @@ export async function sendChatMessage(threadId: string, message: string): Promis
       503: "The chatbot couldn't reach any AI provider right now — check the backend's chat provider keys (Gemini/OpenAI) or try again shortly.",
     },
   });
+}
+
+// On-demand study-guide generation (backend/core/study_guide.py) — turns a
+// picked set of posts (selection, search result, or theme/cluster) into a
+// "collection" of one or more distilled markdown docs. `groups` (e.g. a
+// theme's micro-clusters, each a shortcode list) lets the backend's
+// >MAX_STUDY_GUIDE_POSTS chunking pipeline pack chunks along semantic
+// boundaries instead of an arbitrary positional split — pass it whenever
+// the caller actually has that structure (ThemeAccordion, VectorSpaceLegend),
+// omit it for a plain selection/search result with no known sub-structure.
+//
+// Returns almost immediately — the backend creates the collection and
+// starts the actual LLM pipeline in a background thread rather than making
+// the caller hold a connection open for however long generation takes (see
+// backend/api.py's POST /study-guide). The returned collection is in
+// status "generating" with no guides yet; poll fetchStudyGuideCollection()
+// to watch it fill in. No custom timeout needed here — this call itself
+// does none of the slow work anymore.
+export async function generateStudyGuide(
+  shortcodes: string[],
+  sourceLabel?: string,
+  groups?: string[][]
+): Promise<StudyGuideCollectionResponse> {
+  return request<StudyGuideCollectionResponse>("/study-guide", {
+    method: "POST",
+    body: { shortcodes, source_label: sourceLabel, groups },
+  });
+}
+
+export async function fetchStudyGuides(): Promise<StudyGuidesResponse> {
+  return request<StudyGuidesResponse>("/study-guides");
+}
+
+export async function fetchStudyGuide(id: number | string): Promise<StudyGuideResponse> {
+  return request<StudyGuideResponse>(`/study-guides/${id}`);
+}
+
+export async function deleteStudyGuide(id: number | string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/study-guides/${id}`, { method: "DELETE" });
+}
+
+export async function fetchStudyGuideCollections(): Promise<StudyGuideCollectionsResponse> {
+  return request<StudyGuideCollectionsResponse>("/study-guide-collections");
+}
+
+export async function fetchStudyGuideCollection(id: number | string): Promise<StudyGuideCollectionResponse> {
+  return request<StudyGuideCollectionResponse>(`/study-guide-collections/${id}`);
+}
+
+export async function deleteStudyGuideCollection(id: number | string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/study-guide-collections/${id}`, { method: "DELETE" });
+}
+
+// Binary passthrough for a study guide's rendered PDF/thumbnail (backend/
+// core/study_guide_pdf.py) — bypasses request<T>()'s JSON parsing since
+// these return raw bytes, but still needs the server-only API key attached,
+// so it can't just be a browser <img>/<a> pointed at the backend directly
+// (same reasoning as /api/thumbnail/[shortcode] for post thumbnails, except
+// that route can redirect to an unauthenticated /media URL — this one can't,
+// since every /study-guides/* backend route requires X-API-Key).
+export async function fetchStudyGuideAsset(
+  id: number | string,
+  kind: "pdf" | "thumbnail"
+): Promise<{ body: ArrayBuffer; contentType: string }> {
+  const config = getConfig();
+  const res = await fetch(`${config.apiUrl}/study-guides/${id}/${kind}`, {
+    headers: { "X-API-Key": config.apiKey },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new SuperBrainApiError(`Backend error ${res.status} fetching study guide ${kind}: ${body.slice(0, 300)}`, res.status);
+  }
+  return { body: await res.arrayBuffer(), contentType: res.headers.get("content-type") ?? "application/octet-stream" };
 }
 
 // Feeds src/lib/recommendations.ts — never called from a "use client" component.

@@ -209,7 +209,9 @@ interface PostLike {
 // Boilerplate hashtags that show up on almost every Instagram reel regardless
 // of topic (platform/format noise, not content signal) — excluded from
 // labeling only, not from clustering itself (that's driven by embeddings).
-const GENERIC_TAGS = new Set([
+// Exported for reuse by src/lib/ideas.ts's tag-frequency aggregation, which
+// wants the same "ignore platform noise" rule this module already encodes.
+export const GENERIC_TAGS = new Set([
   "instagramreel",
   "instagramreels",
   "reel",
@@ -233,7 +235,7 @@ const GENERIC_TAGS = new Set([
   "like",
 ]);
 
-function normalizeTag(tag: string): string {
+export function normalizeTag(tag: string): string {
   return tag.trim().replace(/^#/, "").toLowerCase();
 }
 

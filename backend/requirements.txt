@@ -42,3 +42,11 @@ pyngrok>=7.1.5
 # ── Terminal UI ───────────────────────────────────────────────────────────────
 rich>=13.0.0
 segno>=1.6.0
+
+# ── Study guide PDF rendering (core/study_guide_pdf.py) ──────────────────────
+# WeasyPrint (not fpdf2 — fpdf2's write_html() had real Unicode and
+# page-break/list bugs, see study_guide_pdf.py's module docstring). Uses its
+# own pure-Python PDF backend (pydyf) as of v69, no Pango/cairo system deps.
+markdown>=3.6
+weasyprint>=69.0
+pymupdf>=1.24.0

@@ -14,6 +14,14 @@
   --color-ink-muted: #6b6b6b;
   --color-line: #f0e2cd;
 
+  /* Scrapbook "paper" tone (PaperCutout.tsx) — a distinct physical
+     scrap sitting ON the board (--color-surface-2); --color-surface
+     alone doesn't guarantee that (in dark mode surface is actually
+     darker than surface-2, the opposite of light mode, so a card built
+     from bare --color-surface nearly vanishes against the board
+     there). */
+  --paper-bg: #fffdf8;
+
   --color-coral: #ff5a5f;
   --color-coral-soft: #ffe1de;
   --color-coral-ink: #d0342c;
@@ -97,6 +105,7 @@
     --color-ink: #fbf3e7;
     --color-ink-muted: #b8a891;
     --color-line: #3a2f22;
+    --paper-bg: #4d3c29;
 
     --color-coral-soft: #4a231f;
     --color-coral-ink: #ff8f83;
@@ -148,6 +157,7 @@
   --color-ink: #fbf3e7;
   --color-ink-muted: #b8a891;
   --color-line: #3a2f22;
+  --paper-bg: #4d3c29;
 
   --color-coral-soft: #4a231f;
   --color-coral-ink: #ff8f83;
@@ -225,6 +235,9 @@
 
   --font-display: var(--font-fredoka), system-ui, sans-serif;
   --font-body: var(--font-nunito), system-ui, sans-serif;
+  /* Handwritten/marker voice for the study guides "corkboard" collage
+     (src/app/study-guides) only — see layout.tsx's kalam font. */
+  --font-hand: var(--font-kalam), cursive;
 }
 
 body {

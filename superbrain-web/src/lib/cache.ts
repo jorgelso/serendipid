@@ -1,8 +1,9 @@
 import { fetchCategories, fetchChangelog, fetchExport } from "./apiClient";
 import { computeThemes } from "./clustering";
 import { getConfig } from "./config";
+import { computeIdeas } from "./ideas";
 import { computeVectorSpaceLayout } from "./vectorSpace";
-import type { CategoriesResponse, ChangelogResponse, ExportPayload, Theme, VectorSpacePoint } from "@/types/domain";
+import type { CategoriesResponse, ChangelogResponse, ExportPayload, Idea, Theme, VectorSpacePoint } from "@/types/domain";
 
 interface AppCache {
   exportPayload: ExportPayload | null;
@@ -16,6 +17,10 @@ interface AppCache {
   changelogFetchedAt: string | null;
   categories: CategoriesResponse | null;
   categoriesFetchedAt: string | null;
+  // Keyed by themeId, "" for the whole-library computation — cheap enough
+  // (pure aggregation over already-cached posts, see src/lib/ideas.ts) that
+  // caching per-scope is just to avoid recomputing on repeat page views.
+  ideas: Map<string, Idea[]> | null;
 }
 
 // Stored on globalThis (not a plain module-level variable) so it survives
@@ -38,6 +43,7 @@ function getCache(): AppCache {
       changelogFetchedAt: null,
       categories: null,
       categoriesFetchedAt: null,
+      ideas: null,
     };
   }
   return globalThis.__superbrainCache;
@@ -51,13 +57,38 @@ export async function getExport(forceRefresh = false): Promise<ExportPayload> {
   const payload = await fetchExport();
   cache.exportPayload = payload;
   cache.exportFetchedAt = new Date().toISOString();
-  // Invalidate derived themes/vector-space whenever the underlying export changes.
+  // Invalidate derived themes/vector-space/ideas whenever the underlying export changes.
   cache.themes = null;
   cache.unclusteredShortcodes = null;
   cache.themesComputedAt = null;
   cache.vectorSpace = null;
   cache.vectorSpaceComputedAt = null;
+  cache.ideas = null;
   return payload;
+}
+
+// v1 tag-frequency aggregation (src/lib/ideas.ts) — see that file for why
+// this isn't real semantic dedup. themeId scopes counting to one theme's
+// member posts; omitted/undefined scopes to the whole library.
+export async function getIdeas(themeId?: string, forceRefresh = false): Promise<Idea[]> {
+  const cache = getCache();
+  const cacheKey = themeId ?? "";
+  if (!forceRefresh && cache.ideas?.has(cacheKey)) {
+    return cache.ideas.get(cacheKey)!;
+  }
+
+  const payload = await getExport(forceRefresh);
+  let scopeShortcodes: string[] | undefined;
+  if (themeId) {
+    const { themes } = await getThemes(false);
+    const theme = themes.find((t) => t.id === themeId);
+    scopeShortcodes = theme?.microClusters.flatMap((mc) => mc.postShortcodes) ?? [];
+  }
+
+  const ideas = computeIdeas(payload.posts, { scopeShortcodes });
+  if (!cache.ideas) cache.ideas = new Map();
+  cache.ideas.set(cacheKey, ideas);
+  return ideas;
 }
 
 export async function getThemes(
@@ -135,6 +166,7 @@ export function invalidateCache(): void {
   cache.themesComputedAt = null;
   cache.vectorSpace = null;
   cache.vectorSpaceComputedAt = null;
+  cache.ideas = null;
 }
 
 export function getCacheTimestamps(): {

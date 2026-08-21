@@ -4,8 +4,7 @@ import { getExport } from "@/lib/cache";
 import { mergeSearchHitsWithPosts } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
 import SearchBar from "@/components/SearchBar";
-import PostCard from "@/components/PostCard";
-import MasonryGrid from "@/components/MasonryGrid";
+import SearchResultsWithStudyGuide from "@/components/SearchResultsWithStudyGuide";
 
 async function loadResults(q: string): Promise<(ClientPost & { similarity: number })[]> {
   const config = getConfig();
@@ -69,13 +68,7 @@ export default async function SearchPage(props: PageProps<"/search">) {
           </p>
         )}
 
-        {results && results.length > 0 && (
-          <MasonryGrid>
-            {results.map((post) => (
-              <PostCard key={post.shortcode} post={post} />
-            ))}
-          </MasonryGrid>
-        )}
+        {results && results.length > 0 && <SearchResultsWithStudyGuide results={results} query={q} />}
       </div>
     </div>
   );

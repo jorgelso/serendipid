@@ -1,8 +1,12 @@
+import Link from "next/link";
 import type { Theme } from "@/types/domain";
 import { TagChips } from "./Chips";
 import LazyPostList from "./LazyPostList";
+import GenerateStudyGuideButton from "./GenerateStudyGuideButton";
 
 export default function ThemeAccordion({ theme }: { theme: Theme }) {
+  const groups = theme.microClusters.map((mc) => mc.postShortcodes);
+  const shortcodes = groups.flat();
   return (
     <details className="group rounded-2xl border border-line bg-surface" open={theme.postCount >= 6}>
       <summary className="cursor-pointer select-none list-none flex items-center gap-3 px-5 py-4">
@@ -21,6 +25,15 @@ export default function ThemeAccordion({ theme }: { theme: Theme }) {
             <LazyPostList label={mc.label} subLabels={mc.subLabels} shortcodes={mc.postShortcodes} />
           </div>
         ))}
+        <div className="mt-2 flex items-center gap-3">
+          <Link
+            href={`/ideas?themeId=${encodeURIComponent(theme.id)}`}
+            className="text-xs text-ink-muted hover:text-coral-ink transition-colors"
+          >
+            View recurring ideas in this theme →
+          </Link>
+          <GenerateStudyGuideButton shortcodes={shortcodes} groups={groups} sourceLabel={`Theme: "${theme.label}"`} />
+        </div>
       </div>
     </details>
   );

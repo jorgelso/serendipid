@@ -15,6 +15,7 @@ import asyncio
 import sys
 import os
 import json
+import re
 import zipfile
 import io
 from datetime import datetime
@@ -60,6 +61,8 @@ from core.model_router import get_router
 from core.categories import CATEGORIES
 from core.importance import score_and_stamp_importance
 from core import rag
+from core import study_guide
+from core import study_guide_pdf
 
 # Configure logging
 logging.basicConfig(
@@ -1521,6 +1524,274 @@ async def delete_chat_thread(thread_id: str, token: str = Depends(verify_token))
         deleted = db.delete_chat_thread(thread_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Chat thread not found.")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class StudyGuideCreate(BaseModel):
+    shortcodes: List[str]
+    source_label: Optional[str] = None
+    # Optional semantic sub-groups (e.g. a theme's micro-clusters, each a
+    # list of shortcodes) for the >MAX_STUDY_GUIDE_POSTS chunking pipeline
+    # to pack chunks along — see core/study_guide.py's chunk_posts(). Falls
+    # back to even positional chunking when omitted (a plain selection/
+    # search result has no known sub-structure).
+    groups: Optional[List[List[str]]] = None
+
+
+def _run_study_guide_pipeline(db, router, posts, groups, source_label, collection_id):
+    """Runs core/study_guide.py's pipeline in a background thread (started
+    by POST /study-guide, below) and persists each guide the moment it's
+    generated, not batched until the whole pipeline finishes — see
+    generate_study_guide_pipeline()'s docstring for why: a crash/restart
+    mid-run should only lose whatever guide was actively in flight, not
+    every guide already completed. Marks the collection 'complete' or
+    'failed' on the way out; guides already saved before a failure are left
+    in place either way.
+    """
+    def on_guide(g):
+        db.create_study_guide(
+            title=g["title"],
+            content=g["content"],
+            shortcodes=g["shortcodes"],
+            excluded_shortcodes=g["excluded_shortcodes"],
+            source_label=source_label,
+            collection_id=collection_id,
+            role=g["role"],
+            position=g["position"],
+            model=g.get("model"),
+        )
+
+    try:
+        study_guide.generate_study_guide_pipeline(router, posts, groups, on_guide=on_guide)
+        db.update_study_guide_collection_status(collection_id, "complete")
+    except Exception as e:
+        logger.warning(f"Study guide pipeline failed for collection {collection_id}: {e}")
+        db.update_study_guide_collection_status(collection_id, "failed", error=str(e))
+
+
+@app.post("/study-guide")
+async def create_study_guide(req: StudyGuideCreate, token: str = Depends(verify_token)):
+    """
+    Kick off an on-demand study-guide "collection" distilling a user-picked
+    set of posts (a selection, search result, or theme/cluster from
+    superbrain-web) into one or more markdown docs — see core/study_guide.py
+    for the full pipeline.
+
+    Returns IMMEDIATELY with the (initially empty) collection — the actual
+    LLM pipeline runs in a background thread (_run_study_guide_pipeline,
+    above), so the caller never has to hold a connection open for however
+    long generation takes (potentially several minutes for a large,
+    multi-call request). Poll GET /study-guide-collections/{id} to watch
+    `status` ('generating' -> 'complete'/'failed') and `guides` fill in —
+    each guide is persisted the instant it's generated, not all at once at
+    the end.
+
+    At or under MAX_STUDY_GUIDE_POSTS this is one LLM call and one saved
+    guide. Above it, by explicit user request, the pipeline runs BOTH a
+    whole-selection pass and a chunked-then-merged pass and reconciles them
+    into a final guide — every intermediate guide (full/merge/chunk) is
+    persisted alongside the final one as siblings in the same collection,
+    none are deleted. Every call is pinned to OpenAI's STUDY_GUIDE_MODEL
+    specifically (no Groq/Gemini/OpenRouter/Ollama fallback) — also an
+    explicit product decision, not a technical necessity.
+
+    Requires API authentication.
+    """
+    try:
+        shortcodes = list(dict.fromkeys(s for s in req.shortcodes if s))
+        if not shortcodes:
+            raise HTTPException(status_code=400, detail="shortcodes must not be empty.")
+        if len(shortcodes) > study_guide.ABSOLUTE_MAX_STUDY_GUIDE_POSTS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many posts selected ({len(shortcodes)}) — the absolute limit is "
+                       f"{study_guide.ABSOLUTE_MAX_STUDY_GUIDE_POSTS} per generation."
+            )
+
+        db = get_db()
+        posts = db.get_posts_by_shortcodes(shortcodes)
+        if not posts:
+            raise HTTPException(status_code=404, detail="None of the given shortcodes were found.")
+
+        try:
+            count = study_guide.expected_guide_count(posts, req.groups)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        collection = db.create_study_guide_collection(
+            source_label=req.source_label, status="generating", expected_guide_count=count
+        )
+        if not collection:
+            raise HTTPException(status_code=500, detail="Could not create the study guide collection.")
+
+        router = get_router()
+        threading.Thread(
+            target=_run_study_guide_pipeline,
+            args=(db, router, posts, req.groups, req.source_label, collection["id"]),
+            daemon=True,
+        ).start()
+
+        return {"success": True, "data": collection}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/study-guides")
+async def list_study_guides(token: str = Depends(verify_token)):
+    """
+    List all saved study guides across every collection, newest first.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        guides = db.get_study_guides()
+        return {"success": True, "count": len(guides), "data": guides}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/study-guides/{study_guide_id}")
+async def get_study_guide(study_guide_id: int, token: str = Depends(verify_token)):
+    """
+    Return a single saved study guide.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        guide = db.get_study_guide(study_guide_id)
+        if not guide:
+            raise HTTPException(status_code=404, detail="Study guide not found.")
+        return {"success": True, "data": guide}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/study-guides/{study_guide_id}")
+async def delete_study_guide(study_guide_id: int, token: str = Depends(verify_token)):
+    """
+    Delete a single saved study guide (not its collection or siblings).
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        if not db.delete_study_guide(study_guide_id):
+            raise HTTPException(status_code=404, detail="Study guide not found.")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/study-guides/{study_guide_id}/pdf")
+async def get_study_guide_pdf(study_guide_id: int, token: str = Depends(verify_token)):
+    """
+    Render a saved study guide's markdown content as a PDF, on demand (see
+    core/study_guide_pdf.py — nothing is persisted to disk, always rendered
+    fresh from the stored content).
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        guide = db.get_study_guide(study_guide_id)
+        if not guide:
+            raise HTTPException(status_code=404, detail="Study guide not found.")
+        pdf_bytes = await asyncio.to_thread(
+            study_guide_pdf.render_study_guide_pdf, guide.get("title") or "Study Guide", guide["content"]
+        )
+        safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', guide.get("title") or f"study-guide-{study_guide_id}")
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{safe_name}.pdf"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/study-guides/{study_guide_id}/thumbnail")
+async def get_study_guide_thumbnail(study_guide_id: int, token: str = Depends(verify_token)):
+    """
+    Rasterize the first page of a saved study guide's PDF as a PNG, on
+    demand — used by superbrain-web's collection view for a thumbnail grid.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        guide = db.get_study_guide(study_guide_id)
+        if not guide:
+            raise HTTPException(status_code=404, detail="Study guide not found.")
+        png_bytes = await asyncio.to_thread(
+            study_guide_pdf.render_study_guide_thumbnail, guide.get("title") or "Study Guide", guide["content"]
+        )
+        return Response(content=png_bytes, media_type="image/png")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/study-guide-collections")
+async def list_study_guide_collections(token: str = Depends(verify_token)):
+    """
+    List all study guide collections, newest first, each with its member
+    guides attached (ordered: final, full, merge, then individual chunks).
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        collections = db.get_study_guide_collections()
+        return {"success": True, "count": len(collections), "data": collections}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/study-guide-collections/{collection_id}")
+async def get_study_guide_collection(collection_id: int, token: str = Depends(verify_token)):
+    """
+    Return a single study guide collection with its member guides attached.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        collection = db.get_study_guide_collection(collection_id)
+        if not collection:
+            raise HTTPException(status_code=404, detail="Study guide collection not found.")
+        return {"success": True, "data": collection}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/study-guide-collections/{collection_id}")
+async def delete_study_guide_collection(collection_id: int, token: str = Depends(verify_token)):
+    """
+    Delete a study guide collection and every guide in it.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        if not db.delete_study_guide_collection(collection_id):
+            raise HTTPException(status_code=404, detail="Study guide collection not found.")
         return {"success": True}
     except HTTPException:
         raise

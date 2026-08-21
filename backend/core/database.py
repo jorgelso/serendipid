@@ -625,6 +625,107 @@ class Database:
         """)
         self._conn.commit()
 
+        # Study guides — persisted on-demand synthesis docs (superbrain-web's
+        # /study-guides), generated from a user-picked set of posts (a
+        # selection, search result, or theme/cluster) via one LLM call over
+        # their stored content — see core/study_guide.py. v1 only: dedup of
+        # repeated points across source posts happens implicitly inside that
+        # single prompt, not via a separate claim-extraction/embedding
+        # pipeline (see core/study_guide.py's module docstring for the
+        # planned v2, already agreed with the user).
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS study_guides (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                title                 TEXT,
+                content               TEXT NOT NULL,
+                shortcodes            TEXT NOT NULL,
+                excluded_shortcodes   TEXT DEFAULT '[]',
+                source_label          TEXT,
+                created_at            TEXT
+            );
+        """)
+        self._conn.commit()
+
+        # study_guide_collections — one row per generation *request* (a
+        # single selection/theme/cluster the user asked to synthesize), so
+        # the frontend has one uniform thing to render ("every generation is
+        # a collection you can expand") whether it produced one guide or
+        # several. core/study_guide.py's generate_study_guide_pipeline()
+        # populates a collection with more than one guide (role
+        # 'full'/'merge'/'chunk' alongside the primary 'final' guide) once a
+        # request exceeds MAX_STUDY_GUIDE_POSTS — both a whole-selection
+        # pass and a chunked-then-merged pass are run and reconciled into
+        # 'final', by explicit user request, and NONE of the intermediate
+        # guides are deleted afterward; they're kept as siblings so the user
+        # can inspect how the final guide was actually built.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS study_guide_collections (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_label  TEXT,
+                created_at    TEXT
+            );
+        """)
+        self._conn.commit()
+
+        for stmt in (
+            "ALTER TABLE study_guides ADD COLUMN collection_id INTEGER",
+            "ALTER TABLE study_guides ADD COLUMN role TEXT DEFAULT 'final'",
+            "ALTER TABLE study_guides ADD COLUMN position INTEGER DEFAULT 0",
+            # The exact OpenAI model that generated this guide (e.g.
+            # "gpt-5.6-luna") — core/study_guide.py pins a specific model
+            # rather than letting the router pick, so this is worth
+            # recording per-guide rather than just trusting whatever
+            # STUDY_GUIDE_MODEL happens to be set to today.
+            "ALTER TABLE study_guides ADD COLUMN model TEXT",
+        ):
+            try:
+                self._conn.execute(stmt)
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass
+
+        # status/error/expected_guide_count: POST /study-guide (api.py) now
+        # creates the collection row and returns immediately, running
+        # core/study_guide.py's pipeline in a background thread that
+        # persists each guide (db.create_study_guide()) the moment it's
+        # generated rather than batching everything until the pipeline
+        # finishes — so a crash/restart mid-generation only loses whatever
+        # guide was actively in flight, not every guide already completed.
+        # 'generating' -> 'complete' (all guides done) or 'failed' (error
+        # set) in the normal case. A collection can also get stuck at
+        # 'generating' forever if the whole backend process dies mid-run —
+        # see the startup sweep right below, which relabels those
+        # 'interrupted' so the UI doesn't lie about work that's not actually
+        # still happening. expected_guide_count is computed synchronously,
+        # cheaply, before the background thread starts (see
+        # core/study_guide.py's expected_guide_count()) so the frontend can
+        # show real progress ("3 of 7") instead of just a spinner.
+        for stmt in (
+            "ALTER TABLE study_guide_collections ADD COLUMN status TEXT DEFAULT 'complete'",
+            "ALTER TABLE study_guide_collections ADD COLUMN error TEXT",
+            "ALTER TABLE study_guide_collections ADD COLUMN expected_guide_count INTEGER",
+        ):
+            try:
+                self._conn.execute(stmt)
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass
+
+        # Startup sweep: any collection still marked 'generating' belonged
+        # to a background thread that died with the previous process — it
+        # is definitely not still running (this codebase has no
+        # cross-restart job resumption for this pipeline, unlike the
+        # OpenAI-Batch-API-backed pipelines elsewhere in this file). Relabel
+        # rather than delete: whatever guides it already saved via on_guide
+        # before the process died are real, valid, and kept.
+        try:
+            self._conn.execute(
+                "UPDATE study_guide_collections SET status = 'interrupted' WHERE status = 'generating'"
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
     def _seed_changelog(self):
         """Seed analysis_changelog with the known version history. Uses
         INSERT OR IGNORE so re-running on an existing DB is a no-op, and new
@@ -2572,6 +2673,177 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error adding chat message: {e}")
             return None
+
+    # ------------------------------------------------------------------
+    # Study guides
+    # ------------------------------------------------------------------
+
+    def _study_guide_row_to_dict(self, row):
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d['shortcodes'] = json.loads(d.get('shortcodes') or '[]')
+        except Exception:
+            d['shortcodes'] = []
+        try:
+            d['excluded_shortcodes'] = json.loads(d.get('excluded_shortcodes') or '[]')
+        except Exception:
+            d['excluded_shortcodes'] = []
+        return d
+
+    def create_study_guide(self, title, content, shortcodes, excluded_shortcodes=None, source_label=None,
+                            collection_id=None, role='final', position=0, model=None):
+        """Persist a generated study guide. Returns the saved dict, or None on failure."""
+        if not self.is_connected():
+            return None
+        try:
+            now = datetime.utcnow().isoformat()
+            cur = self._conn.execute(
+                "INSERT INTO study_guides "
+                "(title, content, shortcodes, excluded_shortcodes, source_label, created_at, collection_id, role, position, model) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (title, content, json.dumps(shortcodes), json.dumps(excluded_shortcodes or []), source_label, now,
+                 collection_id, role, position, model)
+            )
+            self._conn.commit()
+            return self.get_study_guide(cur.lastrowid)
+        except Exception as e:
+            print(f"[WARNING]  Error creating study guide: {e}")
+            return None
+
+    def get_study_guides(self):
+        """Return all study guides (across every collection), newest first."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM study_guides ORDER BY created_at DESC")
+            return [self._study_guide_row_to_dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error listing study guides: {e}")
+            return []
+
+    def get_study_guide(self, study_guide_id):
+        """Return a single study guide by id, or None."""
+        if not self.is_connected():
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM study_guides WHERE id = ?", (study_guide_id,))
+            return self._study_guide_row_to_dict(cur.fetchone())
+        except Exception as e:
+            print(f"[WARNING]  Error getting study guide: {e}")
+            return None
+
+    def delete_study_guide(self, study_guide_id):
+        """Delete a single study guide (not its collection or siblings). Returns True if it existed."""
+        if not self.is_connected():
+            return False
+        try:
+            cur = self._conn.execute("DELETE FROM study_guides WHERE id = ?", (study_guide_id,))
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error deleting study guide: {e}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Study guide collections
+    # ------------------------------------------------------------------
+
+    def create_study_guide_collection(self, source_label=None, status='generating', expected_guide_count=None):
+        """Create a new (initially empty) study guide collection — one per
+        generation request. Returns the saved dict, or None on failure."""
+        if not self.is_connected():
+            return None
+        try:
+            now = datetime.utcnow().isoformat()
+            cur = self._conn.execute(
+                "INSERT INTO study_guide_collections (source_label, created_at, status, expected_guide_count) "
+                "VALUES (?, ?, ?, ?)",
+                (source_label, now, status, expected_guide_count)
+            )
+            self._conn.commit()
+            return self.get_study_guide_collection(cur.lastrowid)
+        except Exception as e:
+            print(f"[WARNING]  Error creating study guide collection: {e}")
+            return None
+
+    def update_study_guide_collection_status(self, collection_id, status, error=None):
+        """Mark a collection 'complete' or 'failed' once its background
+        pipeline (api.py's POST /study-guide) finishes or raises. Returns
+        True if the collection existed."""
+        if not self.is_connected():
+            return False
+        try:
+            cur = self._conn.execute(
+                "UPDATE study_guide_collections SET status = ?, error = ? WHERE id = ?",
+                (status, error, collection_id)
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error updating study guide collection status: {e}")
+            return False
+
+    def get_study_guide_collections(self):
+        """Return every collection (newest first), each with its member
+        guides already attached and ordered by position — 'final' first,
+        then 'full', 'merge', and the individual 'chunk' guides."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM study_guide_collections ORDER BY created_at DESC")
+            collections = [dict(r) for r in cur.fetchall()]
+            for collection in collections:
+                cur2 = self._conn.cursor()
+                cur2.execute(
+                    "SELECT * FROM study_guides WHERE collection_id = ? ORDER BY position ASC",
+                    (collection["id"],)
+                )
+                collection["guides"] = [self._study_guide_row_to_dict(r) for r in cur2.fetchall()]
+            return collections
+        except Exception as e:
+            print(f"[WARNING]  Error listing study guide collections: {e}")
+            return []
+
+    def get_study_guide_collection(self, collection_id):
+        """Return a single collection with its member guides attached (see
+        get_study_guide_collections()), or None."""
+        if not self.is_connected():
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM study_guide_collections WHERE id = ?", (collection_id,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            collection = dict(row)
+            cur2 = self._conn.cursor()
+            cur2.execute(
+                "SELECT * FROM study_guides WHERE collection_id = ? ORDER BY position ASC",
+                (collection_id,)
+            )
+            collection["guides"] = [self._study_guide_row_to_dict(r) for r in cur2.fetchall()]
+            return collection
+        except Exception as e:
+            print(f"[WARNING]  Error getting study guide collection: {e}")
+            return None
+
+    def delete_study_guide_collection(self, collection_id):
+        """Delete a collection and every guide in it. Returns True if the collection existed."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute("DELETE FROM study_guides WHERE collection_id = ?", (collection_id,))
+            cur = self._conn.execute("DELETE FROM study_guide_collections WHERE id = ?", (collection_id,))
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error deleting study guide collection: {e}")
+            return False
 
 
 # ------------------------------------------------------------------
