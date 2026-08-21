@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import type { ClientPost, Theme, VectorSpacePoint } from "@/types/domain";
 import { useStudyGuideSelection } from "@/lib/useStudyGuideSelection";
 import type { VectorSpaceSceneHandle } from "./VectorSpaceScene";
+import GenerateStudyGuideButton from "./GenerateStudyGuideButton";
 import VectorSpaceLegend, { UNCLUSTERED_SELECTION } from "./VectorSpaceLegend";
 import VectorSpaceSearch from "./VectorSpaceSearch";
 import StudyGuideToolbar from "./StudyGuideToolbar";
@@ -35,6 +36,7 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
   // "both active" state.
   const [legendSelection, setLegendSelection] = useState<string | null>(null);
   const [searchShortcodes, setSearchShortcodes] = useState<Set<string> | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   // Clicking a point isolates it (dims every other point, same mechanism as
   // the legend/search highlight) so it stays visually findable even after
   // FocusOrbit re-centers the camera on it and the cursor is no longer over
@@ -93,10 +95,11 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
     setLegendSelection(key);
   }
 
-  function handleSearchResults(shortcodes: Set<string> | null) {
+  function handleSearchResults(shortcodes: Set<string> | null, query: string) {
     setLegendSelection(null);
     setPointSelection(null);
     setSearchShortcodes(shortcodes);
+    setSearchQuery(query);
   }
 
   function handleToggleSelectMode() {
@@ -160,6 +163,7 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
               sceneRef.current?.resetCamera();
               setLegendSelection(null);
               setSearchShortcodes(null);
+              setSearchQuery("");
               setPointSelection(null);
               sg.stopSelecting();
             }}
@@ -169,6 +173,13 @@ export default function VectorSpaceView({ points, themes, unclusteredCount }: Ve
             ↺ Reset view
           </button>
           {!sg.selecting && <VectorSpaceSearch onResults={handleSearchResults} />}
+          {!sg.selecting && searchShortcodes && searchShortcodes.size > 0 && (
+            <GenerateStudyGuideButton
+              shortcodes={Array.from(searchShortcodes)}
+              sourceLabel={`Search: "${searchQuery}"`}
+              className="shrink-0 rounded-2xl border border-line bg-surface/90 px-3 py-2.5 text-xs font-bold text-ink shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            />
+          )}
           <div className="[&>div]:mb-0 rounded-2xl border border-line bg-surface/90 px-3 py-2 shadow-[0_10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur-md">
             <StudyGuideToolbar
               selecting={sg.selecting}

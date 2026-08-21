@@ -3,8 +3,12 @@
 import { useRef, useState } from "react";
 
 interface VectorSpaceSearchProps {
-  // null = no active search (show everything at full brightness).
-  onResults: (shortcodes: Set<string> | null) => void;
+  // null = no active search (show everything at full brightness). query is
+  // the submitted text that produced these shortcodes (empty string when
+  // shortcodes is null) — the caller needs it as the study-guide
+  // sourceLabel, the same way /search's page.tsx passes its `q` through to
+  // SearchResultsWithStudyGuide.
+  onResults: (shortcodes: Set<string> | null, query: string) => void;
 }
 
 // Free-text box that runs the same cosine-similarity search as /search
@@ -33,7 +37,7 @@ export default function VectorSpaceSearch({ onResults }: VectorSpaceSearchProps)
       setLoading(false);
       setError(null);
       setMatchCount(null);
-      onResults(null);
+      onResults(null, "");
       return;
     }
 
@@ -48,18 +52,18 @@ export default function VectorSpaceSearch({ onResults }: VectorSpaceSearchProps)
       if (!res.ok || data.error) {
         setError(data.error ?? "Search failed.");
         setMatchCount(null);
-        onResults(null);
+        onResults(null, "");
         return;
       }
 
       const shortcodes = data.shortcodes ?? [];
       setMatchCount(shortcodes.length);
-      onResults(new Set(shortcodes));
+      onResults(new Set(shortcodes), query);
     } catch {
       if (requestId !== requestIdRef.current) return;
       setError("Search failed.");
       setMatchCount(null);
-      onResults(null);
+      onResults(null, "");
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
@@ -76,7 +80,7 @@ export default function VectorSpaceSearch({ onResults }: VectorSpaceSearchProps)
     setLoading(false);
     setError(null);
     setMatchCount(null);
-    onResults(null);
+    onResults(null, "");
   }
 
   return (
