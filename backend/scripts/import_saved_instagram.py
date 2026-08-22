@@ -13,17 +13,31 @@ recursive URL scan, so parsing degrades gracefully instead of hard-failing
 on an unrecognized shape. If --dry-run counts look wrong, start by checking
 which of these three actually matched your file.
 
-Instagram's export always lists each collection newest-saved-first.
---reverse-collections (default: ON) reverses each collection's own slice of
-records to oldest-first before they're processed, so posts get analyzed
-(and stamped with analyzed_at) in the same order they were actually saved —
-see reverse_within_collections() for the full reasoning. Only cross-category
-order is left unfixed (there's no reliable signal in the export to unify
-collections against each other); pass --no-reverse-collections only if you
-specifically want the raw export order.
+Two input files, two different jobs:
+  - <export.json-or-dir> (positional, required): the "by collection" export
+    (saved_collections.json-shaped) — decides WHAT gets analyzed and which
+    SuperBrain collection(s) it's assigned to. Only posts saved in a
+    collection are ever analyzed by this script.
+  - --all-posts-file (optional): a flat "every saved post, ungrouped" export
+    (saved_posts.json-shaped) — used ONLY to look up each analyzed post's
+    real save date (analyses.date_saved), via each entry's own `timestamp`
+    field. Verified to be a save date, not a publish date (see the
+    date_saved migration comment in core/database.py). A post in this file
+    that isn't also in the collections file is never analyzed on its own —
+    it's a lookup table, not a second source of URLs.
+
+Instagram's collection export always lists each collection newest-saved-
+first. --reverse-collections (default: OFF) reverses each collection's own
+slice of records to oldest-first before they're processed, purely as a
+processing-order preference — analyzed_at no longer needs to reflect save
+order for date accuracy now that real dates come from --all-posts-file, so
+the default is off, meaning the newest-saved reels in each collection get
+analyzed (and become searchable) first. See reverse_within_collections() for
+the full reasoning; only cross-category order is left unfixed regardless.
 
 Usage:
     python import_saved_instagram.py <export.json-or-dir> --dry-run
+    python import_saved_instagram.py <export.json-or-dir> --all-posts-file saved_posts.json
     python import_saved_instagram.py <export.json-or-dir> --folder Recipes
     python import_saved_instagram.py <export.json-or-dir>
 """
@@ -189,6 +203,51 @@ def extract_meta_label_values_shape(blob: Any) -> List[Tuple[str, str, str, List
     return records if matched_any_collection else []
 
 
+def looks_like_collections_export(blob: Any) -> bool:
+    """Cheap structural check, no full parse: does blob look like a
+    saved_collections.json-shaped export (top-level list, at least one item
+    with a label_values list containing both a Name label and a Media-like
+    dict entry)? Mirrors extract_meta_label_values_shape()'s own matching
+    condition exactly, so "this parses" and "this validates" never disagree.
+    Used by api.py's /instagram-export/* routes to reject a JSON upload
+    that isn't actually this shape, before it's ever written to disk or
+    handed to a subprocess.
+    """
+    if not isinstance(blob, list) or not blob:
+        return False
+    for item in blob:
+        if not isinstance(item, dict) or not isinstance(item.get("label_values"), list):
+            continue
+        has_name = any(isinstance(lv, dict) and lv.get("label") == "Name" for lv in item["label_values"])
+        has_media = any(isinstance(lv, dict) and "dict" in lv for lv in item["label_values"])
+        if has_name and has_media:
+            return True
+    return False
+
+
+def looks_like_all_posts_export(blob: Any) -> bool:
+    """Cheap structural check, no full parse: does blob look like a
+    saved_posts.json-shaped export (top-level list, at least one item with
+    its own numeric top-level `timestamp` and a label_values list
+    containing a URL directly, not nested inside a Media dict)? Mirrors
+    extract_post_timestamps()'s own matching condition. The Name-vs-URL
+    distinction is what tells this apart from looks_like_collections_export
+    above — both shapes' top-level items can carry a `timestamp` field
+    (a collections file's is a collection-level timestamp), so `timestamp`
+    alone isn't a reliable signal on its own.
+    """
+    if not isinstance(blob, list) or not blob:
+        return False
+    for item in blob:
+        if not isinstance(item, dict) or not isinstance(item.get("label_values"), list):
+            continue
+        if not isinstance(item.get("timestamp"), (int, float)):
+            continue
+        if any(isinstance(lv, dict) and lv.get("label") == "URL" for lv in item["label_values"]):
+            return True
+    return False
+
+
 def _known_shape_items(blob: Any) -> Optional[Dict[str, List[Any]]]:
     """
     Try to recognize a top-level Instagram export shape and return
@@ -291,6 +350,50 @@ def parse_export(path: Path) -> List[Tuple[str, str, str, List[str]]]:
     return cleaned
 
 
+def extract_post_timestamps(path: Path) -> Dict[str, str]:
+    """Parse a flat "every saved post, ungrouped" export (saved_posts.json-
+    shaped — a top-level list where each entry has its own `label_values`
+    directly, no collection `Name`/`Media` wrapper, plus a sibling
+    `timestamp` field) into {shortcode: iso_date_string}.
+
+    This is a genuinely different shape from the collections export's
+    (extract_meta_label_values_shape() requires a `Name` label per
+    top-level item, which entries here don't have, so it returns [] for
+    this file). `timestamp` here is the real date the post was SAVED to
+    Instagram, not its publish date — verified against analyses.post_date
+    (see the date_saved migration comment in core/database.py): it's always
+    later than post_date, by a wildly varying amount, the signature of
+    "whenever I happened to see and save this," not a duplicate publish
+    date. Entries with no parseable URL or timestamp are skipped silently.
+    """
+    result: Dict[str, str] = {}
+    for json_file in _iter_json_files(path):
+        try:
+            blob = json.loads(json_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"[WARN] Skipping unparseable file {json_file}: {e}")
+            continue
+        if not isinstance(blob, list):
+            continue
+        for entry in blob:
+            if not isinstance(entry, dict):
+                continue
+            label_values = entry.get("label_values")
+            ts = entry.get("timestamp")
+            if not isinstance(label_values, list) or not isinstance(ts, (int, float)):
+                continue
+            url = None
+            for lv in label_values:
+                u = _label_value(lv, "URL")
+                if u:
+                    url = u
+                    break
+            code = shortcode_for(url) if url else None
+            if code:
+                result[code] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+    return result
+
+
 def reverse_within_collections(
     records: List[Tuple[str, str, str, List[str]]]
 ) -> List[Tuple[str, str, str, List[str]]]:
@@ -389,7 +492,23 @@ def api_request(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8")
-            return json.loads(body) if body else {}
+            parsed = json.loads(body) if body else {}
+            # urlopen() only raises HTTPError for 4xx/5xx — a 2xx status
+            # other than 200 (in practice, /analyze's 202 "queued for
+            # retry server-side, nothing saved yet" response) reaches here
+            # as if it were a normal success. Left unchecked, main()'s loop
+            # would mark the item "success" even though nothing was
+            # actually analyzed — confirmed in practice: 39 posts queued
+            # server-side for a Whisper-failure retry were silently marked
+            # done locally and never revisited. Raising ApiError here
+            # routes a non-200 status through the *already-existing*
+            # e.status == 202 handling in main()'s except block below,
+            # which was clearly written assuming this would happen but
+            # never actually fired.
+            if resp.status != 200:
+                detail = parsed.get("detail", body) if isinstance(parsed, dict) else body
+                raise ApiError(resp.status, str(detail))
+            return parsed
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         detail = body
@@ -400,6 +519,18 @@ def api_request(
         raise ApiError(e.code, str(detail)) from None
     except urllib.error.URLError as e:
         raise ApiError(0, f"Connection error: {e.reason}") from None
+    except OSError as e:
+        # A request that hangs past `timeout` (e.g. main.py stuck on an
+        # unusually slow download/analysis) can raise a bare TimeoutError
+        # (or another raw socket-level OSError) straight out of urlopen()
+        # without it ever becoming a urllib.error.URLError — seen in
+        # practice: a TimeoutError surfacing mid-response-read after the
+        # full 600s timeout elapsed, which the two except clauses above
+        # don't catch, crashing the whole script instead of just failing
+        # this one URL. Wrapping it as an ApiError routes it through the
+        # exact same per-URL retry/skip handling in main()'s loop as any
+        # other failure, so one slow item can't take down an entire run.
+        raise ApiError(0, f"{type(e).__name__}: {e}") from None
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -477,12 +608,15 @@ def ensure_post_in_collection(
 def analyze_url(
     base_url: str, api_key: str, url: str, force: bool,
     caption: str = "", hashtags: Optional[List[str]] = None,
+    date_saved: Optional[str] = None,
 ) -> dict:
     body: Dict[str, Any] = {"url": url, "force": force}
     if caption:
         body["caption"] = caption
     if hashtags:
         body["hashtags"] = hashtags
+    if date_saved:
+        body["date_saved"] = date_saved
     return api_request("POST", base_url, "/analyze", api_key, body)
 
 
@@ -511,19 +645,27 @@ def resolve_api_key(cli_value: Optional[str]) -> str:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("export_path", type=Path, help="Path to the Instagram export JSON file, or a directory of them")
+    p.add_argument("export_path", type=Path, help="Path to the Instagram \"by collection\" export JSON file, or a directory of them")
+    p.add_argument(
+        "--all-posts-file", type=Path, default=None,
+        help="Path to a flat 'saved_posts.json'-style export (every individually-saved "
+             "post, ungrouped) — used only to look up each analyzed post's real save "
+             "date. Posts here that aren't also in the collections file are never "
+             "analyzed on their own. Optional; omit to skip date_saved for this run.",
+    )
     p.add_argument("--folder", help="Only process URLs from this Instagram folder/collection (case-insensitive)")
     p.add_argument(
         "--reverse-collections", dest="reverse_collections",
-        action="store_true", default=True,
-        help="Process each collection oldest-saved-first (default: on). Instagram's "
-             "export lists newest-saved-first; leaving this on keeps analyzed_at "
-             "chronologically meaningful. Only disable if you specifically want the "
-             "raw export order.",
+        action="store_true", default=False,
+        help="Process each collection oldest-saved-first (default: off). Purely a "
+             "processing-order preference now — real save dates come from "
+             "--all-posts-file regardless of analysis order. Off by default means the "
+             "newest-saved reels in each collection get analyzed (and become "
+             "searchable) first.",
     )
     p.add_argument(
         "--no-reverse-collections", dest="reverse_collections", action="store_false",
-        help="Process collections in the raw export order (newest-saved-first).",
+        help="Process collections in the raw export order, newest-saved-first (the default).",
     )
     p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"SuperBrain backend URL (default: {DEFAULT_SERVER_URL})")
     p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SUPERBRAIN_API_KEY)")
@@ -552,6 +694,14 @@ def main() -> None:
 
     url_to_folders = group_by_url(records)
     url_meta = build_url_metadata(records)
+
+    post_timestamps: Dict[str, str] = {}
+    if args.all_posts_file:
+        if not args.all_posts_file.exists():
+            print(f"[ERROR] --all-posts-file not found: {args.all_posts_file}")
+            sys.exit(1)
+        post_timestamps = extract_post_timestamps(args.all_posts_file)
+        print(f"Loaded {len(post_timestamps)} save-date(s) from {args.all_posts_file}.")
 
     folder_counts: Dict[str, int] = {}
     for folders in url_to_folders.values():
@@ -619,43 +769,66 @@ def main() -> None:
             print(f"[{i}/{total}] Analyzing {shortcode} ({', '.join(folders)}) ...")
             submitted += 1
             caption, hashtags = url_meta.get(url, ("", []))
+            date_saved = post_timestamps.get(shortcode)
+            cached = False
             try:
-                analyze_url(args.server_url, api_key, url, args.force, caption, hashtags)
+                result = analyze_url(args.server_url, api_key, url, args.force, caption, hashtags, date_saved)
+                cached = bool(result.get("cached"))
                 entry["status"] = "success"
                 entry["last_error"] = None
                 success_count += 1
-                print(f"[{i}/{total}]   OK")
+                print(f"[{i}/{total}]   OK" + (" (cached)" if cached else ""))
             except ApiError as e:
-                entry["attempts"] += 1
                 entry["last_error"] = f"{e.status}: {e.detail}"
                 if e.status == 202:
-                    print(f"[{i}/{total}]   RATE-LIMITED / quota exhausted, server will retry in 24h: {e.detail}")
-                elif e.status == 503:
-                    print(f"[{i}/{total}]   SERVER BUSY, queued server-side: {e.detail}")
-                elif e.status == 409:
-                    print(f"[{i}/{total}]   ALREADY PROCESSING: {e.detail}")
-                elif e.status == 504:
-                    print(f"[{i}/{total}]   TIMEOUT (10 min): {e.detail}")
-                elif e.status == 410:
-                    # User deleted this post via a client — respect that and
-                    # stop retrying rather than re-submitting every run.
-                    print(f"[{i}/{total}]   DELETED by user, skipping: {e.detail}")
-                else:
-                    print(f"[{i}/{total}]   FAILED ({e.status}): {e.detail}")
-
-                if e.status == 410 or entry["attempts"] >= args.max_attempts:
-                    entry["status"] = "permanently_skipped"
-                    skipped_count += 1
-                    if e.status != 410:
-                        print(f"[{i}/{total}]   Giving up after {entry['attempts']} attempts.")
-                else:
+                    # The backend itself queued this for a later automatic
+                    # retry (e.g. Whisper/transcription failed server-side,
+                    # or an AI quota is exhausted) — NOT a failure caused by
+                    # this script, and NOT something already saved. Deliberately
+                    # doesn't count against max_attempts (queue_worker() will
+                    # keep retrying this server-side on its own schedule
+                    # regardless of how many times this script happens to run
+                    # in the meantime) and always stays "pending" so a later
+                    # run of this script re-checks it — harmless either way:
+                    # an instant cache hit if the backend's own retry already
+                    # succeeded, or it gets queued again if not yet.
+                    print(f"[{i}/{total}]   QUEUED server-side (not yet saved), will retry automatically: {e.detail}")
                     entry["status"] = "pending"
                     pending_count += 1
+                else:
+                    entry["attempts"] += 1
+                    if e.status == 503:
+                        print(f"[{i}/{total}]   SERVER BUSY, queued server-side: {e.detail}")
+                    elif e.status == 409:
+                        print(f"[{i}/{total}]   ALREADY PROCESSING: {e.detail}")
+                    elif e.status == 504:
+                        print(f"[{i}/{total}]   TIMEOUT (10 min): {e.detail}")
+                    elif e.status == 410:
+                        # User deleted this post via a client — respect that and
+                        # stop retrying rather than re-submitting every run.
+                        print(f"[{i}/{total}]   DELETED by user, skipping: {e.detail}")
+                    else:
+                        print(f"[{i}/{total}]   FAILED ({e.status}): {e.detail}")
+
+                    if e.status == 410 or entry["attempts"] >= args.max_attempts:
+                        entry["status"] = "permanently_skipped"
+                        skipped_count += 1
+                        if e.status != 410:
+                            print(f"[{i}/{total}]   Giving up after {entry['attempts']} attempts.")
+                    else:
+                        entry["status"] = "pending"
+                        pending_count += 1
 
             entry["last_updated"] = now_iso()
             save_state(args.state_file, state)
 
-            time.sleep(random.uniform(args.delay_min, args.delay_max))
+            # Skip the artificial rate-limit delay on a confirmed cache hit —
+            # /analyze already returned instantly, no real work (download/AI
+            # calls) happened, so there's nothing to throttle. A failed
+            # attempt (ApiError, cached=False left as its default) still
+            # sleeps as before.
+            if not cached:
+                time.sleep(random.uniform(args.delay_min, args.delay_max))
 
         # Collection assignment (runs for newly-succeeded AND previously-succeeded
         # entries, so a crash between "analyzed" and "assigned" is resumed correctly)

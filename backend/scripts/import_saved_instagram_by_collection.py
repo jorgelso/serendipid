@@ -13,10 +13,12 @@ resumable state file by default, so runs of either script are safe to
 interleave — a URL already marked "success" is skipped regardless of which
 script processed it.
 
-Also reuses import_saved_instagram.py's --reverse-collections (default: ON)
-— applied before the priority reorder below, since the two are independent:
-reversal fixes each collection's own internal order, priority-reordering
-only decides which collection is scheduled first.
+Also reuses import_saved_instagram.py's --reverse-collections (default: OFF)
+and --all-posts-file (real save-date lookup, see that script's docstring for
+the full two-file explanation) — reversal is applied before the priority
+reorder below, since the two are independent: reversal fixes each
+collection's own internal order, priority-reordering only decides which
+collection is scheduled first.
 
 Usage:
     python import_saved_instagram_by_collection.py <export.json-or-dir> --dry-run
@@ -44,6 +46,7 @@ from import_saved_instagram import (
     analyze_url,
     build_url_metadata,
     ensure_post_in_collection,
+    extract_post_timestamps,
     group_by_url,
     load_collections,
     load_state,
@@ -98,7 +101,14 @@ def _ordered_folder_names(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("export_path", type=Path, help="Path to the Instagram export JSON file, or a directory of them")
+    p.add_argument("export_path", type=Path, help="Path to the Instagram \"by collection\" export JSON file, or a directory of them")
+    p.add_argument(
+        "--all-posts-file", type=Path, default=None,
+        help="Path to a flat 'saved_posts.json'-style export (every individually-saved "
+             "post, ungrouped) — used only to look up each analyzed post's real save "
+             "date. Posts here that aren't also in the collections file are never "
+             "analyzed on their own. Optional; omit to skip date_saved for this run.",
+    )
     p.add_argument("--folder", help="Only process URLs from this Instagram folder/collection (case-insensitive)")
     p.add_argument(
         "--priority-folder",
@@ -107,15 +117,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--reverse-collections", dest="reverse_collections",
-        action="store_true", default=True,
-        help="Process each collection oldest-saved-first (default: on). Instagram's "
-             "export lists newest-saved-first; leaving this on keeps analyzed_at "
-             "chronologically meaningful. Only disable if you specifically want the "
-             "raw export order.",
+        action="store_true", default=False,
+        help="Process each collection oldest-saved-first (default: off). Purely a "
+             "processing-order preference now — real save dates come from "
+             "--all-posts-file regardless of analysis order. Off by default means the "
+             "newest-saved reels in each collection get analyzed (and become "
+             "searchable) first.",
     )
     p.add_argument(
         "--no-reverse-collections", dest="reverse_collections", action="store_false",
-        help="Process collections in the raw export order (newest-saved-first).",
+        help="Process collections in the raw export order, newest-saved-first (the default).",
     )
     p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"SuperBrain backend URL (default: {DEFAULT_SERVER_URL})")
     p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SUPERBRAIN_API_KEY)")
@@ -146,6 +157,14 @@ def main() -> None:
 
     url_to_folders = group_by_url(records)
     url_meta = build_url_metadata(records)
+
+    post_timestamps: Dict[str, str] = {}
+    if args.all_posts_file:
+        if not args.all_posts_file.exists():
+            print(f"[ERROR] --all-posts-file not found: {args.all_posts_file}")
+            sys.exit(1)
+        post_timestamps = extract_post_timestamps(args.all_posts_file)
+        print(f"Loaded {len(post_timestamps)} save-date(s) from {args.all_posts_file}.")
 
     folder_counts: Dict[str, int] = {}
     for folders in url_to_folders.values():
@@ -215,12 +234,15 @@ def main() -> None:
             print(f"[{i}/{total}] Analyzing {shortcode} ({', '.join(folders)}) ...")
             submitted += 1
             caption, hashtags = url_meta.get(url, ("", []))
+            date_saved = post_timestamps.get(shortcode)
+            cached = False
             try:
-                analyze_url(args.server_url, api_key, url, args.force, caption, hashtags)
+                result = analyze_url(args.server_url, api_key, url, args.force, caption, hashtags, date_saved)
+                cached = bool(result.get("cached"))
                 entry["status"] = "success"
                 entry["last_error"] = None
                 success_count += 1
-                print(f"[{i}/{total}]   OK")
+                print(f"[{i}/{total}]   OK" + (" (cached)" if cached else ""))
             except ApiError as e:
                 entry["attempts"] += 1
                 entry["last_error"] = f"{e.status}: {e.detail}"
@@ -251,7 +273,10 @@ def main() -> None:
             entry["last_updated"] = now_iso()
             save_state(args.state_file, state)
 
-            time.sleep(random.uniform(args.delay_min, args.delay_max))
+            # Skip the artificial rate-limit delay on a confirmed cache hit —
+            # see the matching comment in import_saved_instagram.py.
+            if not cached:
+                time.sleep(random.uniform(args.delay_min, args.delay_max))
 
         # Collection assignment (runs for newly-succeeded AND previously-succeeded
         # entries, so a crash between "analyzed" and "assigned" is resumed correctly)

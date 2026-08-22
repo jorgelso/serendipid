@@ -195,6 +195,12 @@ class Database:
             # drop this context before queue_worker eventually spawns main.py.
             ("caption",      "TEXT"),
             ("hashtags",     "TEXT"),
+            # Same idea for date_saved (see AnalyzeRequest.date_saved) — the
+            # real Instagram save date the import scripts look up per-post
+            # from saved_posts.json, threaded through exactly like
+            # caption/hashtags so it isn't lost if this request has to wait
+            # in the queue before queue_worker spawns main.py for it.
+            ("date_saved",   "TEXT"),
         ]:
             try:
                 self._conn.execute(
@@ -339,21 +345,40 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
-        # Migration: saved_order — reconstructed relative chronological rank
-        # for Instagram posts bulk-imported from an export JSON, where
-        # analyzed_at only reflects when the import script ran, not when the
-        # post was actually saved. Backfilled once via
-        # scripts/backfill_saved_order.py from each collection's
-        # newest-saved-first ordering in the export (reversed to
-        # oldest-first per category; categories themselves are NOT unified
-        # against each other — only within-category order is guaranteed
-        # correct). NULL means either "saved individually via the normal
-        # live pipeline" (analyzed_at is accurate for those, especially now
-        # that scripts/import_saved_instagram.py's --reverse-collections
-        # keeps future imports in order too) or "not covered by the
-        # backfill" — never coerced to a fake value.
+        # Migration: saved_order (RETIRED — column kept for backwards
+        # compatibility with this codebase's additive-only migration
+        # convention, but no longer populated or read anywhere; every row
+        # has been reset to NULL). It was a reconstructed relative rank,
+        # useful only because Instagram's collection export has no per-post
+        # timestamp. Superseded by date_saved below, a real date sourced
+        # from saved_posts.json (Instagram's flat "every saved post" export,
+        # which does have a real per-post timestamp) — see
+        # scripts/backfill_date_saved.py and backend/CLAUDE.md's "Instagram
+        # export import" section for the full story.
         try:
             self._conn.execute("ALTER TABLE analyses ADD COLUMN saved_order INTEGER DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: date_saved — the real date a post was saved to
+        # Instagram (NOT its content publish date, which is `post_date`
+        # above, scraped independently from Instagram's own post metadata).
+        # Sourced from saved_posts.json's per-post `timestamp` field —
+        # verified against post_date to actually be a save date, not a
+        # duplicate publish date: it's always later than post_date, by a
+        # wildly varying amount (a day to several months), which is the
+        # signature of "whenever I happened to see and save this," not a
+        # second copy of the same publish fact. Backfilled once for
+        # existing rows via scripts/backfill_date_saved.py; set for future
+        # imports by import_saved_instagram.py passing it straight into
+        # POST /analyze (see AnalyzeRequest.date_saved), same pipeline path
+        # as caption/hashtags. NULL for posts saved individually (not via
+        # the collections-file import flow) or not found in the all-posts
+        # lookup file at backfill/import time — never coerced to a fake
+        # value.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN date_saved TEXT DEFAULT NULL")
             self._conn.commit()
         except sqlite3.OperationalError:
             pass
@@ -880,7 +905,7 @@ class Database:
         "shortcode, url, username, content_type, analyzed_at, updated_at, "
         "post_date, likes, thumbnail, title, summary, tags, music, category, "
         "language, is_hidden, analysis_version, media_files, importance, "
-        "enjoyment_rating, perceived_importance_rating, caption, saved_order"
+        "enjoyment_rating, perceived_importance_rating, caption, date_saved"
     )
 
     def _row_to_dict(self, row):
@@ -961,7 +986,8 @@ class Database:
                       likes=0, post_date=None, content_type="instagram", thumbnail="",
                       source_hashtags=None, embedding=None, analysis_version=None,
                       language=None, media_files=None, importance=None,
-                      model_used=None, transcription_backend=None, caption=None):
+                      model_used=None, transcription_backend=None, caption=None,
+                      date_saved=None):
         """Insert or update an analysis record. Returns True on success.
 
         source_hashtags: original hashtags from the source platform (e.g. an
@@ -1000,6 +1026,14 @@ class Database:
         (see instagram/instagram_downloader.py), stored verbatim — distinct
         from the AI-generated `summary`. None/"" for non-Instagram content
         or posts with no caption.
+
+        date_saved: the real date this post was saved to Instagram (NOT its
+        publish date, which is `post_date` above) — looked up by
+        scripts/import_saved_instagram.py from saved_posts.json and passed
+        through /analyze same as caption/hashtags. None for posts saved
+        individually (not via that import flow) or not found in the
+        lookup file. Never coerced to a fake value — see the date_saved
+        migration comment in _create_tables for the full story.
         """
         if not self.is_connected():
             print("[WARNING] Database not connected. Analysis not saved.")
@@ -1056,8 +1090,8 @@ class Database:
                          thumbnail, title, summary, tags, music, category,
                          visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
                          analysis_version, language, media_files, importance, model_used, transcription_backend,
-                         caption)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         caption, date_saved)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(shortcode) DO UPDATE SET
                         url                   = excluded.url,
                         username              = excluded.username,
@@ -1082,12 +1116,13 @@ class Database:
                         importance            = CASE WHEN excluded.importance IS NOT NULL THEN excluded.importance ELSE analyses.importance END,
                         model_used            = excluded.model_used,
                         transcription_backend = excluded.transcription_backend,
-                        caption               = CASE WHEN excluded.caption != '' THEN excluded.caption ELSE analyses.caption END
+                        caption               = CASE WHEN excluded.caption != '' THEN excluded.caption ELSE analyses.caption END,
+                        date_saved            = CASE WHEN excluded.date_saved IS NOT NULL THEN excluded.date_saved ELSE analyses.date_saved END
                 """, (shortcode, url, username, content_type, now, now, post_date, likes,
                       thumbnail, title, summary, tags_json, music, category_json,
                       visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
                       version, language_json, media_files_json, importance,
-                      model_used or "", transcription_backend or "", caption or ""))
+                      model_used or "", transcription_backend or "", caption or "", date_saved))
 
                 # Restore any eloquence score stashed by hard_delete_post() (force
                 # re-analysis) — see that method and eloquence_stash's comment in
@@ -1145,20 +1180,22 @@ class Database:
             print(f"[WARNING]  Error updating caption: {e}")
             return False
 
-    def update_saved_order(self, shortcode, order) -> bool:
-        """Set the reconstructed chronological save-order rank for an
-        existing post — used by scripts/backfill_saved_order.py."""
+    def update_date_saved(self, shortcode, date_saved) -> bool:
+        """Set the real Instagram save date for an existing post — used by
+        scripts/backfill_date_saved.py. (Live imports set this at analysis
+        time instead, via save_analysis()'s date_saved param — see
+        AnalyzeRequest.date_saved in api.py.)"""
         if not self.is_connected():
             return False
         try:
             self._conn.execute(
-                "UPDATE analyses SET saved_order = ? WHERE shortcode = ?",
-                (order, shortcode),
+                "UPDATE analyses SET date_saved = ? WHERE shortcode = ?",
+                (date_saved, shortcode),
             )
             self._conn.commit()
             return True
         except Exception as e:
-            print(f"[WARNING]  Error updating saved_order: {e}")
+            print(f"[WARNING]  Error updating date_saved: {e}")
             return False
 
     # ------------------------------------------------------------------
@@ -1691,19 +1728,24 @@ class Database:
         """Return recent posts with only UI-essential fields (no analysis blobs).
 
         sort: "recent" (default, analyzed_at DESC), "importance" (importance
-        DESC, unscored posts last, analyzed_at DESC as tie-breaker), or
-        "saved_order" (reconstructed chronological save order, oldest first
-        — posts covered by scripts/backfill_saved_order.py sort by
-        saved_order ASC, then every other post continues by analyzed_at ASC,
-        forming one continuous oldest-to-newest timeline).
+        DESC, unscored posts last, analyzed_at DESC as tie-breaker),
+        "date_saved" (real Instagram save date, oldest first — see
+        scripts/backfill_date_saved.py; posts without a known date_saved
+        continue by analyzed_at ASC, forming one continuous oldest-to-newest
+        timeline), or "post_date" (the content's own publish date, oldest
+        first, same analyzed_at ASC fallback for posts with no post_date —
+        a distinct axis from date_saved: "when was this posted" vs. "when
+        did I save it").
         """
         if not self.is_connected():
             return []
         order_clause = (
             "ORDER BY importance IS NULL, importance DESC, analyzed_at DESC"
             if sort == "importance" else
-            "ORDER BY saved_order IS NULL, saved_order ASC, analyzed_at ASC"
-            if sort == "saved_order" else
+            "ORDER BY date_saved IS NULL, date_saved ASC, analyzed_at ASC"
+            if sort == "date_saved" else
+            "ORDER BY post_date IS NULL, post_date ASC, analyzed_at ASC"
+            if sort == "post_date" else
             "ORDER BY analyzed_at DESC"
         )
         try:
@@ -2002,13 +2044,13 @@ class Database:
 
     # ==================== QUEUE MANAGEMENT ====================
 
-    def add_to_queue(self, shortcode, url, caption=None, hashtags=None):
+    def add_to_queue(self, shortcode, url, caption=None, hashtags=None, date_saved=None):
         """Add item to processing queue. Returns queue position (1-based), or -1 on error.
 
-        caption/hashtags: optional client-supplied hint (see AnalyzeRequest),
-        persisted so queue_worker can still forward it to main.py once this
-        item is eventually picked up — otherwise it's silently lost for any
-        request that arrives while the server is busy.
+        caption/hashtags/date_saved: optional client-supplied hint (see
+        AnalyzeRequest), persisted so queue_worker can still forward it to
+        main.py once this item is eventually picked up — otherwise it's
+        silently lost for any request that arrives while the server is busy.
         """
         if not self.is_connected():
             return -1
@@ -2033,16 +2075,17 @@ class Database:
             now = datetime.utcnow().isoformat()
             hashtags_json = json.dumps(hashtags) if hashtags else ''
             self._conn.execute("""
-                INSERT INTO processing_queue (shortcode, url, status, position, added_at, updated_at, caption, hashtags)
-                VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)
+                INSERT INTO processing_queue (shortcode, url, status, position, added_at, updated_at, caption, hashtags, date_saved)
+                VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
                     url        = excluded.url,
                     status     = 'queued',
                     position   = excluded.position,
                     updated_at = excluded.updated_at,
                     caption    = excluded.caption,
-                    hashtags   = excluded.hashtags
-            """, (shortcode, url, position, now, now, caption or '', hashtags_json))
+                    hashtags   = excluded.hashtags,
+                    date_saved = excluded.date_saved
+            """, (shortcode, url, position, now, now, caption or '', hashtags_json, date_saved))
             self._conn.commit()
             return position
         except Exception as e:
@@ -2056,7 +2099,7 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                "SELECT shortcode, url, position, caption, hashtags FROM processing_queue "
+                "SELECT shortcode, url, position, caption, hashtags, date_saved FROM processing_queue "
                 "WHERE status = 'queued' ORDER BY position"
             )
             result = []
@@ -2071,6 +2114,7 @@ class Database:
                     "position": r["position"],
                     "caption": r["caption"] or '',
                     "hashtags": hashtags,
+                    "date_saved": r["date_saved"] or None,
                 })
             return result
         except Exception as e:

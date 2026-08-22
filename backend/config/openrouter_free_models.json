@@ -1,5 +1,5 @@
 {
-  "cached_at": "2026-08-21T23:04:32.218472",
+  "cached_at": "2026-08-22T13:57:59.503032",
   "models": [
     {
       "id": "stealth/ox-alpha",
@@ -183,21 +183,21 @@
             "arena": "models",
             "category": "3d",
             "elo": 1179,
-            "win_rate": 41.1,
+            "win_rate": 41.2,
             "rank": 56
           },
           {
             "arena": "models",
             "category": "asciiart",
-            "elo": 1101,
+            "elo": 1095,
             "win_rate": 36,
             "rank": 55
           },
           {
             "arena": "models",
             "category": "codecategories",
-            "elo": 1158,
-            "win_rate": 36.1,
+            "elo": 1159,
+            "win_rate": 36.2,
             "rank": 75
           },
           {
@@ -211,27 +211,27 @@
             "arena": "models",
             "category": "gamedev",
             "elo": 1160,
-            "win_rate": 36.9,
+            "win_rate": 37,
             "rank": 68
           },
           {
             "arena": "models",
             "category": "svg",
-            "elo": 1120,
+            "elo": 1121,
             "win_rate": 37.1,
             "rank": 54
           },
           {
             "arena": "models",
             "category": "uicomponent",
-            "elo": 1166,
+            "elo": 1165,
             "win_rate": 37.9,
             "rank": 67
           },
           {
             "arena": "models",
             "category": "website",
-            "elo": 1143,
+            "elo": 1144,
             "win_rate": 33.9,
             "rank": 81
           }
@@ -689,16 +689,16 @@
           {
             "arena": "models",
             "category": "3d",
-            "elo": 1203,
-            "win_rate": 42.8,
-            "rank": 48
+            "elo": 1207,
+            "win_rate": 43.5,
+            "rank": 46
           },
           {
             "arena": "models",
             "category": "asciiart",
-            "elo": 1122,
-            "win_rate": 33.3,
-            "rank": 52
+            "elo": 1134,
+            "win_rate": 36.6,
+            "rank": 48
           },
           {
             "arena": "models",
@@ -710,23 +710,23 @@
           {
             "arena": "models",
             "category": "dataviz",
-            "elo": 1195,
-            "win_rate": 39.8,
-            "rank": 53
+            "elo": 1193,
+            "win_rate": 39.4,
+            "rank": 54
           },
           {
             "arena": "models",
             "category": "gamedev",
-            "elo": 1193,
+            "elo": 1192,
             "win_rate": 38.4,
             "rank": 54
           },
           {
             "arena": "models",
             "category": "uicomponent",
-            "elo": 1218,
-            "win_rate": 41.8,
-            "rank": 45
+            "elo": 1214,
+            "win_rate": 41.1,
+            "rank": 46
           },
           {
             "arena": "models",
@@ -968,8 +968,8 @@
             "arena": "agents",
             "category": "agenticgamedev",
             "elo": 1188,
-            "win_rate": 49.2,
-            "rank": 9
+            "win_rate": 49.3,
+            "rank": 8
           },
           {
             "arena": "agents",
@@ -981,7 +981,7 @@
           {
             "arena": "agents",
             "category": "fullstack",
-            "elo": 1270,
+            "elo": 1269,
             "win_rate": 61.3,
             "rank": 10
           },
@@ -995,16 +995,16 @@
           {
             "arena": "agents",
             "category": "htmlslides",
-            "elo": 1187,
+            "elo": 1189,
             "win_rate": 50,
             "rank": 10
           },
           {
             "arena": "agents",
             "category": "mobileapps",
-            "elo": 1210,
-            "win_rate": 51.7,
-            "rank": 15
+            "elo": 1212,
+            "win_rate": 51.9,
+            "rank": 14
           },
           {
             "arena": "agents",
@@ -1016,7 +1016,7 @@
           {
             "arena": "agents",
             "category": "webapps",
-            "elo": 1255,
+            "elo": 1256,
             "win_rate": 56.5,
             "rank": 11
           },
@@ -1030,14 +1030,14 @@
           {
             "arena": "models",
             "category": "asciiart",
-            "elo": 1256,
+            "elo": 1251,
             "win_rate": 52.1,
             "rank": 13
           },
           {
             "arena": "models",
             "category": "codecategories",
-            "elo": 1332,
+            "elo": 1331,
             "win_rate": 56.5,
             "rank": 6
           },
@@ -1051,7 +1051,7 @@
           {
             "arena": "models",
             "category": "gamedev",
-            "elo": 1321,
+            "elo": 1322,
             "win_rate": 54.1,
             "rank": 11
           },
@@ -1059,21 +1059,21 @@
             "arena": "models",
             "category": "svg",
             "elo": 1256,
-            "win_rate": 54.9,
-            "rank": 14
+            "win_rate": 54.8,
+            "rank": 15
           },
           {
             "arena": "models",
             "category": "uicomponent",
-            "elo": 1327,
-            "win_rate": 57.7,
+            "elo": 1328,
+            "win_rate": 57.8,
             "rank": 9
           },
           {
             "arena": "models",
             "category": "website",
             "elo": 1327,
-            "win_rate": 57.5,
+            "win_rate": 57.4,
             "rank": 4
           }
         ],
@@ -1619,99 +1619,6 @@
       },
       "reasoning": {
         "mandatory": false
-      }
-    },
-    {
-      "id": "openai/gpt-oss-20b:free",
-      "canonical_slug": "openai/gpt-oss-20b",
-      "hugging_face_id": "openai/gpt-oss-20b",
-      "name": "OpenAI: gpt-oss-20b (free)",
-      "created": 1754414229,
-      "description": "gpt-oss-20b is an open-weight 21B parameter model released by OpenAI under the Apache 2.0 license. It uses a Mixture-of-Experts (MoE) architecture with 3.6B active parameters per forward pass, optimized for...",
-      "context_length": 131072,
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": [
-          "text"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "GPT",
-        "instruct_type": null
-      },
-      "pricing": {
-        "prompt": "0",
-        "completion": "0"
-      },
-      "top_provider": {
-        "context_length": 131072,
-        "max_completion_tokens": 32768,
-        "is_moderated": false
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "frequency_penalty",
-        "include_reasoning",
-        "logprobs",
-        "max_tokens",
-        "presence_penalty",
-        "reasoning",
-        "reasoning_effort",
-        "repetition_penalty",
-        "response_format",
-        "seed",
-        "stop",
-        "structured_outputs",
-        "temperature",
-        "tool_choice",
-        "tools",
-        "top_k",
-        "top_logprobs",
-        "top_p"
-      ],
-      "default_parameters": {
-        "temperature": null,
-        "top_p": null,
-        "frequency_penalty": null
-      },
-      "supported_voices": null,
-      "knowledge_cutoff": "2024-06-30",
-      "expiration_date": null,
-      "links": {
-        "details": "/api/v1/models/openai/gpt-oss-20b/endpoints"
-      },
-      "benchmarks": {
-        "design_arena": [
-          {
-            "arena": "models",
-            "category": "dataviz",
-            "elo": 953,
-            "win_rate": 39.7,
-            "rank": 107
-          },
-          {
-            "arena": "models",
-            "category": "website",
-            "elo": 872,
-            "win_rate": 27.9,
-            "rank": 122
-          }
-        ],
-        "artificial_analysis": {
-          "intelligence_index": 15.2,
-          "coding_index": 20.7,
-          "agentic_index": 3.1
-        }
-      },
-      "reasoning": {
-        "mandatory": true,
-        "supported_efforts": [
-          "high",
-          "medium",
-          "low"
-        ],
-        "default_effort": "medium"
       }
     }
   ]

@@ -13,13 +13,18 @@ function formatStarted(iso: string): string {
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [allPostsFile, setAllPostsFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<InstagramExportPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const [mode, setMode] = useState<"regular" | "by_collection">("regular");
   const [priorityFolder, setPriorityFolder] = useState(DEFAULT_PRIORITY_FOLDER);
-  const [reverseCollections, setReverseCollections] = useState(true);
+  // Off by default — real save dates now come from the all-posts file
+  // regardless of analysis order, so this is just a processing-order
+  // preference. See scripts/import_saved_instagram.py's
+  // --reverse-collections docstring.
+  const [reverseCollections, setReverseCollections] = useState(false);
 
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -104,9 +109,7 @@ export default function ImportPage() {
     }
   }, [activeJob?.log_tail]);
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null;
-    setFile(f);
+  async function runPreview(f: File | null, apf: File | null) {
     setPreview(null);
     setPreviewError(null);
     setStartError(null);
@@ -116,6 +119,7 @@ export default function ImportPage() {
     try {
       const formData = new FormData();
       formData.append("file", f);
+      if (apf) formData.append("allPostsFile", apf);
       const res = await fetch("/api/instagram-export/preview", { method: "POST", body: formData });
       const data: InstagramExportPreview & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not parse that file.");
@@ -129,6 +133,20 @@ export default function ImportPage() {
     }
   }
 
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
+    await runPreview(f, allPostsFile);
+  }
+
+  async function handleAllPostsFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const apf = e.target.files?.[0] ?? null;
+    setAllPostsFile(apf);
+    // Re-run the preview so the "known save date" count reflects the newly
+    // picked file — only meaningful once a collections file is already set.
+    if (file) await runPreview(file, apf);
+  }
+
   async function handleStart() {
     if (!file) return;
     setStarting(true);
@@ -136,6 +154,7 @@ export default function ImportPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      if (allPostsFile) formData.append("allPostsFile", allPostsFile);
       formData.append("mode", mode);
       if (mode === "by_collection") formData.append("priorityFolder", priorityFolder);
       formData.append("reverseCollections", String(reverseCollections));
@@ -205,6 +224,7 @@ export default function ImportPage() {
               onClick={() => {
                 setActiveJob(null);
                 setFile(null);
+                setAllPostsFile(null);
                 setPreview(null);
               }}
               className="mt-4 rounded-full border border-line px-4 py-2 text-sm font-bold text-ink-muted hover:text-coral-ink hover:border-coral transition-colors"
@@ -217,7 +237,12 @@ export default function ImportPage() {
         <div className="rounded-2xl border border-line bg-surface p-5">
           <label className="block cursor-pointer rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-ink-muted hover:border-coral hover:text-coral-ink transition-colors">
             <input type="file" accept=".json" className="hidden" onChange={handleFileChange} />
-            {file ? file.name : "Choose an export JSON file"}
+            {file ? file.name : "Choose a “by collection” export JSON file"}
+          </label>
+
+          <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-line px-4 py-6 text-center text-sm text-ink-muted hover:border-coral hover:text-coral-ink transition-colors">
+            <input type="file" accept=".json" className="hidden" onChange={handleAllPostsFileChange} />
+            {allPostsFile ? allPostsFile.name : "Choose an all-posts export JSON file (optional, for save dates)"}
           </label>
 
           {previewLoading && <p className="mt-3 text-sm text-ink-muted">Parsing…</p>}
@@ -244,6 +269,9 @@ export default function ImportPage() {
               <p className="mt-2 text-xs text-ink-muted">
                 {preview.total_unique_posts} unique post(s) across {preview.categories.length} categor
                 {preview.categories.length === 1 ? "y" : "ies"} ({preview.total_raw_entries} raw entries).
+                {preview.posts_with_known_date != null && (
+                  <> {preview.posts_with_known_date} of them have a known save date.</>
+                )}
               </p>
 
               <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -279,9 +307,10 @@ export default function ImportPage() {
                   className="mt-0.5 h-4 w-4 cursor-pointer accent-coral"
                 />
                 <span>
-                  Reverse each category (recommended) — Instagram lists each collection newest-saved-first;
-                  reversing keeps posts analyzed oldest-first, so their analyzed date stays chronologically
-                  meaningful.
+                  Reverse each category — Instagram lists each collection newest-saved-first; this analyzes
+                  oldest-first instead. Off by default: real save dates now come from the all-posts file
+                  regardless of analysis order, so this is just a processing-order preference, not required
+                  for date accuracy.
                 </span>
               </label>
 

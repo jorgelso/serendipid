@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
   const category = searchParams.get("category") || undefined;
   const language = searchParams.get("language") || undefined;
   const sortParam = searchParams.get("sort");
-  const sort = sortParam === "importance" ? "importance" : sortParam === "saved_order" ? "saved_order" : "recent";
+  const sort =
+    sortParam === "importance" || sortParam === "date_saved" || sortParam === "post_date" ? sortParam : "recent";
 
   if (!Number.isFinite(version)) {
     return NextResponse.json({ error: "A numeric 'version' is required." }, { status: 400 });

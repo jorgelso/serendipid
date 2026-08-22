@@ -435,10 +435,13 @@ interface InstagramExportPreviewResponse extends InstagramExportPreview {
 
 const INSTAGRAM_EXPORT_PREVIEW_TIMEOUT_MS = 60 * 1000;
 
-export async function previewInstagramExport(exportData: unknown): Promise<InstagramExportPreview> {
+export async function previewInstagramExport(
+  exportData: unknown,
+  allPostsData?: unknown
+): Promise<InstagramExportPreview> {
   return request<InstagramExportPreviewResponse>("/instagram-export/preview", {
     method: "POST",
-    body: { export_data: exportData },
+    body: { export_data: exportData, all_posts_data: allPostsData ?? null },
     timeoutMs: INSTAGRAM_EXPORT_PREVIEW_TIMEOUT_MS,
   });
 }
@@ -456,6 +459,7 @@ interface ImportJobsResponse {
 
 export async function createInstagramExportJob(params: {
   exportData: unknown;
+  allPostsData?: unknown;
   mode: "regular" | "by_collection";
   priorityFolder?: string | null;
   reverseCollections: boolean;
@@ -464,6 +468,7 @@ export async function createInstagramExportJob(params: {
     method: "POST",
     body: {
       export_data: params.exportData,
+      all_posts_data: params.allPostsData ?? null,
       mode: params.mode,
       priority_folder: params.priorityFolder ?? null,
       reverse_collections: params.reverseCollections,

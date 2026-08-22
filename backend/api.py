@@ -350,6 +350,8 @@ def queue_worker():
                         cmd += ["--caption", item['caption']]
                     if item.get('hashtags'):
                         cmd += ["--hashtags", ",".join(item['hashtags'])]
+                    if item.get('date_saved'):
+                        cmd += ["--date-saved", item['date_saved']]
                     process = subprocess.Popen(
                         cmd,
                         cwd=Path(__file__).parent,
@@ -430,6 +432,13 @@ class AnalyzeRequest(BaseModel):
     restore: bool = False
     caption: Optional[str] = None
     hashtags: Optional[List[str]] = None
+    # The real date this post was saved to Instagram (NOT its publish date) —
+    # looked up by scripts/import_saved_instagram.py from saved_posts.json
+    # and threaded through exactly like caption/hashtags above. Ignored by
+    # every other client (mobile app, browser extension, direct URL shares),
+    # same as caption/hashtags already are. See analyses.date_saved's
+    # migration comment in core/database.py for the full story.
+    date_saved: Optional[str] = None
 
     class Config:
         json_schema_extra = {
@@ -438,7 +447,8 @@ class AnalyzeRequest(BaseModel):
                 "force": False,
                 "restore": False,
                 "caption": None,
-                "hashtags": None
+                "hashtags": None,
+                "date_saved": None
             }
         }
 
@@ -595,6 +605,7 @@ async def _run_or_queue_analysis(
     content_type: str,
     caption: Optional[str] = None,
     hashtags: Optional[List[str]] = None,
+    date_saved: Optional[str] = None,
     *,
     run_inline: bool = True,
 ) -> dict:
@@ -638,7 +649,7 @@ async def _run_or_queue_analysis(
         slot_free = len(processing_items) < max_concurrent
         if not run_inline or not slot_free:
             logger.warning(f"🚦 [{shortcode}] Server busy or queuing requested — adding to queue...")
-            queue_position = db.add_to_queue(shortcode, url_str, caption, hashtags)
+            queue_position = db.add_to_queue(shortcode, url_str, caption, hashtags, date_saved)
             if queue_position > 0:
                 logger.info(f"📝 [{shortcode}] ✅ Added to queue at position {queue_position}")
                 logger.info(f"📊 Queue status: {len(queue_items) + 1} waiting | {len(processing_items)} analyzing")
@@ -661,6 +672,8 @@ async def _run_or_queue_analysis(
             cmd += ["--caption", caption]
         if hashtags:
             cmd += ["--hashtags", ",".join(hashtags)]
+        if date_saved:
+            cmd += ["--date-saved", date_saved]
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -897,7 +910,7 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
         logger.info(f"💾 [{shortcode}] Not in cache")
 
         outcome = await _run_or_queue_analysis(
-            shortcode, url_str, content_type, request.caption, request.hashtags, run_inline=True
+            shortcode, url_str, content_type, request.caption, request.hashtags, request.date_saved, run_inline=True
         )
         if outcome["status"] == "queued":
             raise HTTPException(
@@ -1125,7 +1138,7 @@ async def check_cache(shortcode: str, token: str = Depends(verify_token)):
 async def get_recent_analyses(
     limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    sort: str = Query(default="recent", pattern="^(recent|importance|saved_order)$"),
+    sort: str = Query(default="recent", pattern="^(recent|importance|date_saved|post_date)$"),
     token: str = Depends(verify_token),
 ):
     """
@@ -1136,9 +1149,12 @@ async def get_recent_analyses(
     - sort=recent (default): most recently analyzed first
     - sort=importance: highest importance score first (unscored posts last),
       analyzed_at as tie-breaker — see core/importance.py
-    - sort=saved_order: reconstructed chronological save order (oldest
-      first), then analyzed_at for posts outside the backfill — see
-      scripts/backfill_saved_order.py
+    - sort=date_saved: real Instagram save date (oldest first), then
+      analyzed_at for posts outside the backfill — see
+      scripts/backfill_date_saved.py
+    - sort=post_date: the content's own publish date (oldest first), same
+      analyzed_at fallback — a distinct axis from date_saved ("when was
+      this posted" vs. "when did I save it")
     - Default limit: 50, max: 1000
     - Requires API authentication
     """
@@ -2607,24 +2623,66 @@ class InstagramExportPreviewRequest(BaseModel):
     # — see extract_meta_label_values_shape()) or, for some other export
     # variants, a dict — see _known_shape_items()'s Shape A/B. Never assume dict.
     export_data: Any
+    # Optional flat "every saved post, ungrouped" export (saved_posts.json-
+    # shaped) — when given, the preview also reports how many of
+    # export_data's posts already have a known real save date in it. Never
+    # a source of URLs itself — see extract_post_timestamps().
+    all_posts_data: Any = None
 
 
 class InstagramExportJobCreate(BaseModel):
     export_data: Any
+    all_posts_data: Any = None
     mode: str = "regular"  # "regular" | "by_collection"
     priority_folder: Optional[str] = None
-    reverse_collections: bool = True
+    # Off by default — see scripts/import_saved_instagram.py's
+    # --reverse-collections docstring: purely a processing-order preference
+    # now that real save dates come from all_posts_data, not a correctness
+    # requirement.
+    reverse_collections: bool = False
 
 
-def _instagram_export_preview(export_data) -> dict:
+def _write_temp_json(data) -> Path:
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+        json.dump(data, tmp)
+        return Path(tmp.name)
+
+
+def _validate_instagram_export_shapes(export_data, all_posts_data) -> None:
+    """Structural validation, independent of the client — Pydantic's `Any`
+    on export_data/all_posts_data only guarantees "valid JSON", not "the
+    right shape". Raises HTTPException(400) with a specific, actionable
+    message rather than silently writing garbage to disk and letting the
+    import script discover the problem (or, worse, quietly find nothing
+    and produce a no-op-looking run). Shared by both POST
+    /instagram-export/preview and POST /instagram-export/jobs so neither
+    route can be reached with an unvalidated file — including a direct API
+    call that bypasses superbrain-web's own (also real, not just
+    client-side) checks in its Next.js route handlers.
+    """
+    if not _ig_import.looks_like_collections_export(export_data):
+        raise HTTPException(
+            status_code=400,
+            detail="That file doesn't look like an Instagram \"by collection\" export — expected "
+                   "a JSON list of collections, each with a Name and a list of saved posts.",
+        )
+    if all_posts_data is not None and not _ig_import.looks_like_all_posts_export(all_posts_data):
+        raise HTTPException(
+            status_code=400,
+            detail="That all-posts file doesn't look like an Instagram \"all posts\" export — "
+                   "expected a flat JSON list of individually-saved posts, each with a URL and a "
+                   "save timestamp.",
+        )
+
+
+def _instagram_export_preview(export_data, all_posts_data=None) -> dict:
     """Parse export_data the same way parse_export() would, without writing
     a permanent file — used by POST /instagram-export/preview so the web UI
     can sanity-check category counts before committing to an hours-long
-    import job."""
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
-        json.dump(export_data, tmp)
-        tmp_path = Path(tmp.name)
+    import job. When all_posts_data is also given, additionally reports how
+    many of export_data's posts already have a known real save date in it."""
+    tmp_path = _write_temp_json(export_data)
     try:
         records = _ig_import.parse_export(tmp_path)
     finally:
@@ -2640,15 +2698,29 @@ def _instagram_export_preview(export_data) -> dict:
         {"name": folder, "count": count}
         for folder, count in sorted(folder_counts.items(), key=lambda kv: -kv[1])
     ]
-    return {
+    result = {
         "categories": categories,
         "total_raw_entries": len(records),
         "total_unique_posts": len(url_to_folders),
     }
 
+    if all_posts_data is not None:
+        posts_tmp_path = _write_temp_json(all_posts_data)
+        try:
+            shortcode_ts = _ig_import.extract_post_timestamps(posts_tmp_path)
+        finally:
+            posts_tmp_path.unlink(missing_ok=True)
+        known = sum(
+            1 for url in url_to_folders
+            if (code := _ig_import.shortcode_for(url)) and code in shortcode_ts
+        )
+        result["posts_with_known_date"] = known
+
+    return result
+
 
 def _run_instagram_export_job(
-    job_id: str, json_path: Path, mode: str,
+    job_id: str, json_path: Path, all_posts_json_path: Optional[Path], mode: str,
     priority_folder: Optional[str], reverse_collections: bool,
 ):
     """Spawns import_saved_instagram.py (or its _by_collection sibling) as a
@@ -2670,6 +2742,8 @@ def _run_instagram_export_job(
     ]
     if mode == "by_collection" and priority_folder:
         cmd += ["--priority-folder", priority_folder]
+    if all_posts_json_path:
+        cmd += ["--all-posts-file", str(all_posts_json_path)]
 
     log_lines: List[str] = []
 
@@ -2726,8 +2800,11 @@ async def preview_instagram_export(req: InstagramExportPreviewRequest, token: st
     Requires API authentication.
     """
     try:
-        preview = await asyncio.to_thread(_instagram_export_preview, req.export_data)
+        _validate_instagram_export_shapes(req.export_data, req.all_posts_data)
+        preview = await asyncio.to_thread(_instagram_export_preview, req.export_data, req.all_posts_data)
         return {"success": True, **preview}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not parse export: {e}")
 
@@ -2753,6 +2830,8 @@ async def create_instagram_export_job(req: InstagramExportJobCreate, token: str 
         if req.mode not in {"regular", "by_collection"}:
             raise HTTPException(status_code=400, detail="mode must be 'regular' or 'by_collection'.")
 
+        _validate_instagram_export_shapes(req.export_data, req.all_posts_data)
+
         db = get_db()
         for job in db.list_import_jobs(limit=5):
             if job["status"] == "running":
@@ -2763,6 +2842,11 @@ async def create_instagram_export_job(req: InstagramExportJobCreate, token: str 
         json_path = _INSTAGRAM_EXPORT_UPLOADS_DIR / f"{job_id}.json"
         json_path.write_text(json.dumps(req.export_data), encoding="utf-8")
 
+        all_posts_json_path: Optional[Path] = None
+        if req.all_posts_data is not None:
+            all_posts_json_path = _INSTAGRAM_EXPORT_UPLOADS_DIR / f"{job_id}_posts.json"
+            all_posts_json_path.write_text(json.dumps(req.all_posts_data), encoding="utf-8")
+
         job = db.create_import_job(
             job_id, req.mode, req.priority_folder, req.reverse_collections, json_path.name,
         )
@@ -2771,7 +2855,7 @@ async def create_instagram_export_job(req: InstagramExportJobCreate, token: str 
 
         threading.Thread(
             target=_run_instagram_export_job,
-            args=(job_id, json_path, req.mode, req.priority_folder, req.reverse_collections),
+            args=(job_id, json_path, all_posts_json_path, req.mode, req.priority_folder, req.reverse_collections),
             daemon=True,
         ).start()
 

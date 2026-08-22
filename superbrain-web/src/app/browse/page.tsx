@@ -36,10 +36,11 @@ async function loadBrowseData(
   const baseOptions = {
     language: language || undefined,
     collectionId: collectionId || undefined,
-    sort: (sort === "importance" ? "importance" : sort === "saved_order" ? "saved_order" : "recent") as
+    sort: (sort === "importance" || sort === "date_saved" || sort === "post_date" ? sort : "recent") as
       | "recent"
       | "importance"
-      | "saved_order",
+      | "date_saved"
+      | "post_date",
     importance,
   };
 

@@ -41,6 +41,7 @@ backend/media/
 
 # ── Personal data / import state (not code, not for version control) ─────────
 backend/saved_collections.json
+backend/saved_posts.json
 backend/scripts/import_state.json
 backend/uploads/
 

@@ -452,10 +452,12 @@ def main():
 
     print_header("🧠 SUPERBRAIN - Content Analyzer")
     
-    # Step 1: Get URL (+ optional --caption / --hashtags passed by the API
-    # or the bulk importer, so source-provided context can inform the summary)
+    # Step 1: Get URL (+ optional --caption / --hashtags / --date-saved passed
+    # by the API or the bulk importer, so source-provided context can inform
+    # the summary / be stored alongside the analysis)
     source_caption = ""
     source_hashtags: list = []
+    date_saved = None
     if len(sys.argv) > 1:
         instagram_url = sys.argv[1]
         print(f"📎 Link: {instagram_url}")
@@ -466,6 +468,9 @@ def main():
                 i += 2
             elif sys.argv[i] == "--hashtags" and i + 1 < len(sys.argv):
                 source_hashtags = [t for t in sys.argv[i + 1].split(",") if t]
+                i += 2
+            elif sys.argv[i] == "--date-saved" and i + 1 < len(sys.argv):
+                date_saved = sys.argv[i + 1]
                 i += 2
             else:
                 i += 1
@@ -810,6 +815,7 @@ def main():
                 state = {
                     "source_caption": source_caption,
                     "source_hashtags": source_hashtags,
+                    "date_saved": date_saved,
                     "username": _info["username"],
                     "likes": _info["likes"],
                     "post_date": _info["post_date"],
@@ -864,6 +870,7 @@ def main():
             state = {
                 "source_caption": source_caption,
                 "source_hashtags": source_hashtags,
+                "date_saved": date_saved,
                 "username": _info["username"],
                 "likes": _info["likes"],
                 "post_date": _info["post_date"],
@@ -976,6 +983,7 @@ def main():
         model_used=model_used,
         transcription_backend=transcription_backend,
         caption=caption,
+        date_saved=date_saved,
     )
 
     if not saved:

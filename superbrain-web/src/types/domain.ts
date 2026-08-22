@@ -9,12 +9,13 @@ export interface Post {
   analyzed_at: string | null;
   updated_at: string | null;
   post_date: string | null;
-  // Reconstructed relative chronological save order for Instagram posts
-  // bulk-imported from an export JSON (backfilled once, see backend's
-  // scripts/backfill_saved_order.py) — NOT a real date, just a rank (lower
-  // = saved earlier). null for posts outside the backfill, where
-  // analyzed_at is already chronologically meaningful on its own.
-  saved_order: number | null;
+  // The real date this post was saved to Instagram — distinct from
+  // post_date above (the content's own publish date). Backfilled once for
+  // pre-existing posts from saved_posts.json (backend's
+  // scripts/backfill_date_saved.py), set going forward by the import
+  // scripts at analysis time. null for posts saved individually (not via
+  // that import flow) or not found in the lookup file at the time.
+  date_saved: string | null;
   likes: number | null;
   // 1-5 rating of lasting/reusable value (backend/core/importance.py) — null
   // for posts saved before this feature existed or unscored so far.
@@ -112,6 +113,10 @@ export interface InstagramExportPreview {
   categories: { name: string; count: number }[];
   total_raw_entries: number;
   total_unique_posts: number;
+  // Present only when an all-posts (save-date lookup) file was also
+  // uploaded at preview time — how many of total_unique_posts already have
+  // a known real save date in it.
+  posts_with_known_date?: number;
 }
 
 export interface ExportPayload {

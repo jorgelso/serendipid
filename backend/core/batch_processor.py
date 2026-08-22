@@ -306,6 +306,7 @@ def _finalize_scoring_phase(db, job: dict) -> bool:
         model_used="openai_gpt41_batch",
         transcription_backend=state.get("transcription_backend", ""),
         caption=state.get("caption", ""),
+        date_saved=state.get("date_saved"),
     )
 
     if not saved:

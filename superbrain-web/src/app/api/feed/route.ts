@@ -22,7 +22,8 @@ export async function GET(request: NextRequest) {
   const language = searchParams.get("language") || undefined;
   const collectionId = searchParams.get("collection") || undefined;
   const sortParam = searchParams.get("sort");
-  const sort = sortParam === "importance" ? "importance" : sortParam === "saved_order" ? "saved_order" : "recent";
+  const sort =
+    sortParam === "importance" || sortParam === "date_saved" || sortParam === "post_date" ? sortParam : "recent";
   const importance = (searchParams.get("importance") || "")
     .split(",")
     .map((v) => Number(v))

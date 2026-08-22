@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SuperBrainApiError, previewInstagramExport } from "@/lib/apiClient";
+import { looksLikeAllPostsExport, looksLikeCollectionsExport } from "@/lib/instagramExportValidation";
 
 // Reads an uploaded Instagram "Download Your Information" export JSON
 // (multipart, sent from /import's file input) and forwards its parsed
@@ -20,8 +21,38 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: "That file isn't valid JSON." }, { status: 400 });
     }
+    if (!looksLikeCollectionsExport(exportData)) {
+      return NextResponse.json(
+        {
+          error:
+            'That file doesn\'t look like an Instagram "by collection" export — expected a JSON ' +
+            "list of collections, each with a Name and a list of saved posts.",
+        },
+        { status: 400 }
+      );
+    }
 
-    const preview = await previewInstagramExport(exportData);
+    let allPostsData: unknown;
+    const allPostsFile = formData.get("allPostsFile");
+    if (allPostsFile instanceof File) {
+      try {
+        allPostsData = JSON.parse(await allPostsFile.text());
+      } catch {
+        return NextResponse.json({ error: "The all-posts file isn't valid JSON." }, { status: 400 });
+      }
+      if (!looksLikeAllPostsExport(allPostsData)) {
+        return NextResponse.json(
+          {
+            error:
+              'That all-posts file doesn\'t look like an Instagram "all posts" export — expected a ' +
+              "flat JSON list of individually-saved posts, each with a URL and a save timestamp.",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const preview = await previewInstagramExport(exportData, allPostsData);
     return NextResponse.json(preview);
   } catch (err) {
     if (err instanceof SuperBrainApiError) {

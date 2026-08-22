@@ -169,7 +169,8 @@ export default function BrowseFilters({
       >
         <option value="recent">Sort: Recent</option>
         <option value="importance">Sort: Most important</option>
-        <option value="saved_order">Sort: Save order</option>
+        <option value="date_saved">Sort: Save date</option>
+        <option value="post_date">Sort: Publish date</option>
       </select>
 
       <div className="flex items-center gap-1.5 rounded-full border border-line bg-surface px-2 py-1.5">
