@@ -93,7 +93,7 @@ def _validate_instagram(url: str, parsed) -> dict:
     ):
         return None
 
-    match = re.search(r"/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)", parsed.path)
+    match = re.search(r"/(p|reel|reels|tv)/([A-Za-z0-9_-]+)", parsed.path)
     if not match:
         return {
             "valid": False, "content_type": "instagram",
@@ -101,7 +101,8 @@ def _validate_instagram(url: str, parsed) -> dict:
             "error": "Not a valid Instagram post/reel/video URL", "url": url,
         }
 
-    shortcode = match.group(1)
+    post_type = match.group(1)
+    shortcode = match.group(2)
     if not re.match(r"^[A-Za-z0-9_-]+$", shortcode):
         return {
             "valid": False, "content_type": "instagram",
@@ -109,10 +110,14 @@ def _validate_instagram(url: str, parsed) -> dict:
             "error": "Invalid Instagram shortcode format", "url": url,
         }
 
+    # Drop tracking params (utm_source, igsi, etc.) and rebuild a canonical URL,
+    # so the same reel shared from different sources always stores the same url.
+    clean_url = f"https://www.instagram.com/{post_type}/{shortcode}/"
+
     return {
         "valid": True, "content_type": "instagram",
         "shortcode": shortcode, "video_id": None,
-        "error": None, "url": url,
+        "error": None, "url": clean_url,
     }
 
 
