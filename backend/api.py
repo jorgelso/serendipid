@@ -2043,6 +2043,209 @@ async def delete_collection(collection_id: str, token: str = Depends(verify_toke
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ─────────────────────────────────────────────────────────────────
+# Boards endpoints — user-curated collections created from
+# superbrain-web's /boards page. See core/database.py's schema comment
+# above `boards`/`board_subcollections` for how this differs from the
+# Instagram-import-driven Collections above.
+# ─────────────────────────────────────────────────────────────────
+
+class BoardCreateRequest(BaseModel):
+    name: str
+    icon: str = "🗂️"
+
+
+class BoardUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class SubcollectionCreateRequest(BaseModel):
+    name: str
+    icon: str = "📁"
+
+
+@app.get("/boards")
+async def get_boards(token: str = Depends(verify_token)):
+    """Return all boards, each with its subcollections attached."""
+    try:
+        db = get_db()
+        return {"success": True, "data": db.get_boards()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/boards")
+async def create_board(req: BoardCreateRequest, token: str = Depends(verify_token)):
+    """Create a new, empty board."""
+    try:
+        db = get_db()
+        board_id = str(uuid.uuid4())
+        saved = db.create_board(board_id, req.name, req.icon)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=500, detail="Failed to create board")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/boards/{board_id}")
+async def get_board(board_id: str, token: str = Depends(verify_token)):
+    """Return a single board (with its subcollections attached) by id."""
+    try:
+        db = get_db()
+        board = db.get_board(board_id)
+        if board:
+            return {"success": True, "data": board}
+        raise HTTPException(status_code=404, detail="Board not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/boards/{board_id}")
+async def rename_board(board_id: str, req: BoardUpdateRequest, token: str = Depends(verify_token)):
+    """Rename a board and/or change its icon."""
+    try:
+        db = get_db()
+        saved = db.rename_board(board_id, req.name, req.icon)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=404, detail="Board not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/boards/{board_id}")
+async def delete_board(board_id: str, token: str = Depends(verify_token)):
+    """Delete a board and every subcollection nested under it."""
+    try:
+        db = get_db()
+        ok = db.delete_board(board_id)
+        if ok:
+            return {"success": True, "message": "Board deleted"}
+        raise HTTPException(status_code=404, detail="Board not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/boards/{board_id}/posts/{shortcode}")
+async def add_post_to_board(board_id: str, shortcode: str, token: str = Depends(verify_token)):
+    """Add one post directly to a board (no-op if already present)."""
+    try:
+        db = get_db()
+        saved = db.add_post_to_board(board_id, shortcode)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=404, detail="Board not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/boards/{board_id}/posts/{shortcode}")
+async def remove_post_from_board(board_id: str, shortcode: str, token: str = Depends(verify_token)):
+    """Remove one post from a board's direct post_ids."""
+    try:
+        db = get_db()
+        saved = db.remove_post_from_board(board_id, shortcode)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=404, detail="Board not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/boards/{board_id}/subcollections")
+async def create_board_subcollection(board_id: str, req: SubcollectionCreateRequest,
+                                      token: str = Depends(verify_token)):
+    """Create a new, empty subcollection nested under a board."""
+    try:
+        db = get_db()
+        sub_id = str(uuid.uuid4())
+        saved = db.create_board_subcollection(sub_id, board_id, req.name, req.icon)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=404, detail="Board not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/boards/{board_id}/subcollections/{sub_id}")
+async def rename_board_subcollection(board_id: str, sub_id: str, req: BoardUpdateRequest,
+                                      token: str = Depends(verify_token)):
+    """Rename a subcollection and/or change its icon."""
+    try:
+        db = get_db()
+        saved = db.rename_board_subcollection(sub_id, req.name, req.icon)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=404, detail="Subcollection not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/boards/{board_id}/subcollections/{sub_id}")
+async def delete_board_subcollection(board_id: str, sub_id: str, token: str = Depends(verify_token)):
+    """Delete a single subcollection (its parent board and siblings are untouched)."""
+    try:
+        db = get_db()
+        ok = db.delete_board_subcollection(sub_id)
+        if ok:
+            return {"success": True, "message": "Subcollection deleted"}
+        raise HTTPException(status_code=404, detail="Subcollection not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/boards/{board_id}/subcollections/{sub_id}/posts/{shortcode}")
+async def add_post_to_subcollection(board_id: str, sub_id: str, shortcode: str,
+                                     token: str = Depends(verify_token)):
+    """Add one post to a subcollection (no-op if already present)."""
+    try:
+        db = get_db()
+        saved = db.add_post_to_subcollection(sub_id, shortcode)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=404, detail="Subcollection not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/boards/{board_id}/subcollections/{sub_id}/posts/{shortcode}")
+async def remove_post_from_subcollection(board_id: str, sub_id: str, shortcode: str,
+                                          token: str = Depends(verify_token)):
+    """Remove one post from a subcollection."""
+    try:
+        db = get_db()
+        saved = db.remove_post_from_subcollection(sub_id, shortcode)
+        if saved:
+            return {"success": True, "data": saved}
+        raise HTTPException(status_code=404, detail="Subcollection not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/health")
 async def health_check(token: str = Depends(verify_token)):
     """API health check with database connectivity test (requires auth)"""

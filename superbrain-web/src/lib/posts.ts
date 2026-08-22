@@ -46,57 +46,65 @@ export function toDisplayPost(post: Post, apiBaseUrl: string): ClientPost {
   };
 }
 
-/** Most-recently-analyzed first — the ordering behind the Home/Browse feeds. */
-export function sortPostsByRecency(posts: Post[]): Post[] {
+export type SortDirection = "asc" | "desc";
+
+/** Most-recently-analyzed first by default ("desc"); pass dir="asc" to flip
+ * to oldest-first — the ordering behind the Home/Browse feeds. */
+export function sortPostsByRecency(posts: Post[], dir: SortDirection = "desc"): Post[] {
+  const sign = dir === "asc" ? -1 : 1;
   return [...posts].sort((a, b) => {
     const aTime = a.analyzed_at ? Date.parse(a.analyzed_at) : 0;
     const bTime = b.analyzed_at ? Date.parse(b.analyzed_at) : 0;
-    return bTime - aTime;
+    return sign * (bTime - aTime);
   });
 }
 
-/** Highest importance (1-5) first — unscored posts (null) sink to the
- * bottom rather than being treated as 0, since "not scored yet" isn't the
- * same claim as "scored low". Recency breaks ties, including among the
- * unscored group. */
-export function sortPostsByImportance(posts: Post[]): Post[] {
-  return sortPostsByRecency(posts).sort((a, b) => {
+/** Highest importance (1-5) first by default ("desc"); dir="asc" flips to
+ * lowest first. Unscored posts (null) always sink to the bottom regardless
+ * of direction, since "not scored yet" isn't the same claim as "scored low".
+ * Recency (direction-aware too) breaks ties, including among the unscored
+ * group. */
+export function sortPostsByImportance(posts: Post[], dir: SortDirection = "desc"): Post[] {
+  const sign = dir === "asc" ? -1 : 1;
+  return sortPostsByRecency(posts, dir).sort((a, b) => {
     if (a.importance == null && b.importance == null) return 0;
     if (a.importance == null) return 1;
     if (b.importance == null) return -1;
-    return b.importance - a.importance;
+    return sign * (b.importance - a.importance);
   });
 }
 
-/** Real Instagram save date, oldest first — mirrors the backend's
- * `ORDER BY date_saved IS NULL, date_saved ASC, analyzed_at ASC` (see
- * backend/core/database.py's get_recent_light). Posts with a known
- * date_saved sort first (ascending); every other post continues by
- * analyzed_at ascending, forming one continuous oldest-to-newest timeline
- * across both eras. */
-export function sortPostsByDateSaved(posts: Post[]): Post[] {
+/** Real Instagram save date, newest first by default ("desc"); dir="asc"
+ * mirrors the backend's `ORDER BY date_saved IS NULL, date_saved ASC,
+ * analyzed_at ASC` (see backend/core/database.py's get_recent_light).
+ * Posts with a known date_saved always sort before every other post
+ * regardless of direction — only the relative order within each of those two
+ * groups flips with dir — forming one continuous timeline across both eras. */
+export function sortPostsByDateSaved(posts: Post[], dir: SortDirection = "desc"): Post[] {
+  const sign = dir === "asc" ? 1 : -1;
   return [...posts].sort((a, b) => {
-    if (a.date_saved != null && b.date_saved != null) return Date.parse(a.date_saved) - Date.parse(b.date_saved);
+    if (a.date_saved != null && b.date_saved != null) return sign * (Date.parse(a.date_saved) - Date.parse(b.date_saved));
     if (a.date_saved != null) return -1;
     if (b.date_saved != null) return 1;
     const aTime = a.analyzed_at ? Date.parse(a.analyzed_at) : 0;
     const bTime = b.analyzed_at ? Date.parse(b.analyzed_at) : 0;
-    return aTime - bTime;
+    return sign * (aTime - bTime);
   });
 }
 
-/** The content's own publish date, oldest first — same shape as
- * sortPostsByDateSaved but keyed on post_date, a distinct axis ("when was
- * this posted" vs. "when did I save it"). Mirrors the backend's
- * `ORDER BY post_date IS NULL, post_date ASC, analyzed_at ASC`. */
-export function sortPostsByPostDate(posts: Post[]): Post[] {
+/** The content's own publish date, newest first by default ("desc") — same
+ * shape as sortPostsByDateSaved but keyed on post_date, a distinct axis
+ * ("when was this posted" vs. "when did I save it"). dir="asc" mirrors the
+ * backend's `ORDER BY post_date IS NULL, post_date ASC, analyzed_at ASC`. */
+export function sortPostsByPostDate(posts: Post[], dir: SortDirection = "desc"): Post[] {
+  const sign = dir === "asc" ? 1 : -1;
   return [...posts].sort((a, b) => {
-    if (a.post_date != null && b.post_date != null) return Date.parse(a.post_date) - Date.parse(b.post_date);
+    if (a.post_date != null && b.post_date != null) return sign * (Date.parse(a.post_date) - Date.parse(b.post_date));
     if (a.post_date != null) return -1;
     if (b.post_date != null) return 1;
     const aTime = a.analyzed_at ? Date.parse(a.analyzed_at) : 0;
     const bTime = b.analyzed_at ? Date.parse(b.analyzed_at) : 0;
-    return aTime - bTime;
+    return sign * (aTime - bTime);
   });
 }
 
@@ -117,6 +125,10 @@ export function filterPosts(
     language?: string;
     collectionId?: string;
     sort?: "recent" | "importance" | "date_saved" | "post_date";
+    // Direction for whichever `sort` is active — defaults to "desc" so the
+    // newest/highest-ranked posts show first regardless of which sort key
+    // is selected.
+    dir?: SortDirection;
     // Toggle set, not a single value — e.g. [1, 3] keeps posts scored either
     // 1 or 3. Empty/undefined means no importance filtering at all.
     importance?: number[];
@@ -127,14 +139,15 @@ export function filterPosts(
     tutorial?: "yes" | "no";
   }
 ): Post[] {
+  const dir = options.dir ?? "desc";
   let filtered =
     options.sort === "importance"
-      ? sortPostsByImportance(posts)
+      ? sortPostsByImportance(posts, dir)
       : options.sort === "date_saved"
-        ? sortPostsByDateSaved(posts)
+        ? sortPostsByDateSaved(posts, dir)
         : options.sort === "post_date"
-          ? sortPostsByPostDate(posts)
-          : sortPostsByRecency(posts);
+          ? sortPostsByPostDate(posts, dir)
+          : sortPostsByRecency(posts, dir);
   if (options.category && options.category.length > 0) {
     const selected = new Set(options.category);
     filtered =

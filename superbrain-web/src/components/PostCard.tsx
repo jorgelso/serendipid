@@ -19,6 +19,7 @@ import AnalysisDetails from "./AnalysisDetails";
 import ReviewActions from "./ReviewActions";
 import PostModal from "./PostModal";
 import DeletePostButton from "./DeletePostButton";
+import AddToBoardMenu from "./AddToBoardMenu";
 
 interface PostCardProps {
   post: ClientPost & { similarity?: number };
@@ -116,14 +117,17 @@ export default function PostCard({ post, rescanMode, selectable, selected, onTog
           <DeletePostButton shortcode={post.shortcode} title={post.title} />
         </div>
 
-        <a
-          href={post.url}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-1 inline-block text-xs text-ink-muted hover:text-coral-ink transition-colors"
-        >
-          @{post.username}
-        </a>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <a
+            href={post.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-ink-muted hover:text-coral-ink transition-colors"
+          >
+            @{post.username}
+          </a>
+          <AddToBoardMenu shortcode={post.shortcode} />
+        </div>
 
         {(post.category.length > 1 || post.language.length > 0) && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">

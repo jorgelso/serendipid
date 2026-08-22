@@ -1,6 +1,10 @@
 import { getConfig } from "./config";
 import type {
   BatchCheckResponse,
+  Board,
+  BoardResponse,
+  BoardsResponse,
+  BoardSubcollection,
   BulkReanalyzeResponse,
   CategoriesResponse,
   ChangelogResponse,
@@ -487,5 +491,107 @@ export async function fetchInstagramExportJob(jobId: string): Promise<ImportJob>
 
 export async function fetchInstagramExportJobs(): Promise<ImportJob[]> {
   const res = await request<ImportJobsResponse>("/instagram-export/jobs");
+  return res.data;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Boards — user-curated collections, distinct from the Instagram-import
+// Collection type above. See backend/CLAUDE.md's "Boards vs collections".
+// ─────────────────────────────────────────────────────────────────
+
+interface BoardSubcollectionResponse {
+  success: boolean;
+  data: BoardSubcollection;
+}
+
+export async function fetchBoards(): Promise<Board[]> {
+  const res = await request<BoardsResponse>("/boards");
+  return res.data;
+}
+
+export async function fetchBoard(boardId: string): Promise<Board> {
+  const res = await request<BoardResponse>(`/boards/${boardId}`);
+  return res.data;
+}
+
+export async function createBoard(name: string, icon?: string): Promise<Board> {
+  const res = await request<BoardResponse>("/boards", {
+    method: "POST",
+    body: { name, ...(icon ? { icon } : {}) },
+  });
+  return res.data;
+}
+
+export async function renameBoard(
+  boardId: string,
+  edits: { name?: string; icon?: string }
+): Promise<Board> {
+  const res = await request<BoardResponse>(`/boards/${boardId}`, { method: "PUT", body: edits });
+  return res.data;
+}
+
+export async function deleteBoard(boardId: string): Promise<void> {
+  await request<{ success: boolean }>(`/boards/${boardId}`, { method: "DELETE" });
+}
+
+export async function addPostToBoard(boardId: string, shortcode: string): Promise<Board> {
+  const res = await request<BoardResponse>(`/boards/${boardId}/posts/${shortcode}`, { method: "POST" });
+  return res.data;
+}
+
+export async function removePostFromBoard(boardId: string, shortcode: string): Promise<Board> {
+  const res = await request<BoardResponse>(`/boards/${boardId}/posts/${shortcode}`, { method: "DELETE" });
+  return res.data;
+}
+
+export async function createBoardSubcollection(
+  boardId: string,
+  name: string,
+  icon?: string
+): Promise<BoardSubcollection> {
+  const res = await request<BoardSubcollectionResponse>(`/boards/${boardId}/subcollections`, {
+    method: "POST",
+    body: { name, ...(icon ? { icon } : {}) },
+  });
+  return res.data;
+}
+
+export async function renameBoardSubcollection(
+  boardId: string,
+  subId: string,
+  edits: { name?: string; icon?: string }
+): Promise<BoardSubcollection> {
+  const res = await request<BoardSubcollectionResponse>(`/boards/${boardId}/subcollections/${subId}`, {
+    method: "PUT",
+    body: edits,
+  });
+  return res.data;
+}
+
+export async function deleteBoardSubcollection(boardId: string, subId: string): Promise<void> {
+  await request<{ success: boolean }>(`/boards/${boardId}/subcollections/${subId}`, { method: "DELETE" });
+}
+
+export async function addPostToSubcollection(
+  boardId: string,
+  subId: string,
+  shortcode: string
+): Promise<BoardSubcollection> {
+  const res = await request<BoardSubcollectionResponse>(
+    `/boards/${boardId}/subcollections/${subId}/posts/${shortcode}`,
+    { method: "POST" }
+  );
+  return res.data;
+}
+
+export async function removePostFromSubcollection(
+  boardId: string,
+  subId: string,
+  shortcode: string
+): Promise<BoardSubcollection> {
+  const res = await request<BoardSubcollectionResponse>(
+    `/boards/${boardId}/subcollections/${subId}/posts/${shortcode}`,
+    { method: "DELETE" }
+  );
   return res.data;
 }

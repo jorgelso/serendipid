@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
   const sortParam = searchParams.get("sort");
   const sort =
     sortParam === "importance" || sortParam === "date_saved" || sortParam === "post_date" ? sortParam : "recent";
+  const dir = searchParams.get("dir") === "asc" ? "asc" : "desc";
   const importance = (searchParams.get("importance") || "")
     .split(",")
     .map((v) => Number(v))
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
       language,
       collectionId,
       sort,
+      dir,
       importance,
       eloquent,
       tutorial,

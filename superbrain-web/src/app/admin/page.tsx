@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import CheckBatchesButton from "@/components/CheckBatchesButton";
+import RefreshButton from "@/components/RefreshButton";
 import type { ImportJob, InstagramExportPreview } from "@/types/domain";
 
 const POLL_INTERVAL_MS = 3000;
@@ -11,7 +13,7 @@ function formatStarted(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-export default function ImportPage() {
+export default function AdminPage() {
   const [file, setFile] = useState<File | null>(null);
   const [allPostsFile, setAllPostsFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<InstagramExportPreview | null>(null);
@@ -177,7 +179,22 @@ export default function ImportPage() {
   return (
     <div className="mx-auto max-w-3xl px-5 py-8">
       <div className="mb-6">
-        <h1 className="font-display font-semibold text-3xl">Import</h1>
+        <h1 className="font-display font-semibold text-3xl">Admin</h1>
+        <p className="mt-1 text-ink-muted text-sm">
+          Import new content and manage background analysis jobs.
+        </p>
+      </div>
+
+      <div className="mb-8 rounded-2xl border border-line bg-surface p-5">
+        <h2 className="mb-3 text-sm font-bold text-ink-muted">Analysis jobs</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <RefreshButton />
+          <CheckBatchesButton />
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <h2 className="text-sm font-bold text-ink-muted">Import</h2>
         <p className="mt-1 text-ink-muted text-sm">
           Upload an Instagram &ldquo;Download Your Information&rdquo; export and analyze the reels/posts it contains.
         </p>

@@ -568,6 +568,44 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Boards — user-curated groupings of posts created by hand from
+        # superbrain-web's /boards page. Deliberately a separate table from
+        # `collections` above, not an extension of it: `collections` mirrors
+        # Instagram's own saved-post folders (one row per imported folder,
+        # auto-populated by scripts/import_saved_instagram(_by_collection).py)
+        # and is never created or edited by a person, whereas `boards` are
+        # made by hand and never touched by the import scripts. See
+        # backend/CLAUDE.md's "Boards vs collections" section.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS boards (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                icon        TEXT DEFAULT '🗂️',
+                post_ids    TEXT DEFAULT '[]',
+                created_at  TEXT,
+                updated_at  TEXT
+            );
+
+            -- A second, optional grouping level nested under one board (e.g.
+            -- a "Home renovation" board with "Kitchen" / "Bathroom"
+            -- sub-collections underneath it). Same flat JSON-array post_ids
+            -- shape as `boards`/`collections`, not a join table — membership
+            -- here doesn't imply membership in the parent board's own
+            -- post_ids, and vice versa; a post can be in the board directly,
+            -- in one of its sub-collections, both, or neither.
+            CREATE TABLE IF NOT EXISTS board_subcollections (
+                id          TEXT PRIMARY KEY,
+                board_id    TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                icon        TEXT DEFAULT '📁',
+                post_ids    TEXT DEFAULT '[]',
+                created_at  TEXT,
+                updated_at  TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_board_subcollections_board_id ON board_subcollections (board_id);
+        """)
+        self._conn.commit()
+
         # Deleted-log table — tracks when posts are soft-deleted so the
         # mobile app can sync deletions via /sync/deleted.
         self._conn.executescript("""
@@ -2752,6 +2790,279 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error deleting collection: {e}")
             return False
+
+    # ------------------------------------------------------------------
+    # Boards — user-curated collections (see the schema comment above the
+    # `boards`/`board_subcollections` tables for how this differs from the
+    # Instagram-import-driven `collections` above).
+    # ------------------------------------------------------------------
+
+    def _board_row_to_dict(self, row, subcollections=None):
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d['post_ids'] = json.loads(d.get('post_ids') or '[]')
+        except Exception:
+            d['post_ids'] = []
+        d['subcollections'] = subcollections if subcollections is not None else []
+        return d
+
+    def _subcollection_row_to_dict(self, row):
+        if row is None:
+            return None
+        d = dict(row)
+        try:
+            d['post_ids'] = json.loads(d.get('post_ids') or '[]')
+        except Exception:
+            d['post_ids'] = []
+        return d
+
+    def get_board_subcollections(self, board_id):
+        """Return every subcollection belonging to one board, oldest first."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT * FROM board_subcollections WHERE board_id = ? ORDER BY created_at ASC",
+                (board_id,)
+            )
+            return [self._subcollection_row_to_dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting board subcollections: {e}")
+            return []
+
+    def get_boards(self):
+        """Return all boards ordered by created_at, each with its subcollections attached."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM boards ORDER BY created_at ASC")
+            rows = cur.fetchall()
+            return [self._board_row_to_dict(r, self.get_board_subcollections(r['id'])) for r in rows]
+        except Exception as e:
+            print(f"[WARNING]  Error getting boards: {e}")
+            return []
+
+    def get_board(self, board_id):
+        """Return a single board (with its subcollections attached) by id, or None."""
+        if not self.is_connected():
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM boards WHERE id = ?", (board_id,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return self._board_row_to_dict(row, self.get_board_subcollections(board_id))
+        except Exception as e:
+            print(f"[WARNING]  Error getting board: {e}")
+            return None
+
+    def create_board(self, board_id, name, icon):
+        """Insert a new, empty board. Returns the saved dict."""
+        if not self.is_connected():
+            return None
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "INSERT INTO boards (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, '[]', ?, ?)",
+                (board_id, name, icon, now, now)
+            )
+            self._conn.commit()
+            return self.get_board(board_id)
+        except Exception as e:
+            print(f"[WARNING]  Error creating board: {e}")
+            return None
+
+    def rename_board(self, board_id, name=None, icon=None):
+        """Update a board's name/icon (whichever is provided). Returns the saved dict."""
+        if not self.is_connected():
+            return None
+        try:
+            existing = self.get_board(board_id)
+            if existing is None:
+                return None
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE boards SET name = ?, icon = ?, updated_at = ? WHERE id = ?",
+                (
+                    name if name is not None else existing['name'],
+                    icon if icon is not None else existing['icon'],
+                    now, board_id
+                )
+            )
+            self._conn.commit()
+            return self.get_board(board_id)
+        except Exception as e:
+            print(f"[WARNING]  Error renaming board: {e}")
+            return None
+
+    def delete_board(self, board_id):
+        """Delete a board and every subcollection nested under it. Returns True if the board existed."""
+        if not self.is_connected():
+            return False
+        try:
+            cur = self._conn.execute("DELETE FROM boards WHERE id = ?", (board_id,))
+            deleted = cur.rowcount > 0
+            self._conn.execute("DELETE FROM board_subcollections WHERE board_id = ?", (board_id,))
+            self._conn.commit()
+            return deleted
+        except Exception as e:
+            print(f"[WARNING]  Error deleting board: {e}")
+            return False
+
+    def add_post_to_board(self, board_id, shortcode):
+        """Add one post to a board's direct post_ids (no-op if already present). Returns the saved dict, or None if the board doesn't exist."""
+        if not self.is_connected():
+            return None
+        try:
+            board = self.get_board(board_id)
+            if board is None:
+                return None
+            post_ids = board['post_ids']
+            if shortcode not in post_ids:
+                post_ids.append(shortcode)
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE boards SET post_ids = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(post_ids), now, board_id)
+            )
+            self._conn.commit()
+            return self.get_board(board_id)
+        except Exception as e:
+            print(f"[WARNING]  Error adding post to board: {e}")
+            return None
+
+    def remove_post_from_board(self, board_id, shortcode):
+        """Remove one post from a board's direct post_ids. Returns the saved dict, or None if the board doesn't exist."""
+        if not self.is_connected():
+            return None
+        try:
+            board = self.get_board(board_id)
+            if board is None:
+                return None
+            post_ids = [s for s in board['post_ids'] if s != shortcode]
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE boards SET post_ids = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(post_ids), now, board_id)
+            )
+            self._conn.commit()
+            return self.get_board(board_id)
+        except Exception as e:
+            print(f"[WARNING]  Error removing post from board: {e}")
+            return None
+
+    def get_board_subcollection(self, sub_id):
+        """Return a single subcollection by id, or None."""
+        if not self.is_connected():
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM board_subcollections WHERE id = ?", (sub_id,))
+            return self._subcollection_row_to_dict(cur.fetchone())
+        except Exception as e:
+            print(f"[WARNING]  Error getting board subcollection: {e}")
+            return None
+
+    def create_board_subcollection(self, sub_id, board_id, name, icon):
+        """Insert a new, empty subcollection under a board. Returns the saved dict, or None if the board doesn't exist."""
+        if not self.is_connected():
+            return None
+        try:
+            if self.get_board(board_id) is None:
+                return None
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "INSERT INTO board_subcollections (id, board_id, name, icon, post_ids, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, '[]', ?, ?)",
+                (sub_id, board_id, name, icon, now, now)
+            )
+            self._conn.commit()
+            return self.get_board_subcollection(sub_id)
+        except Exception as e:
+            print(f"[WARNING]  Error creating board subcollection: {e}")
+            return None
+
+    def rename_board_subcollection(self, sub_id, name=None, icon=None):
+        """Update a subcollection's name/icon (whichever is provided). Returns the saved dict."""
+        if not self.is_connected():
+            return None
+        try:
+            existing = self.get_board_subcollection(sub_id)
+            if existing is None:
+                return None
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE board_subcollections SET name = ?, icon = ?, updated_at = ? WHERE id = ?",
+                (
+                    name if name is not None else existing['name'],
+                    icon if icon is not None else existing['icon'],
+                    now, sub_id
+                )
+            )
+            self._conn.commit()
+            return self.get_board_subcollection(sub_id)
+        except Exception as e:
+            print(f"[WARNING]  Error renaming board subcollection: {e}")
+            return None
+
+    def delete_board_subcollection(self, sub_id):
+        """Delete a single subcollection (its parent board and sibling subcollections are untouched)."""
+        if not self.is_connected():
+            return False
+        try:
+            cur = self._conn.execute("DELETE FROM board_subcollections WHERE id = ?", (sub_id,))
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error deleting board subcollection: {e}")
+            return False
+
+    def add_post_to_subcollection(self, sub_id, shortcode):
+        """Add one post to a subcollection's post_ids (no-op if already present)."""
+        if not self.is_connected():
+            return None
+        try:
+            sub = self.get_board_subcollection(sub_id)
+            if sub is None:
+                return None
+            post_ids = sub['post_ids']
+            if shortcode not in post_ids:
+                post_ids.append(shortcode)
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE board_subcollections SET post_ids = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(post_ids), now, sub_id)
+            )
+            self._conn.commit()
+            return self.get_board_subcollection(sub_id)
+        except Exception as e:
+            print(f"[WARNING]  Error adding post to board subcollection: {e}")
+            return None
+
+    def remove_post_from_subcollection(self, sub_id, shortcode):
+        """Remove one post from a subcollection's post_ids."""
+        if not self.is_connected():
+            return None
+        try:
+            sub = self.get_board_subcollection(sub_id)
+            if sub is None:
+                return None
+            post_ids = [s for s in sub['post_ids'] if s != shortcode]
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "UPDATE board_subcollections SET post_ids = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(post_ids), now, sub_id)
+            )
+            self._conn.commit()
+            return self.get_board_subcollection(sub_id)
+        except Exception as e:
+            print(f"[WARNING]  Error removing post from board subcollection: {e}")
+            return None
 
     # ------------------------------------------------------------------
     # RAG chatbot — chat_threads / chat_messages

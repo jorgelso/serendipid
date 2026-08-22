@@ -16,6 +16,7 @@ interface BrowseFiltersProps {
   language: string;
   collection: string;
   sort: string;
+  dir: "asc" | "desc";
   importance: number[];
 }
 
@@ -30,6 +31,7 @@ export default function BrowseFilters({
   language,
   collection,
   sort,
+  dir,
   importance,
 }: BrowseFiltersProps) {
   const router = useRouter();
@@ -59,6 +61,7 @@ export default function BrowseFilters({
     language?: string;
     collection?: string;
     sort?: string;
+    dir?: "asc" | "desc";
     importance?: number[];
   }) {
     const params = new URLSearchParams();
@@ -66,6 +69,7 @@ export default function BrowseFilters({
     const nextLanguage = next.language ?? language;
     const nextCollection = next.collection ?? collection;
     const nextSort = next.sort ?? sort;
+    const nextDir = next.dir ?? dir;
     const nextImportance = next.importance ?? importance;
     // Picking categories fresh from this control always resets back to
     // exact match — "any" is only ever reached via the fallback hint link.
@@ -74,7 +78,8 @@ export default function BrowseFilters({
     if (nextCategoryMode === "any" && nextCategory.length > 0) params.set("categoryMode", "any");
     if (nextLanguage) params.set("language", nextLanguage);
     if (nextCollection) params.set("collection", nextCollection);
-    if (nextSort && nextSort !== "recent") params.set("sort", nextSort);
+    if (nextSort && nextSort !== "date_saved") params.set("sort", nextSort);
+    if (nextDir && nextDir !== "desc") params.set("dir", nextDir);
     if (nextImportance.length > 0) params.set("importance", nextImportance.join(","));
     router.push(`/browse${params.toString() ? `?${params.toString()}` : ""}`);
   }
@@ -173,6 +178,17 @@ export default function BrowseFilters({
         <option value="post_date">Sort: Publish date</option>
       </select>
 
+      <button
+        type="button"
+        onClick={() => update({ dir: dir === "asc" ? "desc" : "asc" })}
+        aria-label={dir === "asc" ? "Sort ascending" : "Sort descending"}
+        title={dir === "asc" ? "Ascending (oldest/lowest first)" : "Descending (newest/highest first)"}
+        className={`${selectClass} flex items-center gap-1`}
+      >
+        <span aria-hidden>{dir === "asc" ? "↑" : "↓"}</span>
+        {dir === "asc" ? "Ascending" : "Descending"}
+      </button>
+
       <div className="flex items-center gap-1.5 rounded-full border border-line bg-surface px-2 py-1.5">
         <span className="pl-1.5 pr-0.5 text-xs font-bold text-ink-muted">Importance</span>
         {IMPORTANCE_LEVELS.map((level) => {
@@ -198,7 +214,8 @@ export default function BrowseFilters({
       {(category.length > 0 ||
         language ||
         collection ||
-        (sort && sort !== "recent") ||
+        (sort && sort !== "date_saved") ||
+        dir !== "desc" ||
         importance.length > 0) && (
         <button
           onClick={() => router.push("/browse")}

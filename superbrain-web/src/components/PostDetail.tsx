@@ -10,6 +10,7 @@ import ReviewActions from "./ReviewActions";
 import EditPostForm from "./EditPostForm";
 import DeletePostButton from "./DeletePostButton";
 import RatingControls from "./RatingControls";
+import AddToBoardMenu from "./AddToBoardMenu";
 
 interface PostDetailProps {
   initialPost: ClientPost;
@@ -38,6 +39,7 @@ export default function PostDetail({ initialPost, showFullDetails = false }: Pos
             >
               ✏️ Edit
             </button>
+            <AddToBoardMenu shortcode={post.shortcode} />
             <DeletePostButton shortcode={post.shortcode} title={post.title} variant="button" />
           </div>
         )}

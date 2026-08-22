@@ -28,6 +28,7 @@ async function loadBrowseData(
   language: string,
   collectionId: string,
   sort: string,
+  dir: "asc" | "desc",
   importance: number[]
 ): Promise<BrowseData> {
   const config = getConfig();
@@ -36,11 +37,12 @@ async function loadBrowseData(
   const baseOptions = {
     language: language || undefined,
     collectionId: collectionId || undefined,
-    sort: (sort === "importance" || sort === "date_saved" || sort === "post_date" ? sort : "recent") as
+    sort: (sort === "importance" || sort === "recent" || sort === "post_date" ? sort : "date_saved") as
       | "recent"
       | "importance"
       | "date_saved"
       | "post_date",
+    dir,
     importance,
   };
 
@@ -78,7 +80,8 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
     typeof searchParams.categoryMode === "string" && searchParams.categoryMode === "any" ? "any" : "exact";
   const language = typeof searchParams.language === "string" ? searchParams.language : "";
   const collection = typeof searchParams.collection === "string" ? searchParams.collection : "";
-  const sort = typeof searchParams.sort === "string" ? searchParams.sort : "recent";
+  const sort = typeof searchParams.sort === "string" ? searchParams.sort : "date_saved";
+  const dir: "asc" | "desc" = searchParams.dir === "asc" ? "asc" : "desc";
   const importanceParam = typeof searchParams.importance === "string" ? searchParams.importance : "";
   const importance = importanceParam
     .split(",")
@@ -89,7 +92,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
   let errorMessage: string | null = null;
 
   try {
-    data = await loadBrowseData(category, categoryMode, language, collection, sort, importance);
+    data = await loadBrowseData(category, categoryMode, language, collection, sort, dir, importance);
   } catch (err) {
     errorMessage =
       err instanceof SuperBrainApiError ? err.message : "Something went wrong loading your library.";
@@ -113,6 +116,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
             language={language}
             collection={collection}
             sort={sort}
+            dir={dir}
             importance={importance}
           />
         </div>
@@ -128,7 +132,8 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
               categoryMode: "any",
               ...(language ? { language } : {}),
               ...(collection ? { collection } : {}),
-              ...(sort !== "recent" ? { sort } : {}),
+              ...(sort !== "date_saved" ? { sort } : {}),
+              ...(dir !== "desc" ? { dir } : {}),
               ...(importance.length > 0 ? { importance: importance.join(",") } : {}),
             }).toString()}`}
             className="font-bold text-coral-ink underline underline-offset-2 hover:opacity-80"
@@ -153,7 +158,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
           // picking up the new initialPosts prop, which is exactly the
           // "filter changes the URL but not what's shown" bug. The key
           // forces a remount whenever the filter combination changes.
-          key={`${category.join(",")}|${categoryMode}|${language}|${collection}|${sort}|${importance.join(",")}`}
+          key={`${category.join(",")}|${categoryMode}|${language}|${collection}|${sort}|${dir}|${importance.join(",")}`}
           initialPosts={data.posts}
           total={data.total}
           pageSize={PAGE_SIZE}
@@ -162,7 +167,13 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
             ...(category.length > 0 && categoryMode === "any" ? { categoryMode } : {}),
             ...(language ? { language } : {}),
             ...(collection ? { collection } : {}),
+            // /api/feed's own default is "recent" (shared with Home's feed,
+            // which never sends a sort param at all) — not Browse's default
+            // of "date_saved" — so this must always be sent explicitly
+            // whenever it isn't literally "recent", or "Load more" pages
+            // would silently fall back to the wrong sort.
             ...(sort !== "recent" ? { sort } : {}),
+            ...(dir !== "desc" ? { dir } : {}),
             ...(importance.length > 0 ? { importance: importance.join(",") } : {}),
           }}
         />

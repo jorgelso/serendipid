@@ -92,6 +92,46 @@ export interface Collection {
   updated_at: string;
 }
 
+// A grouping nested under one Board (e.g. a "Home renovation" board with
+// "Kitchen" / "Bathroom" sub-collections underneath it). Its post_ids is
+// independent of the parent board's own post_ids — see Board below.
+export interface BoardSubcollection {
+  id: string;
+  board_id: string;
+  name: string;
+  icon: string | null;
+  post_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// A user-curated grouping of posts, created by hand from this app's /boards
+// page — distinct from Collection above, which mirrors an imported
+// Instagram saved-post folder and is never created here (see
+// backend/CLAUDE.md's "Boards vs collections"). A board can optionally nest
+// sub-collections for a second grouping level within one theme; a post's
+// membership in a sub-collection does not imply membership in the parent
+// board's own post_ids, and vice versa.
+export interface Board {
+  id: string;
+  name: string;
+  icon: string | null;
+  post_ids: string[];
+  created_at: string;
+  updated_at: string;
+  subcollections: BoardSubcollection[];
+}
+
+export interface BoardsResponse {
+  success: boolean;
+  data: Board[];
+}
+
+export interface BoardResponse {
+  success: boolean;
+  data: Board;
+}
+
 // Mirrors backend's import_jobs table — a background run of
 // scripts/import_saved_instagram.py (or its _by_collection sibling),
 // kicked off from /import. See backend/api.py's /instagram-export/* routes.
