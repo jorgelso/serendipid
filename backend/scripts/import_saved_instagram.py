@@ -13,6 +13,15 @@ recursive URL scan, so parsing degrades gracefully instead of hard-failing
 on an unrecognized shape. If --dry-run counts look wrong, start by checking
 which of these three actually matched your file.
 
+Instagram's export always lists each collection newest-saved-first.
+--reverse-collections (default: ON) reverses each collection's own slice of
+records to oldest-first before they're processed, so posts get analyzed
+(and stamped with analyzed_at) in the same order they were actually saved —
+see reverse_within_collections() for the full reasoning. Only cross-category
+order is left unfixed (there's no reliable signal in the export to unify
+collections against each other); pass --no-reverse-collections only if you
+specifically want the raw export order.
+
 Usage:
     python import_saved_instagram.py <export.json-or-dir> --dry-run
     python import_saved_instagram.py <export.json-or-dir> --folder Recipes
@@ -30,6 +39,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -281,6 +291,31 @@ def parse_export(path: Path) -> List[Tuple[str, str, str, List[str]]]:
     return cleaned
 
 
+def reverse_within_collections(
+    records: List[Tuple[str, str, str, List[str]]]
+) -> List[Tuple[str, str, str, List[str]]]:
+    """Group (folder, url, caption, hashtags) records by folder, preserving
+    first-seen folder order, and reverse each folder's internal item order.
+
+    Instagram's "Download Your Information" export always lists a saved
+    collection newest-saved-first. Feeding that order straight into
+    analyze_url() would stamp newer reels with an OLDER analyzed_at than
+    reels that get processed later in the same run — inverting the real
+    chronology. Reversing each collection's slice to oldest-first before
+    processing means analyzed_at increases in the same order the posts were
+    actually saved. Cross-category order is deliberately left as-is (the
+    export gives no reliable signal to unify collections against each
+    other) — only a single collection's own internal order is corrected.
+    """
+    by_folder: "OrderedDict[str, List[Tuple[str, str, str, List[str]]]]" = OrderedDict()
+    for rec in records:
+        by_folder.setdefault(rec[0], []).append(rec)
+    out: List[Tuple[str, str, str, List[str]]] = []
+    for _folder, recs in by_folder.items():
+        out.extend(reversed(recs))
+    return out
+
+
 def group_by_url(records: List[Tuple[str, str, str, List[str]]]) -> Dict[str, List[str]]:
     """(folder, url, caption, hashtags) records -> {url: [folder, ...]}
     preserving first-seen order, deduped per URL (a post saved in the same
@@ -478,6 +513,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("export_path", type=Path, help="Path to the Instagram export JSON file, or a directory of them")
     p.add_argument("--folder", help="Only process URLs from this Instagram folder/collection (case-insensitive)")
+    p.add_argument(
+        "--reverse-collections", dest="reverse_collections",
+        action="store_true", default=True,
+        help="Process each collection oldest-saved-first (default: on). Instagram's "
+             "export lists newest-saved-first; leaving this on keeps analyzed_at "
+             "chronologically meaningful. Only disable if you specifically want the "
+             "raw export order.",
+    )
+    p.add_argument(
+        "--no-reverse-collections", dest="reverse_collections", action="store_false",
+        help="Process collections in the raw export order (newest-saved-first).",
+    )
     p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"SuperBrain backend URL (default: {DEFAULT_SERVER_URL})")
     p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SUPERBRAIN_API_KEY)")
     p.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE, help=f"Resumable state file (default: {DEFAULT_STATE_FILE})")
@@ -500,6 +547,8 @@ def main() -> None:
     records = parse_export(args.export_path)
     if args.folder:
         records = [r for r in records if r[0].lower() == args.folder.lower()]
+    if args.reverse_collections:
+        records = reverse_within_collections(records)
 
     url_to_folders = group_by_url(records)
     url_meta = build_url_metadata(records)

@@ -13,6 +13,11 @@ resumable state file by default, so runs of either script are safe to
 interleave — a URL already marked "success" is skipped regardless of which
 script processed it.
 
+Also reuses import_saved_instagram.py's --reverse-collections (default: ON)
+— applied before the priority reorder below, since the two are independent:
+reversal fixes each collection's own internal order, priority-reordering
+only decides which collection is scheduled first.
+
 Usage:
     python import_saved_instagram_by_collection.py <export.json-or-dir> --dry-run
     python import_saved_instagram_by_collection.py <export.json-or-dir> --priority-folder Important
@@ -45,6 +50,7 @@ from import_saved_instagram import (
     now_iso,
     parse_export,
     resolve_api_key,
+    reverse_within_collections,
     save_state,
     shortcode_for,
 )
@@ -99,6 +105,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PRIORITY_FOLDER,
         help=f"Collection to schedule first, case-insensitive (default: {DEFAULT_PRIORITY_FOLDER})",
     )
+    p.add_argument(
+        "--reverse-collections", dest="reverse_collections",
+        action="store_true", default=True,
+        help="Process each collection oldest-saved-first (default: on). Instagram's "
+             "export lists newest-saved-first; leaving this on keeps analyzed_at "
+             "chronologically meaningful. Only disable if you specifically want the "
+             "raw export order.",
+    )
+    p.add_argument(
+        "--no-reverse-collections", dest="reverse_collections", action="store_false",
+        help="Process collections in the raw export order (newest-saved-first).",
+    )
     p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"SuperBrain backend URL (default: {DEFAULT_SERVER_URL})")
     p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SUPERBRAIN_API_KEY)")
     p.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE, help=f"Resumable state file, shared with import_saved_instagram.py (default: {DEFAULT_STATE_FILE})")
@@ -121,6 +139,8 @@ def main() -> None:
     records = parse_export(args.export_path)
     if args.folder:
         records = [r for r in records if r[0].lower() == args.folder.lower()]
+    if args.reverse_collections:
+        records = reverse_within_collections(records)
 
     records = reorder_by_collection_priority(records, priority_folder=args.priority_folder)
 

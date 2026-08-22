@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(searchParams.get("limit") ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
   const category = searchParams.get("category") || undefined;
   const language = searchParams.get("language") || undefined;
-  const sort = searchParams.get("sort") === "importance" ? "importance" : "recent";
+  const sortParam = searchParams.get("sort");
+  const sort = sortParam === "importance" ? "importance" : sortParam === "saved_order" ? "saved_order" : "recent";
 
   if (!Number.isFinite(version)) {
     return NextResponse.json({ error: "A numeric 'version' is required." }, { status: 400 });

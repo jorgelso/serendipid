@@ -17,6 +17,7 @@ const LINKS = [
   { href: "/space", label: "Space" },
   { href: "/ideas", label: "Ideas" },
   { href: "/study-guides", label: "Study guides" },
+  { href: "/import", label: "Import" },
 ];
 
 export default function NavBar() {

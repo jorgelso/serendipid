@@ -36,7 +36,10 @@ async function loadBrowseData(
   const baseOptions = {
     language: language || undefined,
     collectionId: collectionId || undefined,
-    sort: (sort === "importance" ? "importance" : "recent") as "recent" | "importance",
+    sort: (sort === "importance" ? "importance" : sort === "saved_order" ? "saved_order" : "recent") as
+      | "recent"
+      | "importance"
+      | "saved_order",
     importance,
   };
 
@@ -158,7 +161,7 @@ export default async function BrowsePage(props: PageProps<"/browse">) {
             ...(category.length > 0 && categoryMode === "any" ? { categoryMode } : {}),
             ...(language ? { language } : {}),
             ...(collection ? { collection } : {}),
-            ...(sort === "importance" ? { sort } : {}),
+            ...(sort !== "recent" ? { sort } : {}),
             ...(importance.length > 0 ? { importance: importance.join(",") } : {}),
           }}
         />

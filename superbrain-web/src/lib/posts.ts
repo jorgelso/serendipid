@@ -68,6 +68,23 @@ export function sortPostsByImportance(posts: Post[]): Post[] {
   });
 }
 
+/** Reconstructed chronological save order, oldest first — mirrors the
+ * backend's `ORDER BY saved_order IS NULL, saved_order ASC, analyzed_at ASC`
+ * (see backend/core/database.py's get_recent_light). Posts covered by the
+ * saved_order backfill sort first (ascending); every other post continues
+ * by analyzed_at ascending, forming one continuous oldest-to-newest
+ * timeline across both eras. */
+export function sortPostsBySavedOrder(posts: Post[]): Post[] {
+  return [...posts].sort((a, b) => {
+    if (a.saved_order != null && b.saved_order != null) return a.saved_order - b.saved_order;
+    if (a.saved_order != null) return -1;
+    if (b.saved_order != null) return 1;
+    const aTime = a.analyzed_at ? Date.parse(a.analyzed_at) : 0;
+    const bTime = b.analyzed_at ? Date.parse(b.analyzed_at) : 0;
+    return aTime - bTime;
+  });
+}
+
 /** Shared by /api/feed and the Browse page's initial server render, so both
  * apply category/collection filtering and sorting identically. */
 export function filterPosts(
@@ -84,7 +101,7 @@ export function filterPosts(
     categoryMatch?: "exact" | "any";
     language?: string;
     collectionId?: string;
-    sort?: "recent" | "importance";
+    sort?: "recent" | "importance" | "saved_order";
     // Toggle set, not a single value — e.g. [1, 3] keeps posts scored either
     // 1 or 3. Empty/undefined means no importance filtering at all.
     importance?: number[];
@@ -95,7 +112,12 @@ export function filterPosts(
     tutorial?: "yes" | "no";
   }
 ): Post[] {
-  let filtered = options.sort === "importance" ? sortPostsByImportance(posts) : sortPostsByRecency(posts);
+  let filtered =
+    options.sort === "importance"
+      ? sortPostsByImportance(posts)
+      : options.sort === "saved_order"
+        ? sortPostsBySavedOrder(posts)
+        : sortPostsByRecency(posts);
   if (options.category && options.category.length > 0) {
     const selected = new Set(options.category);
     filtered =
@@ -129,7 +151,7 @@ export function filterPosts(
 export interface VersionFilters {
   category: string;
   language: string;
-  sort: "recent" | "importance";
+  sort: "recent" | "importance" | "saved_order";
 }
 
 export interface VersionSummary {
@@ -177,7 +199,7 @@ export function versionSummaries(posts: Post[], changelog: ChangelogResponse | n
 export function filterVersionPosts(
   posts: Post[],
   version: number,
-  options: { category?: string; language?: string; sort?: "recent" | "importance" }
+  options: { category?: string; language?: string; sort?: "recent" | "importance" | "saved_order" }
 ): Post[] {
   return filterPosts(
     posts.filter((p) => p.analysis_version === version),
@@ -309,6 +331,7 @@ export function mergeSearchHitsWithPosts(
           analyzed_at: null,
           updated_at: null,
           post_date: null,
+          saved_order: null,
           likes: null,
           importance: null,
           thumbnail: hit.thumbnail,

@@ -9,6 +9,12 @@ export interface Post {
   analyzed_at: string | null;
   updated_at: string | null;
   post_date: string | null;
+  // Reconstructed relative chronological save order for Instagram posts
+  // bulk-imported from an export JSON (backfilled once, see backend's
+  // scripts/backfill_saved_order.py) — NOT a real date, just a rank (lower
+  // = saved earlier). null for posts outside the backfill, where
+  // analyzed_at is already chronologically meaningful on its own.
+  saved_order: number | null;
   likes: number | null;
   // 1-5 rating of lasting/reusable value (backend/core/importance.py) — null
   // for posts saved before this feature existed or unscored so far.
@@ -83,6 +89,29 @@ export interface Collection {
   post_ids: string[];
   created_at: string;
   updated_at: string;
+}
+
+// Mirrors backend's import_jobs table — a background run of
+// scripts/import_saved_instagram.py (or its _by_collection sibling),
+// kicked off from /import. See backend/api.py's /instagram-export/* routes.
+export interface ImportJob {
+  id: string;
+  mode: "regular" | "by_collection";
+  priority_folder: string | null;
+  reverse_collections: 0 | 1;
+  export_filename: string | null;
+  status: "running" | "complete" | "failed";
+  log_tail: string;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+// Structured response from POST /instagram-export/preview.
+export interface InstagramExportPreview {
+  categories: { name: string; count: number }[];
+  total_raw_entries: number;
+  total_unique_posts: number;
 }
 
 export interface ExportPayload {

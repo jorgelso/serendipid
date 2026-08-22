@@ -9,6 +9,8 @@ import type {
   ChatThreadDetail,
   EloquenceOverridesResponse,
   ExportPayload,
+  ImportJob,
+  InstagramExportPreview,
   QueueStatusResponse,
   RatingTier,
   SearchHistoryEntry,
@@ -419,4 +421,66 @@ export async function fetchSearchHistory(limit = 2000): Promise<SearchHistoryRes
 // than propagate this promise's rejection.
 export async function logPostView(shortcode: string): Promise<{ success: boolean; shortcode: string }> {
   return request<{ success: boolean; shortcode: string }>(`/post/${shortcode}/view`, { method: "POST" });
+}
+
+// Instagram export import — powers /import. Deliberately distinct from
+// fetchExport()/import-restore concerns above: this ingests a fresh
+// Instagram "Download Your Information" export and runs it through the
+// full analysis pipeline (backend's /instagram-export/* routes), not a
+// SuperBrain-format backup restore.
+
+interface InstagramExportPreviewResponse extends InstagramExportPreview {
+  success: boolean;
+}
+
+const INSTAGRAM_EXPORT_PREVIEW_TIMEOUT_MS = 60 * 1000;
+
+export async function previewInstagramExport(exportData: unknown): Promise<InstagramExportPreview> {
+  return request<InstagramExportPreviewResponse>("/instagram-export/preview", {
+    method: "POST",
+    body: { export_data: exportData },
+    timeoutMs: INSTAGRAM_EXPORT_PREVIEW_TIMEOUT_MS,
+  });
+}
+
+interface ImportJobResponse {
+  success: boolean;
+  data: ImportJob;
+}
+
+interface ImportJobsResponse {
+  success: boolean;
+  count: number;
+  data: ImportJob[];
+}
+
+export async function createInstagramExportJob(params: {
+  exportData: unknown;
+  mode: "regular" | "by_collection";
+  priorityFolder?: string | null;
+  reverseCollections: boolean;
+}): Promise<ImportJob> {
+  const res = await request<ImportJobResponse>("/instagram-export/jobs", {
+    method: "POST",
+    body: {
+      export_data: params.exportData,
+      mode: params.mode,
+      priority_folder: params.priorityFolder ?? null,
+      reverse_collections: params.reverseCollections,
+    },
+    statusMessages: {
+      409: "An import job is already running — wait for it to finish before starting another.",
+    },
+  });
+  return res.data;
+}
+
+export async function fetchInstagramExportJob(jobId: string): Promise<ImportJob> {
+  const res = await request<ImportJobResponse>(`/instagram-export/jobs/${jobId}`);
+  return res.data;
+}
+
+export async function fetchInstagramExportJobs(): Promise<ImportJob[]> {
+  const res = await request<ImportJobsResponse>("/instagram-export/jobs");
+  return res.data;
 }

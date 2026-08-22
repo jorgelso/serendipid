@@ -339,6 +339,54 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: saved_order — reconstructed relative chronological rank
+        # for Instagram posts bulk-imported from an export JSON, where
+        # analyzed_at only reflects when the import script ran, not when the
+        # post was actually saved. Backfilled once via
+        # scripts/backfill_saved_order.py from each collection's
+        # newest-saved-first ordering in the export (reversed to
+        # oldest-first per category; categories themselves are NOT unified
+        # against each other — only within-category order is guaranteed
+        # correct). NULL means either "saved individually via the normal
+        # live pipeline" (analyzed_at is accurate for those, especially now
+        # that scripts/import_saved_instagram.py's --reverse-collections
+        # keeps future imports in order too) or "not covered by the
+        # backfill" — never coerced to a fake value.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN saved_order INTEGER DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # import_jobs — tracks a background run of scripts/import_saved_instagram.py
+        # (or its _by_collection sibling) kicked off from superbrain-web's
+        # /import page. Deliberately a separate table/prefix from
+        # /import & /import/file (which restore a SuperBrain-format /export
+        # backup, a completely different operation) — see api.py's
+        # /instagram-export/* routes. A run can take hours (rate-limited,
+        # one URL at a time), so it's spawned in a background thread and
+        # polled via GET /instagram-export/jobs/{id}, same shape as
+        # study_guide_collections' "create row, update as it progresses,
+        # poll" pattern.
+        try:
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS import_jobs (
+                    id                  TEXT PRIMARY KEY,
+                    mode                TEXT,
+                    priority_folder     TEXT,
+                    reverse_collections INTEGER DEFAULT 1,
+                    export_filename     TEXT,
+                    status              TEXT DEFAULT 'running',
+                    log_tail            TEXT DEFAULT '',
+                    error               TEXT,
+                    started_at          TEXT,
+                    finished_at         TEXT
+                )
+            """)
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # batch_jobs — resume state for ANALYSIS_MODE=batch (see main.py /
         # core/batch_processor.py). main.py runs as a subprocess and exits
         # right after submitting an OpenAI Batch API job, so everything
@@ -832,7 +880,7 @@ class Database:
         "shortcode, url, username, content_type, analyzed_at, updated_at, "
         "post_date, likes, thumbnail, title, summary, tags, music, category, "
         "language, is_hidden, analysis_version, media_files, importance, "
-        "enjoyment_rating, perceived_importance_rating, caption"
+        "enjoyment_rating, perceived_importance_rating, caption, saved_order"
     )
 
     def _row_to_dict(self, row):
@@ -1096,6 +1144,112 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error updating caption: {e}")
             return False
+
+    def update_saved_order(self, shortcode, order) -> bool:
+        """Set the reconstructed chronological save-order rank for an
+        existing post — used by scripts/backfill_saved_order.py."""
+        if not self.is_connected():
+            return False
+        try:
+            self._conn.execute(
+                "UPDATE analyses SET saved_order = ? WHERE shortcode = ?",
+                (order, shortcode),
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error updating saved_order: {e}")
+            return False
+
+    # ------------------------------------------------------------------
+    # import_jobs — background runs of scripts/import_saved_instagram.py
+    # (or _by_collection.py) kicked off from superbrain-web's /import page.
+    # See api.py's /instagram-export/* routes.
+    # ------------------------------------------------------------------
+
+    def create_import_job(self, job_id, mode, priority_folder, reverse_collections, export_filename):
+        """Create a new 'running' import job row. Returns the saved dict, or None on failure."""
+        if not self.is_connected():
+            return None
+        try:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "INSERT INTO import_jobs "
+                "(id, mode, priority_folder, reverse_collections, export_filename, status, started_at) "
+                "VALUES (?, ?, ?, ?, ?, 'running', ?)",
+                (job_id, mode, priority_folder, int(reverse_collections), export_filename, now)
+            )
+            self._conn.commit()
+            return self.get_import_job(job_id)
+        except Exception as e:
+            print(f"[WARNING]  Error creating import job: {e}")
+            return None
+
+    def update_import_job(self, job_id, **fields) -> bool:
+        """Generic column setter for an import job — used both to append to
+        log_tail as the subprocess streams output and to set the terminal
+        status/error/finished_at once it exits."""
+        if not self.is_connected() or not fields:
+            return False
+        try:
+            columns = ", ".join(f"{col} = ?" for col in fields)
+            values = list(fields.values()) + [job_id]
+            cur = self._conn.execute(f"UPDATE import_jobs SET {columns} WHERE id = ?", values)
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error updating import job: {e}")
+            return False
+
+    def get_import_job(self, job_id):
+        """Return a single import job row, or None."""
+        if not self.is_connected():
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT * FROM import_jobs WHERE id = ?", (job_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            print(f"[WARNING]  Error getting import job: {e}")
+            return None
+
+    def list_import_jobs(self, limit=20) -> list:
+        """Return the most recent import jobs, newest first."""
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT * FROM import_jobs ORDER BY started_at DESC LIMIT ?", (limit,)
+            )
+            return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error listing import jobs: {e}")
+            return []
+
+    def mark_stale_import_jobs_failed(self) -> int:
+        """Flip any job still 'running' from before the last server restart
+        to 'failed' — the OS subprocess dies with the parent process, so a
+        'running' row surviving a restart is always stale. The underlying
+        scripts/import_state.json resumable state isn't touched, so simply
+        starting a new job against the same export file picks up right
+        where it left off. Called once on backend startup. Returns the
+        number of rows updated."""
+        if not self.is_connected():
+            return 0
+        try:
+            now = datetime.utcnow().isoformat()
+            cur = self._conn.execute(
+                "UPDATE import_jobs SET status = 'failed', error = ?, finished_at = ? "
+                "WHERE status = 'running'",
+                ("Interrupted by server restart", now)
+            )
+            self._conn.commit()
+            return cur.rowcount
+        except Exception as e:
+            print(f"[WARNING]  Error marking stale import jobs failed: {e}")
+            return 0
 
     def update_importance(self, shortcode, importance) -> bool:
         """Set the importance score for an existing post and stamp it as
@@ -1536,14 +1690,20 @@ class Database:
     def get_recent_light(self, limit=50, offset=0, sort="recent"):
         """Return recent posts with only UI-essential fields (no analysis blobs).
 
-        sort: "recent" (default, analyzed_at DESC) or "importance" (importance
-        DESC, unscored posts last, analyzed_at DESC as tie-breaker).
+        sort: "recent" (default, analyzed_at DESC), "importance" (importance
+        DESC, unscored posts last, analyzed_at DESC as tie-breaker), or
+        "saved_order" (reconstructed chronological save order, oldest first
+        — posts covered by scripts/backfill_saved_order.py sort by
+        saved_order ASC, then every other post continues by analyzed_at ASC,
+        forming one continuous oldest-to-newest timeline).
         """
         if not self.is_connected():
             return []
         order_clause = (
             "ORDER BY importance IS NULL, importance DESC, analyzed_at DESC"
             if sort == "importance" else
+            "ORDER BY saved_order IS NULL, saved_order ASC, analyzed_at ASC"
+            if sort == "saved_order" else
             "ORDER BY analyzed_at DESC"
         )
         try:

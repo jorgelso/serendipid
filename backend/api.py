@@ -16,6 +16,7 @@ import sys
 import os
 import json
 import re
+import uuid
 import zipfile
 import io
 from datetime import datetime
@@ -83,6 +84,15 @@ def is_valid_api_token_format(token: str) -> bool:
     return len(token) == 8 and token.isalnum()
 
 TOKEN_FILE = Path(__file__).parent / "token.txt"
+
+# The port this API process itself listens on when run directly
+# (`python api.py`, the uvicorn.run() call at the bottom of this file) — also
+# hardcoded to the same value in start.py's PORT constant (5000 collides with
+# macOS AirPlay Receiver, see start.py's comment). Not configurable via env
+# var today. Kept as one named constant so the /instagram-export/jobs
+# subprocess spawner (below) builds its --server-url from the same source of
+# truth instead of a second hardcoded literal.
+API_SELF_PORT = 5050
 
 # Ceiling on how long a single Instagram analysis subprocess (main.py) is allowed
 # to run before being force-killed. Default raised from the original 600s (10 min)
@@ -245,6 +255,13 @@ if db.is_connected():
     recovered = db.recover_interrupted_items()
     if recovered > 0:
         logger.info(f"🔄 Recovered {recovered} interrupted items from previous session")
+
+    # Any /instagram-export/jobs row still 'running' from before this process
+    # started is stale — its subprocess died with the previous process. The
+    # underlying import_state.json resume state isn't affected.
+    stale_jobs = db.mark_stale_import_jobs_failed()
+    if stale_jobs > 0:
+        logger.info(f"🔄 Marked {stale_jobs} stale import job(s) as failed (server restarted mid-run)")
 
 # Check for any OpenAI batch jobs (ANALYSIS_MODE=batch) that completed while
 # this backend was offline. Runs once here (not periodically — batch mode is
@@ -1108,7 +1125,7 @@ async def check_cache(shortcode: str, token: str = Depends(verify_token)):
 async def get_recent_analyses(
     limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    sort: str = Query(default="recent", pattern="^(recent|importance)$"),
+    sort: str = Query(default="recent", pattern="^(recent|importance|saved_order)$"),
     token: str = Depends(verify_token),
 ):
     """
@@ -1119,6 +1136,9 @@ async def get_recent_analyses(
     - sort=recent (default): most recently analyzed first
     - sort=importance: highest importance score first (unscored posts last),
       analyzed_at as tie-breaker — see core/importance.py
+    - sort=saved_order: reconstructed chronological save order (oldest
+      first), then analyzed_at for posts outside the backfill — see
+      scripts/backfill_saved_order.py
     - Default limit: 50, max: 1000
     - Requires API authentication
     """
@@ -2560,6 +2580,242 @@ async def export_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Instagram export import (superbrain-web's /import page)
+#
+# Deliberately a distinct URL prefix from /import & /import/file below —
+# those restore a SuperBrain-format /export backup (ImportData/
+# _process_import_data), a completely different operation from ingesting a
+# fresh Instagram "Download Your Information" export and running it through
+# the full analysis pipeline over minutes/hours. Reuses
+# scripts/import_saved_instagram.py's parsing/reversal logic directly
+# (sibling-module import, same trick import_saved_instagram_by_collection.py
+# already uses) rather than re-implementing it here.
+# ─────────────────────────────────────────────────────────────────────────
+
+_INSTAGRAM_EXPORT_SCRIPTS_DIR = Path(__file__).parent / "scripts"
+_INSTAGRAM_EXPORT_UPLOADS_DIR = Path(__file__).parent / "uploads"
+_INSTAGRAM_EXPORT_LOG_MAX_CHARS = 50_000
+
+sys.path.insert(0, str(_INSTAGRAM_EXPORT_SCRIPTS_DIR))
+import import_saved_instagram as _ig_import  # noqa: E402
+
+
+class InstagramExportPreviewRequest(BaseModel):
+    # Instagram's "Download Your Information" export root can be a list of
+    # collections (the shape confirmed against a real saved_collections.json
+    # — see extract_meta_label_values_shape()) or, for some other export
+    # variants, a dict — see _known_shape_items()'s Shape A/B. Never assume dict.
+    export_data: Any
+
+
+class InstagramExportJobCreate(BaseModel):
+    export_data: Any
+    mode: str = "regular"  # "regular" | "by_collection"
+    priority_folder: Optional[str] = None
+    reverse_collections: bool = True
+
+
+def _instagram_export_preview(export_data) -> dict:
+    """Parse export_data the same way parse_export() would, without writing
+    a permanent file — used by POST /instagram-export/preview so the web UI
+    can sanity-check category counts before committing to an hours-long
+    import job."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+        json.dump(export_data, tmp)
+        tmp_path = Path(tmp.name)
+    try:
+        records = _ig_import.parse_export(tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    url_to_folders = _ig_import.group_by_url(records)
+    folder_counts: Dict[str, int] = {}
+    for folders in url_to_folders.values():
+        for f in folders:
+            folder_counts[f] = folder_counts.get(f, 0) + 1
+
+    categories = [
+        {"name": folder, "count": count}
+        for folder, count in sorted(folder_counts.items(), key=lambda kv: -kv[1])
+    ]
+    return {
+        "categories": categories,
+        "total_raw_entries": len(records),
+        "total_unique_posts": len(url_to_folders),
+    }
+
+
+def _run_instagram_export_job(
+    job_id: str, json_path: Path, mode: str,
+    priority_folder: Optional[str], reverse_collections: bool,
+):
+    """Spawns import_saved_instagram.py (or its _by_collection sibling) as a
+    subprocess and streams its output into import_jobs.log_tail — same
+    Popen shape as the /analyze inline subprocess spawn above, but run from
+    a plain background thread (not asyncio.to_thread) since a full import
+    can take hours, far past what's reasonable to hold a request thread
+    open for. Started by POST /instagram-export/jobs, below.
+    """
+    db = get_db()
+    script_name = (
+        "import_saved_instagram_by_collection.py" if mode == "by_collection"
+        else "import_saved_instagram.py"
+    )
+    cmd = [
+        sys.executable, script_name, str(json_path),
+        "--server-url", f"http://localhost:{API_SELF_PORT}",
+        "--reverse-collections" if reverse_collections else "--no-reverse-collections",
+    ]
+    if mode == "by_collection" and priority_folder:
+        cmd += ["--priority-folder", priority_folder]
+
+    log_lines: List[str] = []
+
+    def _persist_log():
+        db.update_import_job(job_id, log_tail="".join(log_lines)[-_INSTAGRAM_EXPORT_LOG_MAX_CHARS:])
+
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=str(_INSTAGRAM_EXPORT_SCRIPTS_DIR),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+            # PYTHONUNBUFFERED=1 is required here: without it, a child
+            # Python process whose stdout is a pipe (not a TTY)
+            # block-buffers, so the script's print() progress lines
+            # wouldn't reach log_tail until the buffer filled or the
+            # process exited — see _run_rescan_subprocess()'s docstring
+            # above for the same issue.
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"},
+            bufsize=1,
+        )
+        last_persist = time.time()
+        for line in proc.stdout:
+            log_lines.append(line)
+            if time.time() - last_persist > 2:
+                _persist_log()
+                last_persist = time.time()
+        proc.wait()
+        _persist_log()
+
+        now = datetime.utcnow().isoformat()
+        if proc.returncode == 0:
+            db.update_import_job(job_id, status="complete", finished_at=now)
+        else:
+            db.update_import_job(
+                job_id, status="failed", finished_at=now,
+                error=f"Script exited with code {proc.returncode}",
+            )
+    except Exception as e:
+        logger.error(f"Instagram export job {job_id} failed to run: {e}")
+        db.update_import_job(
+            job_id, status="failed", finished_at=datetime.utcnow().isoformat(), error=str(e),
+        )
+
+
+@app.post("/instagram-export/preview")
+async def preview_instagram_export(req: InstagramExportPreviewRequest, token: str = Depends(verify_token)):
+    """
+    Parse an uploaded Instagram "Download Your Information" export and
+    return per-category post counts, without starting an import — lets
+    superbrain-web's /import page show a sanity check (and populate the
+    priority-folder dropdown for by-collection mode) before committing to a
+    run that can take hours.
+
+    Requires API authentication.
+    """
+    try:
+        preview = await asyncio.to_thread(_instagram_export_preview, req.export_data)
+        return {"success": True, **preview}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse export: {e}")
+
+
+@app.post("/instagram-export/jobs")
+async def create_instagram_export_job(req: InstagramExportJobCreate, token: str = Depends(verify_token)):
+    """
+    Kick off a background run of import_saved_instagram.py (mode=regular) or
+    import_saved_instagram_by_collection.py (mode=by_collection, using
+    priority_folder) against an uploaded export. Returns IMMEDIATELY with
+    the created (status='running') job — the script runs for potentially
+    hours (deliberately rate-limited, one /analyze call at a time), so this
+    never blocks the request thread. Poll GET /instagram-export/jobs/{id}
+    for status and a rolling log tail.
+
+    Only one job may run at a time (409 otherwise) — both scripts share the
+    same resumable scripts/import_state.json, which isn't safe for
+    concurrent writers.
+
+    Requires API authentication.
+    """
+    try:
+        if req.mode not in {"regular", "by_collection"}:
+            raise HTTPException(status_code=400, detail="mode must be 'regular' or 'by_collection'.")
+
+        db = get_db()
+        for job in db.list_import_jobs(limit=5):
+            if job["status"] == "running":
+                raise HTTPException(status_code=409, detail="An import job is already running.")
+
+        job_id = uuid.uuid4().hex
+        _INSTAGRAM_EXPORT_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+        json_path = _INSTAGRAM_EXPORT_UPLOADS_DIR / f"{job_id}.json"
+        json_path.write_text(json.dumps(req.export_data), encoding="utf-8")
+
+        job = db.create_import_job(
+            job_id, req.mode, req.priority_folder, req.reverse_collections, json_path.name,
+        )
+        if not job:
+            raise HTTPException(status_code=500, detail="Could not create the import job.")
+
+        threading.Thread(
+            target=_run_instagram_export_job,
+            args=(job_id, json_path, req.mode, req.priority_folder, req.reverse_collections),
+            daemon=True,
+        ).start()
+
+        return {"success": True, "data": job}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/instagram-export/jobs")
+async def list_instagram_export_jobs(token: str = Depends(verify_token)):
+    """
+    List recent Instagram-export import jobs, newest first.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        jobs = db.list_import_jobs(limit=20)
+        return {"success": True, "count": len(jobs), "data": jobs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/instagram-export/jobs/{job_id}")
+async def get_instagram_export_job(job_id: str, token: str = Depends(verify_token)):
+    """
+    Poll a single Instagram-export import job's status and log tail.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        job = db.get_import_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Import job not found.")
+        return {"success": True, "data": job}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/import")
 async def import_data(
     data: dict,
@@ -3009,6 +3265,6 @@ async def delete_instagram_credentials(token: str = Depends(verify_token)):
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting SuperBrain API...")
-    print("📖 API Docs: http://localhost:5050/docs")
-    print("🔍 Interactive: http://localhost:5050/redoc")
-    uvicorn.run("api:app", host="0.0.0.0", port=5050, reload=False)
+    print(f"📖 API Docs: http://localhost:{API_SELF_PORT}/docs")
+    print(f"🔍 Interactive: http://localhost:{API_SELF_PORT}/redoc")
+    uvicorn.run("api:app", host="0.0.0.0", port=API_SELF_PORT, reload=False)
