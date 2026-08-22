@@ -47,7 +47,7 @@ from core.link_checker import validate_link
 from core.database import get_db
 from core.categories import CATEGORY_PROMPT
 from core.languages import LANGUAGE_PROMPT
-from core.importance import parse_importance, apply_trusted_creator_boost, build_importance_prompt
+from core.importance import parse_importance, parse_importance_reason, apply_trusted_creator_boost, build_importance_prompt
 from core.media_store import relocate_to_media_store
 from core.summary_parser import (
     parse_summary, apply_music_override, build_final_summary_prompt,
@@ -124,18 +124,25 @@ def score_importance(title, summary_text, tags, category, username):
     single-purpose prompt follows the rubric far more consistently than
     importance being the 7th field competing for attention in one big
     structured-summary prompt — and generate_importance_text() pins the
-    model to OpenAI specifically rather than whatever the latency-ranked
-    router hands back for that request, for the same consistency reason.
+    model to GPT-5.6 Luna specifically rather than whatever the
+    latency-ranked router hands back for that request, for the same
+    consistency reason.
+
+    Returns (importance, importance_reason) — the model's justification is
+    mandatory (see IMPORTANCE_PROMPT) and stored alongside the score so a
+    surprising rating can be checked against its own stated reasoning.
     """
     from core.model_router import get_router
     prompt = build_importance_prompt(title, summary_text, tags, category)
     try:
         response = get_router().generate_importance_text(prompt)
         importance = parse_importance(response) if response else None
+        reason = parse_importance_reason(response) if response else None
     except Exception as e:
         print(f"⚠️  Importance scoring failed: {e}")
         importance = None
-    return apply_trusted_creator_boost(importance, username)
+        reason = None
+    return apply_trusted_creator_boost(importance, username, reason)
 
 
 def parse_info_txt(info_files):
@@ -359,7 +366,7 @@ def run_youtube_analysis(url: str, shortcode: str, db):
 
     title, summary_text, tags, music, category, language = parse_summary(raw)
     yt_channel = result.get('channel', '')
-    importance = score_importance(title, summary_text, tags, category, yt_channel)
+    importance, importance_reason = score_importance(title, summary_text, tags, category, yt_channel)
 
     # Use upload date scraped directly from YouTube page (always accurate)
     yt_post_date = result.get('post_date')
@@ -376,6 +383,7 @@ def run_youtube_analysis(url: str, shortcode: str, db):
         category=category,
         language=language,
         importance=importance,
+        importance_reason=importance_reason,
         visual_analysis='',
         audio_transcription='',
         text_analysis=raw,
@@ -416,7 +424,7 @@ def run_webpage_analysis(url: str, shortcode: str, db):
 
     title, summary_text, tags, music, category, language = parse_summary(raw)
     webpage_author = result.get('author', '')
-    importance = score_importance(title, summary_text, tags, category, webpage_author)
+    importance, importance_reason = score_importance(title, summary_text, tags, category, webpage_author)
     # Use on-page title as fallback if AI did not extract one
     if not title and page_title:
         title = page_title
@@ -433,6 +441,7 @@ def run_webpage_analysis(url: str, shortcode: str, db):
         category=category,
         language=language,
         importance=importance,
+        importance_reason=importance_reason,
         visual_analysis='',
         audio_transcription='',
         text_analysis=raw,
@@ -909,7 +918,7 @@ def main():
         post_date = _info["post_date"]
         caption = _info["caption"]
 
-        importance = score_importance(title, summary_text, tags, category, username)
+        importance, importance_reason = score_importance(title, summary_text, tags, category, username)
 
         # Save to database
         print_section("💾 Saving to Database")
@@ -971,6 +980,7 @@ def main():
         category=category,
         language=language,
         importance=importance,
+        importance_reason=importance_reason,
         media_files=media_files,
         visual_analysis=visual_text,
         audio_transcription=audio_text,

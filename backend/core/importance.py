@@ -11,9 +11,14 @@ Unlike category/language, importance is scored in its own dedicated LLM call
 from main.py's score_importance()) rather than as one field spliced into the
 combined title/summary/tags/... prompt — a single-purpose prompt follows the
 rubric more consistently, and generate_importance_text() pins the model to
-OpenAI specifically instead of whatever the latency-ranked router picks.
-The model's raw output is parsed back into a validated value with
-parse_importance().
+GPT-5.6 Luna specifically (see IMPORTANCE_MODEL in core/model_router.py)
+instead of whatever the latency-ranked router picks.
+The model's raw output is a mandatory "<number>: <justification>" line,
+parsed back into a validated score with parse_importance() and the
+justification text with parse_importance_reason() — both are stored
+(analyses.importance / analyses.importance_reason) so a low or surprising
+score can be checked against the model's own stated reasoning without
+re-running it.
 """
 
 import re
@@ -130,7 +135,11 @@ subject matter, and not by format:
   not just reporting on one situation — and should be scored on that
   insight per the criteria above.
 
-Output just the number, optionally with a short justification.]"""
+Output in exactly this format, on one line: a single digit 1-5, then a
+colon, then a short justification (1-2 sentences) explaining why this
+specific score applies — e.g. "4: Names a specific negotiating tactic and
+explains why it works, but doesn't walk through the full mechanism." The
+justification is required, not optional — never output the number alone.]"""
 
 
 def build_importance_prompt(title: str, summary: str, tags, category) -> str:
@@ -154,13 +163,31 @@ CATEGORY: {category_str}
 def parse_importance(raw: str):
     """Parse a raw IMPORTANCE field into an int 1-5, or None if absent/unparseable.
 
-    Accepts a bare number, or a number followed by justification text (e.g.
-    "4 - solid technique but only partially explained").
+    Accepts a bare number, or (the now-mandatory format, see IMPORTANCE_PROMPT)
+    a number followed by ": <justification>" (e.g.
+    "4: solid technique but only partially explained").
     """
     if not raw:
         return None
     m = re.search(r'[1-5]', raw)
     return int(m.group(0)) if m else None
+
+
+def parse_importance_reason(raw: str):
+    """Parse the justification text that follows the leading 1-5 digit, or
+    None if there's no score to anchor on or nothing follows it.
+
+    Expects IMPORTANCE_PROMPT's mandated "<number>: <justification>" format
+    but tolerates a missing/different separator by taking whatever text
+    follows the first digit, stripped of leading punctuation/whitespace.
+    """
+    if not raw:
+        return None
+    m = re.search(r'[1-5]', raw)
+    if not m:
+        return None
+    reason = raw[m.end():].strip().lstrip(':-–—.,) ').strip()
+    return reason or None
 
 
 # Usernames whose posts the user has manually confirmed are consistently
@@ -173,19 +200,28 @@ TRUSTED_CREATORS = {
 }
 
 
-def apply_trusted_creator_boost(importance, username: str):
+def apply_trusted_creator_boost(importance, username: str, reason: str = None):
     """Floor (never lower) a trusted creator's score at 4.
 
     A post that already scored 5 on its own merits stays a 5 — this only
     rescues a trusted creator's post from a low per-post score, it doesn't
     cap or override a genuinely high one. No-op if importance is None (the
     model didn't produce a parseable score) or username isn't trusted.
+
+    Returns (importance, reason). When the floor actually changes the score,
+    a note is appended to `reason` — otherwise the stored justification
+    would describe a score the post no longer has.
     """
     if importance is None or not username:
-        return importance
-    if username.strip().lower() in TRUSTED_CREATORS:
-        return max(importance, 4)
-    return importance
+        return importance, reason
+    key = username.strip().lower()
+    if key in TRUSTED_CREATORS:
+        boosted = max(importance, 4)
+        if boosted != importance:
+            note = f"Floored to {boosted}/5 — trusted creator ({TRUSTED_CREATORS[key]})."
+            reason = f"{reason} {note}".strip() if reason else note
+        return boosted, reason
+    return importance, reason
 
 
 def score_and_stamp_importance(db, shortcode: str, title: str, summary: str, tags, category, username: str):
@@ -210,7 +246,8 @@ def score_and_stamp_importance(db, shortcode: str, title: str, summary: str, tag
     if importance is None:
         return None
 
-    importance = apply_trusted_creator_boost(importance, username)
-    if not db.update_importance(shortcode, importance):
+    reason = parse_importance_reason(response)
+    importance, reason = apply_trusted_creator_boost(importance, username, reason)
+    if not db.update_importance(shortcode, importance, reason):
         return None
     return importance
