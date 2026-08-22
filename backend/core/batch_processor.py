@@ -37,8 +37,8 @@ import json
 import threading
 
 from core.database import get_db
-from core.model_router import get_router
-from core.importance import build_importance_prompt, parse_importance, apply_trusted_creator_boost
+from core.model_router import get_router, IMPORTANCE_MODEL
+from core.importance import build_importance_prompt, parse_importance, parse_importance_reason, apply_trusted_creator_boost
 from core.summary_parser import parse_summary, apply_music_override, build_final_summary_prompt
 
 _lock = threading.Lock()
@@ -227,12 +227,11 @@ def _advance_summary_phase(db, job: dict) -> bool:
     importance_prompt = build_importance_prompt(title, summary, tags, category)
     embedding_text = f"{title}\n\n{summary}\n\nTags: {', '.join(tags)}"
 
-    # Uses the router's OPENAI_TEXT_MODEL default, matching the immediate
-    # pipeline's generate_importance_text() — importance scoring is pinned to
-    # one specific model (rather than the latency-ranked order) so judgment
-    # stays consistent across posts, not because it needs a different model
-    # from everything else.
-    importance_req = router.build_batch_chat_request(shortcode, importance_prompt)
+    # Pinned to IMPORTANCE_MODEL, matching the immediate pipeline's
+    # generate_importance_text() — importance scoring uses one specific
+    # model (rather than the latency-ranked order, and independent of
+    # OPENAI_TEXT_MODEL) so judgment stays consistent across posts.
+    importance_req = router.build_batch_chat_request(shortcode, importance_prompt, model_id=IMPORTANCE_MODEL)
     embedding_req = router.build_batch_embedding_request(shortcode, embedding_text)
     importance_batch_id = router.submit_openai_batch([importance_req], endpoint="/v1/chat/completions")
     embedding_batch_id = router.submit_openai_batch([embedding_req], endpoint="/v1/embeddings")
@@ -268,13 +267,15 @@ def _finalize_scoring_phase(db, job: dict) -> bool:
     state = json.loads(job["state_json"] or "{}")
 
     importance = None
+    importance_reason = None
     if importance_status.get("status") in _TERMINAL_OK:
         results = router.get_batch_results(job["importance_batch_id"])
         row = next((r for r in results if r.get("custom_id") == shortcode), None)
         raw = router.extract_batch_chat_text(row) if row else None
         if raw:
             importance = parse_importance(raw)
-    importance = apply_trusted_creator_boost(importance, state.get("username", ""))
+            importance_reason = parse_importance_reason(raw)
+    importance, importance_reason = apply_trusted_creator_boost(importance, state.get("username", ""), importance_reason)
 
     embedding = None
     if embedding_status.get("status") in _TERMINAL_OK:
@@ -293,6 +294,7 @@ def _finalize_scoring_phase(db, job: dict) -> bool:
         category=state.get("category", []),
         language=state.get("language", []),
         importance=importance,
+        importance_reason=importance_reason,
         media_files=state.get("media_files", []),
         visual_analysis=state.get("visual_text", ""),
         audio_transcription=state.get("audio_text", ""),

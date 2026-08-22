@@ -72,14 +72,23 @@ RANKING_WEIGHTS = {
 }
 
 # The OpenAI model used for the router's primary "openai" provider slot —
-# text, vision, chat, batch-mode summary requests, and importance scoring
-# (see generate_importance_text()) all resolve to this one value, so
-# switching models is a single config change rather than several. GPT-4.1
-# and GPT-5.6 Luna are both known-good here (both support vision, both
-# handled correctly by _openai_chat_params() below); other OpenAI chat
-# models should work too as long as they accept the same request shape.
-# Override with OPENAI_TEXT_MODEL=gpt-5.6-luna (or similar) to switch.
+# text, vision, chat, and batch-mode summary requests all resolve to this
+# one value, so switching models is a single config change rather than
+# several. GPT-4.1 and GPT-5.6 Luna are both known-good here (both support
+# vision, both handled correctly by _openai_chat_params() below); other
+# OpenAI chat models should work too as long as they accept the same
+# request shape. Override with OPENAI_TEXT_MODEL=gpt-5.6-luna (or similar)
+# to switch. NOTE: importance scoring does NOT use this — see
+# IMPORTANCE_MODEL below.
 OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4.1")
+
+# Pinned model for importance scoring specifically — independent of
+# OPENAI_TEXT_MODEL, same reasoning as core/study_guide.py's
+# STUDY_GUIDE_MODEL pin. Importance scoring needs a specific known-good
+# model for consistent judgment across posts, not whichever model
+# OPENAI_TEXT_MODEL currently resolves to for the rest of the app. Change
+# here, not via an env var, if this ever needs to move off GPT-5.6 Luna.
+IMPORTANCE_MODEL = "gpt-5.6-luna"
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  MODEL REGISTRY
@@ -1257,26 +1266,30 @@ class ModelRouter:
 
     def generate_importance_text(self, prompt: str) -> str:
         """
-        Score a post's importance using OPENAI_TEXT_MODEL specifically,
-        bypassing the latency-ranked fallback order that generate_text() uses.
-        Importance needs *consistent* judgment across posts more than it needs
-        speed — letting the provider drift to whichever model answers fastest
-        at that moment (as happens for every other field in the combined
-        summary prompt) produced visibly inconsistent scores between posts of
-        comparable depth. Falls back to the standard ranked text order only if
-        OpenAI is unavailable or fails, so scoring doesn't hard-break for
-        setups without an OpenAI key.
+        Score a post's importance using IMPORTANCE_MODEL (GPT-5.6 Luna)
+        specifically, bypassing the latency-ranked fallback order that
+        generate_text() uses. Importance needs *consistent* judgment across
+        posts more than it needs speed — letting the provider drift to
+        whichever model answers fastest at that moment (as happens for every
+        other field in the combined summary prompt) produced visibly
+        inconsistent scores between posts of comparable depth. Pinned
+        independently of OPENAI_TEXT_MODEL (see IMPORTANCE_MODEL above),
+        same reasoning as core/study_guide.py's STUDY_GUIDE_MODEL pin.
+        Falls back to the standard ranked text order only if OpenAI is
+        unavailable or fails, so scoring doesn't hard-break for setups
+        without an OpenAI key.
+
+        Deliberately does not call _record_success/_record_failure — mixing
+        IMPORTANCE_MODEL's stats into "openai_gpt41"'s ranking entry (which
+        tracks whatever OPENAI_TEXT_MODEL actually resolves to, a different
+        model) would misattribute them. Same trap documented on
+        generate_openai_only_text() below.
         """
         if self._is_available("openai_gpt41"):
-            t0 = time.time()
             try:
-                result = self._openai_text(OPENAI_TEXT_MODEL, prompt)
-                self._record_success("openai_gpt41", time.time() - t0)
-                return result
+                return self._openai_text(IMPORTANCE_MODEL, prompt)
             except Exception as e:
-                status = 429 if "429" in str(e) else 0
-                self._record_failure("openai_gpt41", str(e), status_code=status)
-                print("  ✗ [openai_gpt41] importance scoring failed, falling back to ranked order …", flush=True)
+                print(f"  ✗ [{IMPORTANCE_MODEL}] importance scoring failed ({e}), falling back to ranked order …", flush=True)
         return self.generate_text(prompt)
 
     def generate_openai_only_text(self, prompt: str, model: str, max_tokens: int = 4000, timeout: int = 60) -> str:

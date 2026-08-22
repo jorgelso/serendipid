@@ -20,6 +20,10 @@ export interface Post {
   // 1-5 rating of lasting/reusable value (backend/core/importance.py) — null
   // for posts saved before this feature existed or unscored so far.
   importance: number | null;
+  // The model's justification for the importance score above (now a
+  // mandatory part of its response, not optional) — null for posts scored
+  // before this was tracked, or where importance itself is null.
+  importance_reason: string | null;
   thumbnail: string | null;
   title: string | null;
   summary: string | null;

@@ -53,7 +53,7 @@ _load_env_file()
 from core.database import get_db
 from core.rescan_plan import decide_rescan_plan
 from core.importance import (
-    build_importance_prompt, parse_importance, apply_trusted_creator_boost,
+    build_importance_prompt, parse_importance, parse_importance_reason, apply_trusted_creator_boost,
     score_and_stamp_importance,
 )
 from core.summary_parser import parse_summary, apply_music_override
@@ -364,8 +364,10 @@ def _rescan_instagram_sync(db, row: dict) -> int:
     except Exception as e:
         print(f"  ⚠️  [{shortcode}] Importance scoring failed: {e}")
         importance_raw = None
-    importance = apply_trusted_creator_boost(
-        parse_importance(importance_raw) if importance_raw else None, state["username"]
+    importance, importance_reason = apply_trusted_creator_boost(
+        parse_importance(importance_raw) if importance_raw else None,
+        state["username"],
+        parse_importance_reason(importance_raw) if importance_raw else None,
     )
 
     embedding = None
@@ -382,6 +384,7 @@ def _rescan_instagram_sync(db, row: dict) -> int:
         content_type="instagram", thumbnail=state["thumbnail"],
         source_hashtags=state["source_hashtags"], embedding=embedding,
         language=language, media_files=state["media_files"], importance=importance,
+        importance_reason=importance_reason,
         model_used=router.last_model_used, transcription_backend=state["transcription_backend"],
         caption=state["caption"],
     )
@@ -407,8 +410,10 @@ def _rescan_youtube_or_webpage_sync(db, row: dict) -> int:
     except Exception as e:
         print(f"  ⚠️  [{shortcode}] Importance scoring failed: {e}")
         importance_raw = None
-    importance = apply_trusted_creator_boost(
-        parse_importance(importance_raw) if importance_raw else None, author
+    importance, importance_reason = apply_trusted_creator_boost(
+        parse_importance(importance_raw) if importance_raw else None,
+        author,
+        parse_importance_reason(importance_raw) if importance_raw else None,
     )
     embedding = None
     try:
@@ -419,6 +424,7 @@ def _rescan_youtube_or_webpage_sync(db, row: dict) -> int:
     saved = db.save_analysis(
         shortcode=shortcode, url=url, username=author, title=title, summary=summary,
         tags=tags, music=music, category=category, language=language, importance=importance,
+        importance_reason=importance_reason,
         visual_analysis="", audio_transcription="", text_analysis=raw,
         content_type=content_type, thumbnail=result.get("thumbnail", ""),
         embedding=embedding, post_date=result.get("post_date"),

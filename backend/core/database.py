@@ -271,6 +271,19 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: add importance_reason — the model's justification for
+        # the importance score above (see core/importance.py's
+        # IMPORTANCE_PROMPT, which now requires a justification alongside
+        # the 1-5 number rather than treating it as optional). NULL for
+        # posts scored before this was tracked; not a CURRENT_ANALYSIS_VERSION
+        # bump on its own since the score itself is unchanged, only whether
+        # its reasoning is retained.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN importance_reason TEXT DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Migration: add model_used — the AI Model Router key (e.g.
         # "openai_gpt41", "groq_llama33_70b") that generated this post's
         # title/summary/tags. Empty for posts saved before this was tracked,
@@ -1025,7 +1038,7 @@ class Database:
                       source_hashtags=None, embedding=None, analysis_version=None,
                       language=None, media_files=None, importance=None,
                       model_used=None, transcription_backend=None, caption=None,
-                      date_saved=None):
+                      date_saved=None, importance_reason=None):
         """Insert or update an analysis record. Returns True on success.
 
         source_hashtags: original hashtags from the source platform (e.g. an
@@ -1052,6 +1065,12 @@ class Database:
         importance: 1-5 rating of lasting/reusable value (see
         core/importance.py), or None if unscored/unparseable — left NULL
         rather than guessed, same reasoning as language.
+
+        importance_reason: the model's justification for the importance
+        score above, or None if unscored/unparseable. Same protect-from-
+        blanking treatment as importance itself (see the ON CONFLICT clause
+        below) — a rescan that skips re-scoring must not wipe a prior
+        justification.
 
         model_used: AI Model Router key that generated this post's summary
         (e.g. "openai_gpt41"), or None/"" if not tracked for this call site.
@@ -1128,8 +1147,8 @@ class Database:
                          thumbnail, title, summary, tags, music, category,
                          visual_analysis, audio_transcription, text_analysis, source_hashtags, embedding,
                          analysis_version, language, media_files, importance, model_used, transcription_backend,
-                         caption, date_saved)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         caption, date_saved, importance_reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(shortcode) DO UPDATE SET
                         url                   = excluded.url,
                         username              = excluded.username,
@@ -1155,12 +1174,13 @@ class Database:
                         model_used            = excluded.model_used,
                         transcription_backend = excluded.transcription_backend,
                         caption               = CASE WHEN excluded.caption != '' THEN excluded.caption ELSE analyses.caption END,
-                        date_saved            = CASE WHEN excluded.date_saved IS NOT NULL THEN excluded.date_saved ELSE analyses.date_saved END
+                        date_saved            = CASE WHEN excluded.date_saved IS NOT NULL THEN excluded.date_saved ELSE analyses.date_saved END,
+                        importance_reason     = CASE WHEN excluded.importance_reason IS NOT NULL THEN excluded.importance_reason ELSE analyses.importance_reason END
                 """, (shortcode, url, username, content_type, now, now, post_date, likes,
                       thumbnail, title, summary, tags_json, music, category_json,
                       visual_analysis, audio_transcription, text_analysis, source_hashtags_json, embedding_json,
                       version, language_json, media_files_json, importance,
-                      model_used or "", transcription_backend or "", caption or "", date_saved))
+                      model_used or "", transcription_backend or "", caption or "", date_saved, importance_reason))
 
                 # Restore any eloquence score stashed by hard_delete_post() (force
                 # re-analysis) — see that method and eloquence_stash's comment in
@@ -1326,19 +1346,19 @@ class Database:
             print(f"[WARNING]  Error marking stale import jobs failed: {e}")
             return 0
 
-    def update_importance(self, shortcode, importance) -> bool:
-        """Set the importance score for an existing post and stamp it as
-        reviewed under CURRENT_ANALYSIS_VERSION — used by the backfill
-        script so it doesn't need to re-run full analysis. Bumping the
-        version here is what clears the post from the 'needs_review' queue
-        the version-6 bump otherwise flagged it into."""
+    def update_importance(self, shortcode, importance, importance_reason=None) -> bool:
+        """Set the importance score (and its justification) for an existing
+        post and stamp it as reviewed under CURRENT_ANALYSIS_VERSION — used
+        by the backfill script so it doesn't need to re-run full analysis.
+        Bumping the version here is what clears the post from the
+        'needs_review' queue the version-6 bump otherwise flagged it into."""
         if not self.is_connected():
             return False
         try:
             with self._write_lock:
                 self._conn.execute(
-                    "UPDATE analyses SET importance = ?, analysis_version = ? WHERE shortcode = ?",
-                    (importance, CURRENT_ANALYSIS_VERSION, shortcode),
+                    "UPDATE analyses SET importance = ?, importance_reason = ?, analysis_version = ? WHERE shortcode = ?",
+                    (importance, importance_reason, CURRENT_ANALYSIS_VERSION, shortcode),
                 )
                 self._conn.commit()
             return True

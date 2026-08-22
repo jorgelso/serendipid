@@ -29,8 +29,8 @@ import threading
 from collections import defaultdict
 
 from core.database import get_db
-from core.model_router import get_router
-from core.importance import build_importance_prompt, parse_importance, apply_trusted_creator_boost
+from core.model_router import get_router, IMPORTANCE_MODEL
+from core.importance import build_importance_prompt, parse_importance, parse_importance_reason, apply_trusted_creator_boost
 from core.summary_parser import parse_summary
 
 _lock = threading.Lock()
@@ -131,15 +131,15 @@ def _advance_summary_group(db, summary_batch_id: str, jobs: list):
         resolved.append((job, state))
 
     if resolved:
-        # Uses the router's OPENAI_TEXT_MODEL default, matching the immediate
-        # pipeline's generate_importance_text() — importance scoring is pinned to
-        # one specific model (rather than the latency-ranked order) so judgment
-        # stays consistent across posts, not because it needs a different model
-        # from everything else.
+        # Pinned to IMPORTANCE_MODEL, matching the immediate pipeline's
+        # generate_importance_text() — importance scoring uses one specific
+        # model (rather than the latency-ranked order, and independent of
+        # OPENAI_TEXT_MODEL) so judgment stays consistent across posts.
         importance_reqs = [
             router.build_batch_chat_request(
                 job["shortcode"],
                 build_importance_prompt(state["title"], state["summary_text"], state["tags"], state["category"]),
+                model_id=IMPORTANCE_MODEL,
             ) for job, state in resolved
         ]
         embedding_reqs = [
@@ -187,12 +187,14 @@ def _finalize_scoring_group(db, importance_batch_id: str, embedding_batch_id: st
         state = json.loads(job["state_json"] or "{}")
 
         importance = None
+        importance_reason = None
         row = importance_results.get(shortcode)
         if row:
             raw = router.extract_batch_chat_text(row)
             if raw:
                 importance = parse_importance(raw)
-        importance = apply_trusted_creator_boost(importance, state.get("username", ""))
+                importance_reason = parse_importance_reason(raw)
+        importance, importance_reason = apply_trusted_creator_boost(importance, state.get("username", ""), importance_reason)
 
         embedding = None
         row = embedding_results.get(shortcode)
@@ -204,7 +206,7 @@ def _finalize_scoring_group(db, importance_batch_id: str, embedding_batch_id: st
             title=state.get("title", ""), summary=state.get("summary_text", ""),
             tags=state.get("tags", []), music=state.get("music", ""),
             category=state.get("category", []), language=state.get("language", []),
-            importance=importance, media_files=state.get("media_files", []),
+            importance=importance, importance_reason=importance_reason, media_files=state.get("media_files", []),
             visual_analysis=state.get("visual_text", ""), audio_transcription=state.get("audio_text", ""),
             text_analysis=state.get("text_text", ""), likes=state.get("likes", 0),
             post_date=state.get("post_date"), content_type=job.get("content_type") or "instagram",
