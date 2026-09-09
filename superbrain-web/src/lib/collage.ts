@@ -33,3 +33,15 @@ export function seededOffset(seed: number, range = 10): number {
 export function seededZIndex(seed: number, min = 1, max = 8): number {
   return min + Math.floor(seededFraction(seed * 1.37) * (max - min + 1));
 }
+
+// The seeded* helpers above all key off a numeric id (study guide
+// collections/guides use their integer DB id directly). Boards use a
+// uuid.hex string id instead, so this folds one down to a stable number to
+// feed them — same purpose as Number(id) would serve for a numeric id.
+export function hashSeed(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}

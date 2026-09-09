@@ -320,6 +320,17 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: should_revisit — a manual per-post flag (superbrain-web's
+        # /boards pages) distinct from every AI-scored signal above. Overrides
+        # the "already seen" (post_views-derived) white thumbnail overlay with
+        # a pink one + label, so a post the user has viewed but wants to come
+        # back to doesn't visually disappear into "already handled."
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN should_revisit INTEGER DEFAULT 0")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Migration: is_eloquent / eloquence_rationale — AI-judged verdict on
         # whether audio_transcription reads as oratory-eloquent (see
         # core/eloquence.py), independent of the `importance` rating above.
@@ -581,6 +592,27 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Seed the "iPhone" collection if missing — same permanent,
+        # never-deletable-by-convention pattern as Watch Later above. Target
+        # for shares that came in through superbrain-ios's Share Extension
+        # offline queue (PendingShareStore/PendingShareSyncer): a post shared
+        # straight from Instagram was never actually saved to a real
+        # Instagram collection first, so there's no folder to assign it to
+        # yet. `ensure_post_in_collection()` (scripts/import_saved_instagram.py)
+        # is purely additive and never removes a shortcode from a collection
+        # it's already in, so a later real Instagram export import that does
+        # find this post in a real folder just adds that folder too — this
+        # collection is never cleared out for a post, only ever gained more
+        # siblings.
+        cur.execute("SELECT id FROM collections WHERE id = 'iphone_shares'")
+        if cur.fetchone() is None:
+            now = datetime.utcnow().isoformat()
+            self._conn.execute(
+                "INSERT INTO collections (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                ('iphone_shares', 'iPhone', '📱', '[]', now, now)
+            )
+            self._conn.commit()
+
         # Boards — user-curated groupings of posts created by hand from
         # superbrain-web's /boards page. Deliberately a separate table from
         # `collections` above, not an extension of it: `collections` mirrors
@@ -684,19 +716,42 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
-        # search_queries — every semantic-search query and chat question, with
-        # its embedding, so the web app can build a rolling "interest vector"
+        # embeddings — deduplicated cache of generated embedding vectors,
+        # keyed by normalized (trimmed + lowercased) query text. Split out
+        # from search_queries below (which used to store the embedding
+        # inline on every row) so the same text's embedding is stored once no
+        # matter how many times it's searched, and so search_queries — the
+        # recommendation-history signal — can be wiped independently (e.g. to
+        # clear out dev/test traffic) without losing the embedding cache that
+        # GET /search/semantic and the chat RAG pipeline (core/rag.py) rely on
+        # to skip redundant embedding-API calls. See get_cached_query_embedding.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                text        TEXT NOT NULL,
+                embedding   TEXT NOT NULL,
+                created_at  TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_embeddings_text ON embeddings (text);
+        """)
+        self._conn.commit()
+
+        # search_queries — one row per semantic-search query or chat question
+        # *instance*, so the web app can build a rolling "interest vector"
         # (superbrain-web/src/lib/recommendations.ts) without re-embedding.
-        # source distinguishes GET /search/semantic from chat. This table also
-        # doubles as an embedding cache (see get_cached_query_embedding below)
-        # so repeating the same query text never re-calls the embedding API.
+        # source distinguishes GET /search/semantic from chat. embedding_id
+        # points at the shared vector in `embeddings` above — repeating the
+        # same query text adds another row here (another usage instance, with
+        # its own created_at for recency-weighting) but never another
+        # `embeddings` row, so this table doubles as "how many times, and
+        # when, each embedding has been used" for the recommendation engine.
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS search_queries (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                query_text       TEXT,
-                query_embedding  TEXT,
-                source           TEXT DEFAULT 'search',
-                created_at       TEXT
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_text    TEXT,
+                embedding_id  INTEGER REFERENCES embeddings (id),
+                source        TEXT DEFAULT 'search',
+                created_at    TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_search_queries_created_at ON search_queries (created_at DESC);
         """)
@@ -708,6 +763,54 @@ class Database:
         try:
             self._conn.execute("ALTER TABLE search_queries ADD COLUMN client_env TEXT DEFAULT 'prod'")
             self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: embedding_id — pre-2026-08-22 databases predate this
+        # column (CREATE TABLE IF NOT EXISTS above is a no-op once the table
+        # already exists, so it never reaches existing databases). Added
+        # before the index below and before the query_embedding-split
+        # migration, both of which depend on it existing.
+        try:
+            self._conn.execute("ALTER TABLE search_queries ADD COLUMN embedding_id INTEGER REFERENCES embeddings (id)")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_search_queries_embedding_id ON search_queries (embedding_id)")
+        self._conn.commit()
+
+        # Migration: pre-2026-08-22 databases store the embedding inline in
+        # search_queries.query_embedding. Split it out into `embeddings`
+        # above (deduped by normalized text) and repoint each row at it via
+        # embedding_id, then drop the now-redundant column. Guarded on that
+        # column still existing so this only ever runs once per database.
+        try:
+            cols = [row[1] for row in self._conn.execute("PRAGMA table_info(search_queries)").fetchall()]
+            if "query_embedding" in cols:
+                rows = self._conn.execute(
+                    "SELECT id, query_text, query_embedding FROM search_queries "
+                    "WHERE query_embedding IS NOT NULL AND query_embedding != ''"
+                ).fetchall()
+                now = datetime.utcnow().isoformat()
+                for row_id, query_text, emb_json in rows:
+                    key = (query_text or "").strip().lower()
+                    existing = self._conn.execute(
+                        "SELECT id FROM embeddings WHERE text = ?", (key,)
+                    ).fetchone()
+                    if existing:
+                        embedding_id = existing[0]
+                    else:
+                        cur = self._conn.execute(
+                            "INSERT INTO embeddings (text, embedding, created_at) VALUES (?, ?, ?)",
+                            (key, emb_json, now),
+                        )
+                        embedding_id = cur.lastrowid
+                    self._conn.execute(
+                        "UPDATE search_queries SET embedding_id = ? WHERE id = ?",
+                        (embedding_id, row_id),
+                    )
+                self._conn.execute("ALTER TABLE search_queries DROP COLUMN query_embedding")
+                self._conn.commit()
         except sqlite3.OperationalError:
             pass
 
@@ -828,12 +931,56 @@ class Database:
             "ALTER TABLE study_guide_collections ADD COLUMN status TEXT DEFAULT 'complete'",
             "ALTER TABLE study_guide_collections ADD COLUMN error TEXT",
             "ALTER TABLE study_guide_collections ADD COLUMN expected_guide_count INTEGER",
+            # Retired on arrival — a machine-readable "what kind of thing is
+            # this" tag, meant to drive superbrain-web's /study-guides
+            # corkboard coloring, turned out to be pure redundancy with
+            # source_label (every writer that would set this also stamps a
+            # label with a recognizable prefix — "Board: ...", "Search: ...",
+            # etc. — so it never carried information the label didn't;
+            # superbrain-web parses that prefix directly instead, see
+            # src/lib/studyGuideSource.ts). Column kept, never populated or
+            # read anywhere (this codebase's migrations are additive-only,
+            # same treatment as analyses.saved_order above).
+            "ALTER TABLE study_guide_collections ADD COLUMN source_type TEXT",
+            # Stamped by POST /study-guide-collections/{id}/opened, fired
+            # from superbrain-web's /study-guides/[id] page every time it's
+            # actually opened (not on generation) — see reels_study_guide
+            # below for why this lives on the collection.
+            "ALTER TABLE study_guide_collections ADD COLUMN last_opened_at TEXT",
         ):
             try:
                 self._conn.execute(stmt)
                 self._conn.commit()
             except sqlite3.OperationalError:
                 pass
+
+        # reels_study_guide — many-to-many link between a post and the study
+        # guide *collection* (not an individual final/full/merge/chunk
+        # guide row — those all draw from ~the same request-level shortcode
+        # set, and double/triple-counting one collection's reels across its
+        # sibling guides would overweight exactly the requests that needed
+        # chunking) it was used to generate. This is a deliberately weaker,
+        # separate signal from post_views for the Home recommendation engine
+        # (superbrain-web/src/lib/recommendations.ts): choosing a reel as
+        # study-guide source material means you cared about its *topic*
+        # enough to synthesize it, even if you never actually watched it
+        # again through this UI — it must never be logged as a post_views
+        # row, which is reserved for an actual qualifying view. One row per
+        # (shortcode, collection) is inserted synchronously in POST
+        # /study-guide, from the original request's shortcode list — not
+        # per generated guide, and not from the background pipeline thread.
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS reels_study_guide (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                shortcode      TEXT NOT NULL,
+                collection_id  INTEGER NOT NULL,
+                created_at     TEXT,
+                client_env     TEXT DEFAULT 'prod'
+            );
+            CREATE INDEX IF NOT EXISTS idx_reels_study_guide_shortcode ON reels_study_guide (shortcode);
+            CREATE INDEX IF NOT EXISTS idx_reels_study_guide_collection_id ON reels_study_guide (collection_id);
+        """)
+        self._conn.commit()
 
         # Startup sweep: any collection still marked 'generating' belonged
         # to a background thread that died with the previous process — it
@@ -1007,6 +1154,7 @@ class Database:
         d['media_urls'] = [f"/media/{_sc}/{f}" for f in d['media_files']] if _sc else []
         d['analysis_version'] = d.get('analysis_version') or 0
         d['needs_review'] = d['analysis_version'] < CURRENT_ANALYSIS_VERSION
+        d['should_revisit'] = bool(d.get('should_revisit'))
         return d
     
     # ------------------------------------------------------------------
@@ -1198,6 +1346,7 @@ class Database:
                     self._conn.execute("DELETE FROM eloquence_stash WHERE shortcode = ?", (shortcode,))
 
                 self._conn.commit()
+            self._sync_trusted_authors_board(username, shortcode)
             print(f"[OK] Analysis saved to database ({shortcode})")
             return True
         except Exception as e:
@@ -1683,17 +1832,17 @@ class Database:
 
     def get_cached_query_embedding(self, query_text):
         """Return a previously-generated embedding for this exact query text
-        (normalized: trimmed + lowercased), if one exists — lets
-        GET /search/semantic and the chat RAG pipeline skip a redundant
-        embedding-API call when a query repeats (e.g. the /space search box
-        re-submitting the same term). Returns None on no match."""
+        (normalized: trimmed + lowercased), if one exists in the `embeddings`
+        cache — lets GET /search/semantic and the chat RAG pipeline skip a
+        redundant embedding-API call when a query repeats (e.g. the /space
+        search box re-submitting the same term). Independent of
+        search_queries (the usage/recommendation-history table), so clearing
+        that table never invalidates this cache. Returns None on no match."""
         if not self.is_connected() or not query_text:
             return None
         try:
             cur = self._conn.execute(
-                "SELECT query_embedding FROM search_queries "
-                "WHERE LOWER(TRIM(query_text)) = LOWER(TRIM(?)) AND query_embedding IS NOT NULL "
-                "ORDER BY created_at DESC LIMIT 1",
+                "SELECT embedding FROM embeddings WHERE text = LOWER(TRIM(?))",
                 (query_text,),
             )
             row = cur.fetchone()
@@ -1705,26 +1854,35 @@ class Database:
             return None
 
     def log_search_query(self, query_text, query_embedding, source="search", client_env="prod") -> bool:
-        """Insert a search/chat query history row. Always inserts a fresh row
-        (even when the embedding was reused from get_cached_query_embedding)
-        so the event's own timestamp is available for recency-weighting.
-        Best-effort — must never break the search/chat request it's attached to.
-        client_env should be 'dev' or 'prod' (api.py normalizes anything else
-        to 'prod') — see the client_env migration above search_queries' CREATE
-        TABLE for why."""
+        """Record one search/chat query usage instance. Upserts the embedding
+        into the `embeddings` cache (deduped by normalized text) and always
+        inserts a fresh search_queries row pointing at it — even when the
+        embedding was reused from get_cached_query_embedding — so the event's
+        own timestamp is available for recency-weighting. Best-effort — must
+        never break the search/chat request it's attached to. client_env
+        should be 'dev' or 'prod' (api.py normalizes anything else to 'prod')
+        — see the client_env migration above search_queries' CREATE TABLE for
+        why."""
         if not self.is_connected():
             return False
         try:
+            embedding_id = None
+            if query_embedding and query_text:
+                key = query_text.strip().lower()
+                cur = self._conn.execute("SELECT id FROM embeddings WHERE text = ?", (key,))
+                row = cur.fetchone()
+                if row:
+                    embedding_id = row[0]
+                else:
+                    cur = self._conn.execute(
+                        "INSERT INTO embeddings (text, embedding, created_at) VALUES (?, ?, ?)",
+                        (key, json.dumps(query_embedding), datetime.utcnow().isoformat()),
+                    )
+                    embedding_id = cur.lastrowid
             self._conn.execute(
-                "INSERT INTO search_queries (query_text, query_embedding, source, created_at, client_env) "
+                "INSERT INTO search_queries (query_text, embedding_id, source, created_at, client_env) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (
-                    query_text,
-                    json.dumps(query_embedding) if query_embedding else None,
-                    source,
-                    datetime.utcnow().isoformat(),
-                    client_env,
-                ),
+                (query_text, embedding_id, source, datetime.utcnow().isoformat(), client_env),
             )
             self._conn.commit()
             return True
@@ -1735,20 +1893,23 @@ class Database:
     def get_search_history(self, since=None, limit=2000):
         """Return [{query_text, query_embedding: [float,...] | None, source, created_at}],
         newest first. Only 'prod'-tagged rows — same reasoning as
-        get_view_history above."""
+        get_view_history above. Embedding is joined in live from the
+        `embeddings` cache via embedding_id."""
         if not self.is_connected():
             return []
         try:
             if since:
                 cur = self._conn.execute(
-                    "SELECT query_text, query_embedding, source, created_at FROM search_queries "
-                    "WHERE created_at >= ? AND client_env = 'prod' ORDER BY created_at DESC LIMIT ?",
+                    "SELECT sq.query_text, e.embedding, sq.source, sq.created_at "
+                    "FROM search_queries sq LEFT JOIN embeddings e ON e.id = sq.embedding_id "
+                    "WHERE sq.created_at >= ? AND sq.client_env = 'prod' ORDER BY sq.created_at DESC LIMIT ?",
                     (since, limit),
                 )
             else:
                 cur = self._conn.execute(
-                    "SELECT query_text, query_embedding, source, created_at FROM search_queries "
-                    "WHERE client_env = 'prod' ORDER BY created_at DESC LIMIT ?",
+                    "SELECT sq.query_text, e.embedding, sq.source, sq.created_at "
+                    "FROM search_queries sq LEFT JOIN embeddings e ON e.id = sq.embedding_id "
+                    "WHERE sq.client_env = 'prod' ORDER BY sq.created_at DESC LIMIT ?",
                     (limit,),
                 )
             out = []
@@ -2817,6 +2978,51 @@ class Database:
     # Instagram-import-driven `collections` above).
     # ------------------------------------------------------------------
 
+    # Instagram usernames whose posts get auto-added to the "Trusted Authors"
+    # board the moment they're saved/re-saved — a deliberate, explicit
+    # exception to "the import scripts never read or write these tables"
+    # (see Boards vs collections in CLAUDE.md), asked for by the user rather
+    # than something boards normally do on their own. Applied from
+    # save_analysis() below, which every pipeline (immediate main.py,
+    # ANALYSIS_MODE=batch, the rescan pipeline, and bulk Instagram-export
+    # imports via scripts/import_saved_instagram.py's POST /analyze calls)
+    # writes through — so this is the one place it needs to live. Keyed
+    # lowercase; extend as the user confirms more trusted authors. Separate
+    # from core/importance.py's TRUSTED_CREATORS (importance-score floor) —
+    # same "explicit code-level allowlist" shape, different purpose, so kept
+    # as two independent lists rather than conflated.
+    TRUSTED_AUTHORS_BOARD_ID = "trusted_authors"
+    TRUSTED_AUTHORS_BOARD_NAME = "Trusted Authors"
+    TRUSTED_AUTHORS_BOARD_ICON = "⭐"
+    TRUSTED_AUTHOR_USERNAMES = {
+        "linaseiche",
+        "erinmerylstudy",
+        "kylascan",
+        "zowi.fit.feliz",
+        "emmieedit",
+    }
+
+    def _sync_trusted_authors_board(self, username, shortcode):
+        """If `username` is a trusted author, make sure `shortcode` is on the
+        Trusted Authors board — creating the board itself on first use.
+        No-op for every other username. Best-effort: never raises, since
+        this runs as a side effect of save_analysis() and must not turn a
+        successful analysis save into a failure."""
+        if not username:
+            return
+        try:
+            if username.strip().lower() not in self.TRUSTED_AUTHOR_USERNAMES:
+                return
+            if self.get_board(self.TRUSTED_AUTHORS_BOARD_ID) is None:
+                self.create_board(
+                    self.TRUSTED_AUTHORS_BOARD_ID,
+                    self.TRUSTED_AUTHORS_BOARD_NAME,
+                    self.TRUSTED_AUTHORS_BOARD_ICON,
+                )
+            self.add_post_to_board(self.TRUSTED_AUTHORS_BOARD_ID, shortcode)
+        except Exception as e:
+            print(f"[WARNING]  Error syncing trusted authors board: {e}")
+
     def _board_row_to_dict(self, row, subcollections=None):
         if row is None:
             return None
@@ -3373,12 +3579,90 @@ class Database:
             return False
         try:
             self._conn.execute("DELETE FROM study_guides WHERE collection_id = ?", (collection_id,))
+            self._conn.execute("DELETE FROM reels_study_guide WHERE collection_id = ?", (collection_id,))
             cur = self._conn.execute("DELETE FROM study_guide_collections WHERE id = ?", (collection_id,))
             self._conn.commit()
             return cur.rowcount > 0
         except Exception as e:
             print(f"[WARNING]  Error deleting study guide collection: {e}")
             return False
+
+    # ------------------------------------------------------------------
+    # Study guide reel signals — feed superbrain-web's Home recommendation
+    # engine as a weaker, separate-from-post_views "I cared enough to
+    # synthesize this" signal. See the reels_study_guide CREATE TABLE
+    # comment above for why this is keyed to a collection, not a guide.
+    # ------------------------------------------------------------------
+
+    def record_study_guide_reels(self, collection_id, shortcodes, client_env="prod") -> bool:
+        """Insert one reels_study_guide row per shortcode a just-submitted
+        generation request was built from (deduped). Called synchronously
+        from POST /study-guide, before the background pipeline thread even
+        starts — so it reflects what was requested, not what a particular
+        final/full/merge/chunk guide happened to include. Best-effort."""
+        if not self.is_connected() or not shortcodes:
+            return False
+        try:
+            now = datetime.utcnow().isoformat()
+            rows = [(sc, collection_id, now, client_env) for sc in dict.fromkeys(shortcodes)]
+            self._conn.executemany(
+                "INSERT INTO reels_study_guide (shortcode, collection_id, created_at, client_env) VALUES (?, ?, ?, ?)",
+                rows,
+            )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            print(f"[WARNING]  Error recording study guide reels: {e}")
+            return False
+
+    def mark_study_guide_collection_opened(self, collection_id) -> bool:
+        """Stamp last_opened_at on a collection the moment one of its guides
+        is actually opened (POST /study-guide-collections/{id}/opened,
+        fired from superbrain-web's /study-guides/[id] page) — a fresh
+        'opened' event nudges this collection's reels_study_guide-derived
+        recommendation signal back up, the same way rewatching a post does
+        for a real view. Returns True if the collection existed."""
+        if not self.is_connected():
+            return False
+        try:
+            cur = self._conn.execute(
+                "UPDATE study_guide_collections SET last_opened_at = ? WHERE id = ?",
+                (datetime.utcnow().isoformat(), collection_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            print(f"[WARNING]  Error marking study guide collection opened: {e}")
+            return False
+
+    def get_study_guide_reel_history(self, since=None, limit=20000):
+        """Return [{shortcode, collection_id, created_at, opened_at}],
+        newest link first. Only 'prod'-tagged rows, same dev/prod split as
+        get_view_history(). opened_at is the owning collection's
+        last_opened_at (NULL if none of its guides have been reopened since
+        generation)."""
+        if not self.is_connected():
+            return []
+        try:
+            query = (
+                "SELECT r.shortcode, r.collection_id, r.created_at, c.last_opened_at "
+                "FROM reels_study_guide r JOIN study_guide_collections c ON c.id = r.collection_id "
+                "WHERE r.client_env = 'prod'"
+            )
+            params = []
+            if since:
+                query += " AND r.created_at >= ?"
+                params.append(since)
+            query += " ORDER BY r.created_at DESC LIMIT ?"
+            params.append(limit)
+            cur = self._conn.execute(query, params)
+            return [
+                {"shortcode": s, "collection_id": cid, "created_at": c, "opened_at": o}
+                for s, cid, c, o in cur.fetchall()
+            ]
+        except Exception as e:
+            print(f"[WARNING]  Error fetching study guide reel history: {e}")
+            return []
 
 
 # ------------------------------------------------------------------

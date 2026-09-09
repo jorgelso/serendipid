@@ -1,7 +1,9 @@
 // Home page recommendation engine — three independently callable scorers
 // (cluster-affinity, interest-vector, hybrid) over the same raw signals:
-// implicit view history, search/chat query history, and the two manual
-// ratings (enjoyment_rating / perceived_importance_rating).
+// implicit view history, study-guide-source history (posts used to generate
+// a study guide — a real but weaker interest signal than an actual
+// qualifying view, see STUDY_GUIDE_WEIGHT below), search/chat query history,
+// and the two manual ratings (enjoyment_rating / perceived_importance_rating).
 //
 // Server-only (never imported by a "use client" component) — reads full
 // Post.embedding via getExport(), same embedding-never-reaches-the-browser
@@ -12,12 +14,13 @@
 // persisted or passed in from outside this module.
 
 import { getExport, getThemes } from "./cache";
-import { fetchSearchHistory, fetchViewHistory } from "./apiClient";
+import { fetchSearchHistory, fetchStudyGuideReelHistory, fetchViewHistory } from "./apiClient";
 import { centroid, dot, normalize, parseEmbedding } from "./clustering";
 import type {
   Post,
   RecommendationStrategy,
   SearchHistoryEntry,
+  StudyGuideReelHistoryEntry,
   Theme,
   ViewHistoryEntry,
 } from "@/types/domain";
@@ -42,6 +45,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENCY_HALF_LIFE_DAYS = 30;
 const RATING_WEIGHT: Record<"liked" | "loved", number> = { liked: 2, loved: 4 };
 const VIEW_WEIGHT = 1;
+// Deliberately well below VIEW_WEIGHT — choosing a post as study-guide
+// source material is real signal (you cared enough to synthesize it), but
+// weaker than actually watching it, and must never outrank real views.
+const STUDY_GUIDE_WEIGHT = 0.3;
 const SEARCH_WEIGHT = 0.5;
 // A post viewed within this window is assumed still "fresh in mind" and
 // excluded from candidacy — recommending something just opened isn't useful.
@@ -76,17 +83,21 @@ interface Signals {
   themeCentroids: Map<string, Float32Array>;
   views: ViewHistoryEntry[];
   viewsByShortcode: Map<string, ViewHistoryEntry[]>;
+  studyGuideReels: StudyGuideReelHistoryEntry[];
+  studyGuideReelsByShortcode: Map<string, StudyGuideReelHistoryEntry[]>;
   searches: SearchHistoryEntry[];
   now: number;
 }
 
 async function loadSignals(): Promise<Signals> {
-  const [{ posts }, { themes, unclusteredShortcodes }, viewHistoryResp, searchHistoryResp] = await Promise.all([
-    getExport(),
-    getThemes(),
-    fetchViewHistory(),
-    fetchSearchHistory(),
-  ]);
+  const [{ posts }, { themes, unclusteredShortcodes }, viewHistoryResp, studyGuideReelHistoryResp, searchHistoryResp] =
+    await Promise.all([
+      getExport(),
+      getThemes(),
+      fetchViewHistory(),
+      fetchStudyGuideReelHistory(),
+      fetchSearchHistory(),
+    ]);
 
   const postsByShortcode = new Map(posts.map((p) => [p.shortcode, p]));
 
@@ -129,6 +140,14 @@ async function loadSignals(): Promise<Signals> {
     else viewsByShortcode.set(v.shortcode, [v]);
   }
 
+  const studyGuideReels = studyGuideReelHistoryResp.data;
+  const studyGuideReelsByShortcode = new Map<string, StudyGuideReelHistoryEntry[]>();
+  for (const r of studyGuideReels) {
+    const list = studyGuideReelsByShortcode.get(r.shortcode);
+    if (list) list.push(r);
+    else studyGuideReelsByShortcode.set(r.shortcode, [r]);
+  }
+
   return {
     posts,
     postsByShortcode,
@@ -138,6 +157,8 @@ async function loadSignals(): Promise<Signals> {
     themeCentroids,
     views,
     viewsByShortcode,
+    studyGuideReels,
+    studyGuideReelsByShortcode,
     searches: searchHistoryResp.data,
     now: Date.now(),
   };
@@ -145,6 +166,7 @@ async function loadSignals(): Promise<Signals> {
 
 function isColdStart(signals: Signals): boolean {
   if (signals.views.length > 0) return false;
+  if (signals.studyGuideReels.length > 0) return false;
   if (signals.searches.length > 0) return false;
   return !signals.posts.some((p) => p.enjoyment_rating || p.perceived_importance_rating);
 }
@@ -177,6 +199,28 @@ function viewScore(shortcode: string, signals: Signals): number {
   let total = 0;
   for (const v of events) total += recencyWeight(v.viewed_at, signals.now);
   return VIEW_WEIGHT * total;
+}
+
+// The timestamp a single study-guide link's recency decays from: whichever
+// is more recent, when it was made or when its collection was last opened.
+// Reopening an old study guide is a fresh "I still care about this" event,
+// so it resets the decay the same way a rewatch does for a real view,
+// rather than the link's importance only ever fading from its creation date.
+function studyGuideEventTimestamp(entry: StudyGuideReelHistoryEntry): string {
+  if (!entry.opened_at) return entry.created_at;
+  return Date.parse(entry.opened_at) > Date.parse(entry.created_at) ? entry.opened_at : entry.created_at;
+}
+
+// Same per-event, recency-decayed sum as viewScore, scaled down by
+// STUDY_GUIDE_WEIGHT — the same reel used as source material for several
+// study guides (or a study guide reopened many times) outscores a single
+// old, never-reopened one, but never outscores an actual qualifying view.
+function studyGuideScore(shortcode: string, signals: Signals): number {
+  const events = signals.studyGuideReelsByShortcode.get(shortcode);
+  if (!events) return 0;
+  let total = 0;
+  for (const e of events) total += recencyWeight(studyGuideEventTimestamp(e), signals.now);
+  return STUDY_GUIDE_WEIGHT * total;
 }
 
 // 0 (viewed very recently) -> 1 (never viewed, or viewed a very long time
@@ -235,6 +279,14 @@ function computeClusterAffinity(signals: Signals): Map<string, number> {
     bump(themeId, VIEW_WEIGHT * w);
   }
 
+  for (const [shortcode, events] of signals.studyGuideReelsByShortcode) {
+    const themeId = signals.themeOf.get(shortcode);
+    if (!themeId) continue;
+    let w = 0;
+    for (const e of events) w += recencyWeight(studyGuideEventTimestamp(e), signals.now);
+    bump(themeId, STUDY_GUIDE_WEIGHT * w);
+  }
+
   for (const post of signals.posts) {
     const themeId = signals.themeOf.get(post.shortcode);
     if (!themeId) continue;
@@ -273,6 +325,12 @@ function computeInterestVector(signals: Signals): Float32Array | null {
     const vec = signals.embeddingByShortcode.get(shortcode);
     if (!vec) continue;
     accumulate(vec, viewScore(shortcode, signals));
+  }
+
+  for (const [shortcode] of signals.studyGuideReelsByShortcode) {
+    const vec = signals.embeddingByShortcode.get(shortcode);
+    if (!vec) continue;
+    accumulate(vec, studyGuideScore(shortcode, signals));
   }
 
   for (const post of signals.posts) {

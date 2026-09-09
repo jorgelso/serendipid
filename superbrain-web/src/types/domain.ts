@@ -72,6 +72,12 @@ export interface Post {
   // (src/lib/recommendations.ts) alongside implicit view/search signals.
   enjoyment_rating: RatingTier;
   perceived_importance_rating: RatingTier;
+  // Manual "come back to this" flag (superbrain-web's /boards pages) — false
+  // by default. Distinct from every AI-scored signal above: it's a plain
+  // user override that replaces the "already seen" (view-history-derived)
+  // white thumbnail overlay with a pink one + label, so a post the user has
+  // watched but still wants to revisit doesn't visually read as "done."
+  should_revisit: boolean;
   // AI-judged oratory eloquence of audio_transcription (backend/core/
   // eloquence.py) — null for posts not yet scored (distinct from 0/"scored
   // not eloquent"). is_tutorial marks whether an eloquent post is delivered
@@ -369,6 +375,20 @@ export interface SearchHistoryEntry {
   created_at: string;
 }
 
+// Mirrors backend/api.py's GET /study-guide-reel-history (backend/core/
+// database.py's reels_study_guide table) — a post used as study-guide
+// source material, a weaker/separate signal from ViewHistoryEntry above
+// that never touches post_views. opened_at is the owning collection's
+// last_opened_at (null until a guide in it is actually reopened after
+// generation). Feeds the Home recommendation engine — never rendered
+// directly.
+export interface StudyGuideReelHistoryEntry {
+  shortcode: string;
+  collection_id: number;
+  created_at: string;
+  opened_at: string | null;
+}
+
 export type RecommendationStrategy = "cluster" | "vector" | "hybrid";
 
 // src/app/api/recommendations/route.ts's response shape.
@@ -433,6 +453,13 @@ export interface StudyGuidesResponse {
 // been saved are kept, but nothing is still actively generating.
 export interface StudyGuideCollection {
   id: number;
+  // What this was generated from, freeform but with a recognizable prefix
+  // ("Board: ...", "Search: ...", "Theme/Idea/Cluster: ...", "3D space
+  // selection") stamped by every generation entry point — the /study-guides
+  // corkboard parses this prefix to color-code each pile (see
+  // src/lib/studyGuideSource.ts). Deliberately the only source-of-truth for
+  // "what kind of thing" a collection is; a separate machine-readable type
+  // column was tried and removed for being pure redundancy with this field.
   source_label: string | null;
   created_at: string;
   status: "generating" | "complete" | "failed" | "interrupted";

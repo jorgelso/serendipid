@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchStudyGuide, fetchStudyGuideCollection, SuperBrainApiError } from "@/lib/apiClient";
+import { fetchStudyGuide, fetchStudyGuideCollection, markStudyGuideCollectionOpened, SuperBrainApiError } from "@/lib/apiClient";
 import LazyPostList from "@/components/LazyPostList";
 import DeleteStudyGuideButton from "@/components/DeleteStudyGuideButton";
 import WashiTape from "@/components/WashiTape";
@@ -30,6 +30,9 @@ export default async function StudyGuideDetailPage(props: PageProps<"/study-guid
     if (guide.collection_id !== null) {
       const { data: collection } = await fetchStudyGuideCollection(guide.collection_id);
       siblings = collection.guides;
+      // Best-effort — this is only a recommendation signal, must never
+      // block or break the page render.
+      markStudyGuideCollectionOpened(guide.collection_id).catch(() => {});
     }
   } catch (err) {
     if (err instanceof SuperBrainApiError && err.status === 404) {

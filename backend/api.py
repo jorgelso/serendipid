@@ -1390,7 +1390,7 @@ async def search_semantic(
         db = get_db()
 
         # Reuse a prior embedding for the same normalized query text if one
-        # exists (search_queries doubles as an embedding cache — see
+        # exists (the `embeddings` table doubles as an embedding cache — see
         # get_cached_query_embedding) rather than re-calling the embedding
         # API for a repeated search (e.g. the /space search box resubmitting
         # the same term).
@@ -1569,6 +1569,15 @@ async def delete_chat_thread(thread_id: str, token: str = Depends(verify_token))
 
 class StudyGuideCreate(BaseModel):
     shortcodes: List[str]
+    # What this was generated from, freeform but with a recognizable prefix
+    # ("Board: ...", "Search: ...", "Theme/Idea/Cluster: ...", "3D space
+    # selection") stamped by every superbrain-web caller — the only
+    # source-of-truth for "what kind of thing" a collection is (a separate
+    # machine-readable source_type field was tried and removed: every
+    # caller that would set it also sets this label with a parseable
+    # prefix, so it never carried information the label didn't).
+    # superbrain-web's /study-guides corkboard parses this prefix to
+    # color-code each pile (src/lib/studyGuideSource.ts).
     source_label: Optional[str] = None
     # Optional semantic sub-groups (e.g. a theme's micro-clusters, each a
     # list of shortcodes) for the >MAX_STUDY_GUIDE_POSTS chunking pipeline
@@ -1610,7 +1619,11 @@ def _run_study_guide_pipeline(db, router, posts, groups, source_label, collectio
 
 
 @app.post("/study-guide")
-async def create_study_guide(req: StudyGuideCreate, token: str = Depends(verify_token)):
+async def create_study_guide(
+    req: StudyGuideCreate,
+    token: str = Depends(verify_token),
+    x_client_env: Optional[str] = Header(default=None, description="'dev' from a local `next dev` session; omitted/anything else counts as real usage")
+):
     """
     Kick off an on-demand study-guide "collection" distilling a user-picked
     set of posts (a selection, search result, or theme/cluster from
@@ -1647,7 +1660,6 @@ async def create_study_guide(req: StudyGuideCreate, token: str = Depends(verify_
                 detail=f"Too many posts selected ({len(shortcodes)}) — the absolute limit is "
                        f"{study_guide.ABSOLUTE_MAX_STUDY_GUIDE_POSTS} per generation."
             )
-
         db = get_db()
         posts = db.get_posts_by_shortcodes(shortcodes)
         if not posts:
@@ -1663,6 +1675,14 @@ async def create_study_guide(req: StudyGuideCreate, token: str = Depends(verify_
         )
         if not collection:
             raise HTTPException(status_code=500, detail="Could not create the study guide collection.")
+
+        # Choosing a post as study-guide source material is a real but
+        # WEAKER interest signal than actually watching it — record it
+        # separately (reels_study_guide), never into post_views, so the Home
+        # recommendation engine (superbrain-web/src/lib/recommendations.ts)
+        # can keep real qualifying views ranked above it. Best-effort and
+        # must never block generation from starting.
+        db.record_study_guide_reels(collection["id"], shortcodes, client_env=resolve_client_env(x_client_env))
 
         router = get_router()
         threading.Thread(
@@ -1835,6 +1855,32 @@ async def delete_study_guide_collection(collection_id: int, token: str = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/study-guide-collections/{collection_id}/opened")
+async def mark_study_guide_collection_opened(collection_id: int, token: str = Depends(verify_token)):
+    """
+    Stamp this collection's last_opened_at — fired by superbrain-web's
+    /study-guides/[id] page every time a guide within it is actually
+    opened. Feeds the Home recommendation engine's reels_study_guide signal
+    (see GET /study-guide-reel-history) alongside how long ago the
+    collection was generated: reopening an old study guide nudges its
+    source reels' recommendation weight back up, the same way rewatching a
+    post does for a real view.
+
+    Fire-and-forget from the frontend — failures here should never surface
+    to the user, so this returns success:false rather than raising where
+    reasonable.
+
+    Requires API authentication.
+    """
+    try:
+        db = get_db()
+        ok = db.mark_study_guide_collection_opened(collection_id)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"Error marking study guide collection opened: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/ping")
 async def ping():
     """Ultra-lightweight liveness check — no DB, no auth, instant response."""
@@ -1958,7 +2004,8 @@ ALLOWED_POST_FIELDS = {
     'shortcode', 'url', 'username', 'content_type', 'post_date',
     'likes', 'thumbnail', 'title', 'summary', 'tags', 'music', 'category',
     'visual_analysis', 'audio_transcription', 'text_analysis', 'analysis_version',
-    'language', 'media_files', 'enjoyment_rating', 'perceived_importance_rating'
+    'language', 'media_files', 'enjoyment_rating', 'perceived_importance_rating',
+    'should_revisit'
 }
 
 # Manual rating axes (distinct from the AI-scored `importance` column) —
@@ -2458,7 +2505,7 @@ async def update_post(shortcode: str, updates: dict, token: str = Depends(verify
         # pipeline change turns out to already be good enough.
         allowed_fields = {
             'category', 'language', 'title', 'summary', 'reviewed',
-            'enjoyment_rating', 'perceived_importance_rating',
+            'enjoyment_rating', 'perceived_importance_rating', 'should_revisit',
         }
         filtered_updates = {k: v for k, v in updates.items() if k in allowed_fields}
 
@@ -2471,6 +2518,9 @@ async def update_post(shortcode: str, updates: dict, token: str = Depends(verify
                     status_code=400,
                     detail=f"{field} must be null, 'liked', or 'loved'"
                 )
+
+        if 'should_revisit' in filtered_updates and not isinstance(filtered_updates['should_revisit'], bool):
+            raise HTTPException(status_code=400, detail="should_revisit must be a boolean")
 
         result = db.update_post(shortcode, filtered_updates)
         
@@ -2532,6 +2582,25 @@ async def get_view_history(
         return {"success": True, "count": len(results), "data": results}
     except Exception as e:
         logger.error(f"Error fetching view history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/study-guide-reel-history")
+async def get_study_guide_reel_history(
+    since: Optional[str] = Query(default=None, description="ISO timestamp; only return links created at or after this time"),
+    limit: int = Query(default=20000, ge=1, le=20000),
+    token: str = Depends(verify_token)
+):
+    """Read-side of the reels_study_guide signal (see that table's CREATE
+    comment in core/database.py) — the Home recommendation engine's weaker,
+    separate-from-post_views "used as study guide source material" history.
+    Each row's opened_at reflects its owning collection's last_opened_at."""
+    try:
+        db = get_db()
+        results = db.get_study_guide_reel_history(since=since, limit=limit)
+        return {"success": True, "count": len(results), "data": results}
+    except Exception as e:
+        logger.error(f"Error fetching study guide reel history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2649,11 +2718,15 @@ async def reset_database(
         conn.execute("DELETE FROM collections")
         conn.execute("DELETE FROM processing_queue")
 
-        # Recreate default Watch Later collection
+        # Recreate the permanently-seeded collections (Watch Later, iPhone)
         now = datetime.utcnow().isoformat()
         conn.execute(
             "INSERT INTO collections (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
             ('default_watch_later', 'Watch Later', 'time', '[]', now, now)
+        )
+        conn.execute(
+            "INSERT INTO collections (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ('iphone_shares', 'iPhone', '📱', '[]', now, now)
         )
         conn.commit()
 
@@ -3195,11 +3268,15 @@ async def _process_import_data(data: dict, mode: str):
             conn.execute("DELETE FROM analyses")
             conn.execute("DELETE FROM collections")
             conn.execute("DELETE FROM processing_queue")
-            # Ensure default Watch Later exists even if import has no collections
+            # Ensure the permanently-seeded collections exist even if import has none
             now = datetime.utcnow().isoformat()
             conn.execute(
                 "INSERT INTO collections (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
                 ('default_watch_later', 'Watch Later', 'time', '[]', now, now)
+            )
+            conn.execute(
+                "INSERT INTO collections (id, name, icon, post_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                ('iphone_shares', 'iPhone', '📱', '[]', now, now)
             )
             conn.commit()
 

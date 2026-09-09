@@ -26,7 +26,7 @@ final class RetryQueueViewModel {
 
     func refresh() async {
         loadState = .loading
-        pendingShares = pendingShareStore.all().sorted { $0.createdAt > $1.createdAt }
+        pendingShares = pendingShareStore.pending().sorted { $0.createdAt > $1.createdAt }
 
         do {
             async let retryTask: RetryQueueResponse = apiClient.send(.retryQueue)

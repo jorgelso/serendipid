@@ -8,15 +8,21 @@ import { refreshBoards } from "@/lib/useBoards";
 import ConfirmDialog from "./ConfirmDialog";
 import BoardPostsGrid from "./BoardPostsGrid";
 import PostPicker, { type LightPost } from "./PostPicker";
+import GenerateStudyGuideButton from "./GenerateStudyGuideButton";
 
 interface BoardDetailProps {
   board: Board;
   allPosts: LightPost[];
+  // Shortcodes with at least one qualifying view — see BoardPostsGrid's
+  // seenShortcodes prop doc. Passed down as a plain array (not a Set) since
+  // it crosses the server/client boundary as a page prop.
+  seenShortcodes: string[];
 }
 
-export default function BoardDetail({ board, allPosts }: BoardDetailProps) {
+export default function BoardDetail({ board, allPosts, seenShortcodes }: BoardDetailProps) {
   const router = useRouter();
   const postsByShortcode = useMemo(() => new Map(allPosts.map((p) => [p.shortcode, p])), [allPosts]);
+  const seenSet = useMemo(() => new Set(seenShortcodes), [seenShortcodes]);
 
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(board.name);
@@ -27,11 +33,21 @@ export default function BoardDetail({ board, allPosts }: BoardDetailProps) {
   const [deletingBoard, setDeletingBoard] = useState(false);
 
   const [removingShortcode, setRemovingShortcode] = useState<string | null>(null);
+  const [revisitingShortcode, setRevisitingShortcode] = useState<string | null>(null);
   const [pickerFor, setPickerFor] = useState<"board" | string | null>(null); // "board" or a subcollection id
 
   const [creatingSub, setCreatingSub] = useState(false);
   const [newSubName, setNewSubName] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // "Select for sub-board" mode: toggling reels in the board's own posts
+  // grid straight from their thumbnails, instead of hunting a title out of a
+  // potentially huge board via PostPicker's search box.
+  const [selectingForSub, setSelectingForSub] = useState(false);
+  const [selectedForSub, setSelectedForSub] = useState<Set<string>>(new Set());
+  const [newSubBoardName, setNewSubBoardName] = useState("");
+  const [targetSubId, setTargetSubId] = useState("");
+  const [assigningSelection, setAssigningSelection] = useState(false);
 
   async function saveName(e: React.FormEvent) {
     e.preventDefault();
@@ -121,6 +137,92 @@ export default function BoardDetail({ board, allPosts }: BoardDetailProps) {
       setError(err instanceof Error ? err.message : "Couldn't remove post.");
     } finally {
       setRemovingShortcode(null);
+    }
+  }
+
+  async function toggleShouldRevisit(shortcode: string, next: boolean) {
+    setRevisitingShortcode(shortcode);
+    setError(null);
+    try {
+      const res = await fetch("/api/update-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shortcode, should_revisit: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't update post.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't update post.");
+    } finally {
+      setRevisitingShortcode(null);
+    }
+  }
+
+  function toggleSelectForSub(shortcode: string) {
+    setSelectedForSub((prev) => {
+      const next = new Set(prev);
+      if (next.has(shortcode)) next.delete(shortcode);
+      else next.add(shortcode);
+      return next;
+    });
+  }
+
+  function stopSelectingForSub() {
+    setSelectingForSub(false);
+    setSelectedForSub(new Set());
+    setNewSubBoardName("");
+    setTargetSubId("");
+  }
+
+  async function bulkAddToSub(subId: string, shortcodes: string[]) {
+    for (const shortcode of shortcodes) {
+      const res = await fetch(`/api/boards/${board.id}/subcollections/${subId}/posts/${shortcode}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't add a post to the sub-board.");
+    }
+  }
+
+  async function createSubBoardFromSelection(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newSubBoardName.trim();
+    if (!name || selectedForSub.size === 0) return;
+    setAssigningSelection(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/boards/${board.id}/subcollections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't create sub-board.");
+      await bulkAddToSub(data.data.id, Array.from(selectedForSub));
+      await refreshBoards();
+      router.refresh();
+      stopSelectingForSub();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't create sub-board.");
+    } finally {
+      setAssigningSelection(false);
+    }
+  }
+
+  async function addSelectionToExistingSub() {
+    if (!targetSubId || selectedForSub.size === 0) return;
+    setAssigningSelection(true);
+    setError(null);
+    try {
+      await bulkAddToSub(targetSubId, Array.from(selectedForSub));
+      await refreshBoards();
+      router.refresh();
+      stopSelectingForSub();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't add posts to sub-board.");
+    } finally {
+      setAssigningSelection(false);
     }
   }
 
@@ -214,28 +316,11 @@ export default function BoardDetail({ board, allPosts }: BoardDetailProps) {
 
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
 
+      {/* Sub-collections come before the direct-posts grid below: that grid
+         can run to dozens/hundreds of thumbnails for a well-populated board,
+         which buried the "+ Create sub-collection" control far enough down
+         the page that it read as missing entirely. */}
       <section className="mt-6">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <h2 className="font-display font-semibold text-lg">
-            Posts <span className="text-ink-muted font-normal text-sm">({board.post_ids.length})</span>
-          </h2>
-          <button
-            type="button"
-            onClick={() => setPickerFor("board")}
-            className="rounded-full border border-line text-xs font-bold px-3.5 py-1.5 hover:bg-surface-2 transition-colors"
-          >
-            + Add posts
-          </button>
-        </div>
-        <BoardPostsGrid
-          shortcodes={board.post_ids}
-          postsByShortcode={postsByShortcode}
-          onRemove={removePostFromBoard}
-          removingShortcode={removingShortcode}
-        />
-      </section>
-
-      <section className="mt-10">
         <h2 className="font-display font-semibold text-lg mb-3">Sub-collections</h2>
 
         <form onSubmit={handleCreateSub} className="mb-4 flex items-center gap-2 max-w-sm">
@@ -265,6 +350,7 @@ export default function BoardDetail({ board, allPosts }: BoardDetailProps) {
             <SubcollectionSection
               key={sub.id}
               boardId={board.id}
+              boardName={board.name}
               sub={sub}
               postsByShortcode={postsByShortcode}
               removingShortcode={removingShortcode}
@@ -272,9 +358,113 @@ export default function BoardDetail({ board, allPosts }: BoardDetailProps) {
               onRemovePost={(shortcode) => removePostFromSub(sub.id, shortcode)}
               onOpenPicker={() => setPickerFor(sub.id)}
               onError={setError}
+              seenShortcodes={seenSet}
+              onToggleRevisit={toggleShouldRevisit}
+              revisitingShortcode={revisitingShortcode}
             />
           ))}
         </div>
+      </section>
+
+      <section className="mt-10">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h2 className="font-display font-semibold text-lg">
+            Posts <span className="text-ink-muted font-normal text-sm">({board.post_ids.length})</span>
+          </h2>
+          <div className="flex items-center gap-2">
+            {!selectingForSub && board.post_ids.length > 0 && (
+              <GenerateStudyGuideButton
+                shortcodes={board.post_ids}
+                sourceLabel={`Board: "${board.name}"`}
+                label="Generate study guide"
+                className="rounded-full border border-line text-ink text-xs font-bold px-3.5 py-1.5 hover:bg-surface-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              />
+            )}
+            {!selectingForSub && (
+              <button
+                type="button"
+                onClick={() => setPickerFor("board")}
+                className="rounded-full border border-line text-xs font-bold px-3.5 py-1.5 hover:bg-surface-2 transition-colors"
+              >
+                + Add posts
+              </button>
+            )}
+            {board.post_ids.length > 0 && (
+              <button
+                type="button"
+                onClick={() => (selectingForSub ? stopSelectingForSub() : setSelectingForSub(true))}
+                className="rounded-full border border-line text-xs font-bold px-3.5 py-1.5 hover:bg-surface-2 transition-colors"
+              >
+                {selectingForSub ? "Cancel" : "Select for sub-board"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {selectingForSub && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface-2 px-3 py-2.5">
+            <span className="text-xs font-bold text-ink-muted shrink-0">
+              {selectedForSub.size} selected
+            </span>
+
+            <form onSubmit={createSubBoardFromSelection} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newSubBoardName}
+                onChange={(e) => setNewSubBoardName(e.target.value)}
+                placeholder="New sub-board name"
+                disabled={assigningSelection}
+                className="w-40 rounded-full border border-line bg-surface px-3 py-1.5 text-xs"
+              />
+              <button
+                type="submit"
+                disabled={assigningSelection || selectedForSub.size === 0 || !newSubBoardName.trim()}
+                className="shrink-0 rounded-full bg-ink text-bg text-xs font-bold px-3 py-1.5 disabled:opacity-40"
+              >
+                {assigningSelection ? "…" : "+ New sub-board"}
+              </button>
+            </form>
+
+            {board.subcollections.length > 0 && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={targetSubId}
+                  onChange={(e) => setTargetSubId(e.target.value)}
+                  disabled={assigningSelection}
+                  className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs"
+                >
+                  <option value="">Existing sub-board…</option>
+                  {board.subcollections.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.icon ?? "📁"} {sub.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={addSelectionToExistingSub}
+                  disabled={assigningSelection || selectedForSub.size === 0 || !targetSubId}
+                  className="shrink-0 rounded-full border border-line text-xs font-bold px-3 py-1.5 hover:bg-surface transition-colors disabled:opacity-40"
+                >
+                  {assigningSelection ? "…" : "Add"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <BoardPostsGrid
+          shortcodes={board.post_ids}
+          postsByShortcode={postsByShortcode}
+          onRemove={removePostFromBoard}
+          removingShortcode={removingShortcode}
+          selectable={selectingForSub}
+          selected={selectedForSub}
+          onToggleSelect={toggleSelectForSub}
+          seenShortcodes={seenSet}
+          onToggleRevisit={toggleShouldRevisit}
+          revisitingShortcode={revisitingShortcode}
+        />
       </section>
 
       {pickerFor && (
@@ -318,6 +508,7 @@ export default function BoardDetail({ board, allPosts }: BoardDetailProps) {
 
 interface SubcollectionSectionProps {
   boardId: string;
+  boardName: string;
   sub: BoardSubcollection;
   postsByShortcode: Map<string, LightPost>;
   removingShortcode: string | null;
@@ -325,16 +516,23 @@ interface SubcollectionSectionProps {
   onRemovePost: (shortcode: string) => Promise<void>;
   onOpenPicker: () => void;
   onError: (message: string) => void;
+  seenShortcodes: Set<string>;
+  onToggleRevisit: (shortcode: string, next: boolean) => void;
+  revisitingShortcode: string | null;
 }
 
 function SubcollectionSection({
   boardId,
+  boardName,
   sub,
   postsByShortcode,
   removingShortcode,
   onRemovePost,
   onOpenPicker,
   onError,
+  seenShortcodes,
+  onToggleRevisit,
+  revisitingShortcode,
 }: SubcollectionSectionProps) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(true);
@@ -400,6 +598,14 @@ function SubcollectionSection({
               </span>
             </button>
             <div className="shrink-0 flex items-center gap-3">
+              {sub.post_ids.length > 0 && (
+                <GenerateStudyGuideButton
+                  shortcodes={sub.post_ids}
+                  sourceLabel={`Board: "${boardName}" → ${sub.name}`}
+                  label="Study guide"
+                  className="text-xs font-bold text-coral-ink hover:opacity-70 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                />
+              )}
               <button
                 onClick={onOpenPicker}
                 className="text-xs font-bold text-coral-ink hover:opacity-70 transition-opacity"
@@ -460,6 +666,9 @@ function SubcollectionSection({
             postsByShortcode={postsByShortcode}
             onRemove={onRemovePost}
             removingShortcode={removingShortcode}
+            seenShortcodes={seenShortcodes}
+            onToggleRevisit={onToggleRevisit}
+            revisitingShortcode={revisitingShortcode}
           />
         </div>
       )}

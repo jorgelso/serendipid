@@ -8,6 +8,11 @@ interface CutoutChipProps {
   size?: "sm" | "md" | "lg";
   className?: string;
   style?: CSSProperties;
+  /** Overrides the seeded default color — used by StudyGuideCorkboard.tsx to
+   *  color a guide's title chip by what it was generated from (parsed from
+   *  source_label, see studyGuideSource.ts) instead of at random. Every
+   *  other caller omits this and keeps the seeded look. */
+  color?: TapeColor;
 }
 
 const SIZE_CLASS: Record<NonNullable<CutoutChipProps["size"]>, string> = {
@@ -20,8 +25,8 @@ const SIZE_CLASS: Record<NonNullable<CutoutChipProps["size"]>, string> = {
 // of text, not a caption. Used both for the page masthead (one word per
 // chip) and per-guide titles on the corkboard, so title text always reads
 // as a pinned/pasted fragment rather than UI copy.
-export default function CutoutChip({ children, seed, rotationRange = 5, size = "md", className = "", style }: CutoutChipProps) {
-  const color: TapeColor = seededTapeColor(seed);
+export default function CutoutChip({ children, seed, rotationRange = 5, size = "md", className = "", style, color: colorOverride }: CutoutChipProps) {
+  const color: TapeColor = colorOverride ?? seededTapeColor(seed);
   return (
     <span
       style={{

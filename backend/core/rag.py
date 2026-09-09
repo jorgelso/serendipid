@@ -64,7 +64,7 @@ def retrieve_relevant_posts(router, db, query, limit=8, min_similarity=0.2):
     interest-history table without re-embedding.
     """
     # Reuse a prior embedding for the same normalized query text if one
-    # exists (search_queries doubles as an embedding cache), same as
+    # exists (the `embeddings` table doubles as an embedding cache), same as
     # GET /search/semantic.
     query_embedding = db.get_cached_query_embedding(query)
     if not query_embedding:

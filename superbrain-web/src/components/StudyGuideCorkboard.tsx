@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { StudyGuide, StudyGuideCollection } from "@/types/domain";
 import { seededRotation, seededTapeColor, seededOffset, seededZIndex } from "@/lib/collage";
+import { tapeColorForSourceLabel } from "@/lib/studyGuideSource";
 import WashiTape from "./WashiTape";
 import PushPin from "./PushPin";
 import PolaroidThumb from "./PolaroidThumb";
@@ -11,6 +12,7 @@ import CutoutChip from "./CutoutChip";
 import TypewriterTag from "./TypewriterTag";
 import StickerLabel from "./StickerLabel";
 import DeleteStudyGuideCollectionButton from "./DeleteStudyGuideCollectionButton";
+import StudyGuideSourceLegend from "./StudyGuideSourceLegend";
 
 const POLL_MS = 3000;
 
@@ -91,17 +93,23 @@ export default function StudyGuideCorkboard({ initialCollections }: { initialCol
   if (collections.length === 0) {
     return (
       <p className="font-hand text-ink-muted py-16 text-center text-lg">
-        Nothing pinned up yet — select posts, or generate one from a theme, idea, or 3D-space cluster.
+        Nothing pinned up yet — select posts, or generate one from a board, theme, idea, search, or 3D-space cluster.
       </p>
     );
   }
 
   return (
-    <div className="relative columns-1 gap-x-2 sm:columns-2 lg:columns-3 xl:columns-4">
-      {collections.map((collection, i) => {
+    <div className="relative">
+      <div className="mb-6 flex justify-end">
+        <StudyGuideSourceLegend />
+      </div>
+
+      <div className="relative columns-1 gap-x-2 sm:columns-2 lg:columns-3 xl:columns-4">
+        {collections.map((collection, i) => {
         const finalGuide = collection.guides.find((g) => g.role === "final");
         const others = collection.guides.filter((g) => g.id !== finalGuide?.id);
         const fanned = others.slice(0, 3);
+        const sourceColor = tapeColorForSourceLabel(collection.source_label);
         const overflow = others.slice(3);
         const tapeColor = seededTapeColor(collection.id + 3);
         // Staggered vertical + horizontal offset by index parity — breaks
@@ -171,7 +179,7 @@ export default function StudyGuideCorkboard({ initialCollections }: { initialCol
                 zIndex: 20,
               }}
             >
-              <CutoutChip seed={collection.id + 7} size="md" rotationRange={6} className="line-clamp-2">
+              <CutoutChip seed={collection.id + 7} size="md" rotationRange={6} className="line-clamp-2" color={sourceColor}>
                 {finalGuide?.title ?? collection.source_label ?? "Untitled pile of reels"}
               </CutoutChip>
             </div>
@@ -232,7 +240,8 @@ export default function StudyGuideCorkboard({ initialCollections }: { initialCol
             </div>
           </div>
         );
-      })}
+        })}
+      </div>
     </div>
   );
 }

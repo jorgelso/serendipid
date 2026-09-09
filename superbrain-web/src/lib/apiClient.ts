@@ -21,6 +21,7 @@ import type {
   SearchSemanticResponse,
   StudyGuideCollectionResponse,
   StudyGuideCollectionsResponse,
+  StudyGuideReelHistoryEntry,
   StudyGuideResponse,
   StudyGuidesResponse,
   ViewHistoryEntry,
@@ -239,6 +240,7 @@ export interface PostEdits {
   language?: string[];
   enjoyment_rating?: RatingTier;
   perceived_importance_rating?: RatingTier;
+  should_revisit?: boolean;
 }
 
 // The backend's PUT /post/{shortcode} does not validate category/language
@@ -376,6 +378,15 @@ export async function deleteStudyGuideCollection(id: number | string): Promise<{
   return request<{ success: boolean }>(`/study-guide-collections/${id}`, { method: "DELETE" });
 }
 
+// Fire-and-forget from the study guide detail page (src/app/study-guides/
+// [id]/page.tsx) every time it's actually rendered — stamps the
+// collection's last_opened_at, which feeds src/lib/recommendations.ts's
+// reels_study_guide signal. A failure here must never block the page from
+// rendering, so callers should swallow errors rather than surface them.
+export async function markStudyGuideCollectionOpened(id: number | string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/study-guide-collections/${id}/opened`, { method: "POST" });
+}
+
 // Binary passthrough for a study guide's rendered PDF/thumbnail (backend/
 // core/study_guide_pdf.py) — bypasses request<T>()'s JSON parsing since
 // these return raw bytes, but still needs the server-only API key attached,
@@ -418,6 +429,16 @@ interface SearchHistoryResponse {
 
 export async function fetchSearchHistory(limit = 2000): Promise<SearchHistoryResponse> {
   return request<SearchHistoryResponse>("/search-history", { params: { limit } });
+}
+
+interface StudyGuideReelHistoryResponse {
+  success: boolean;
+  count: number;
+  data: StudyGuideReelHistoryEntry[];
+}
+
+export async function fetchStudyGuideReelHistory(limit = 20000): Promise<StudyGuideReelHistoryResponse> {
+  return request<StudyGuideReelHistoryResponse>("/study-guide-reel-history", { params: { limit } });
 }
 
 // Fire-and-forget from the frontend's view-tracking hook — a failure here

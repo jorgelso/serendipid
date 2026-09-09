@@ -2,13 +2,19 @@ import WashiTape from "./WashiTape";
 import CutoutChip from "./CutoutChip";
 import { seededRotation } from "@/lib/collage";
 
-const WORDS = ["Study", "guides"];
+const DEFAULT_WORDS = ["Study", "guides"];
 
-export default function ScrapbookMasthead({ subtitle }: { subtitle: string }) {
+export default function ScrapbookMasthead({
+  subtitle,
+  words = DEFAULT_WORDS,
+}: {
+  subtitle: string;
+  words?: string[];
+}) {
   return (
     <div className="relative flex flex-wrap items-start gap-1 pb-2">
       <div className="relative z-20 flex flex-wrap gap-1">
-        {WORDS.map((w, i) => (
+        {words.map((w, i) => (
           <CutoutChip key={w} seed={i + 11} size="lg">
             {w}
           </CutoutChip>

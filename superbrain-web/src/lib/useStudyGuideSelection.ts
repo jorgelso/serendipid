@@ -11,7 +11,9 @@ export type StudyGuideGenerateState = "idle" | "generating" | "error";
 // and search results can mount their own selectable UI against one
 // implementation instead of duplicating this logic. sourceLabel is stored on
 // the resulting study_guides row (backend/core/database.py) purely for
-// display — "Home feed selection", `Search: "cold email"`, etc.
+// display — "Home feed selection", `Search: "cold email"`, etc. — and is
+// also what the /study-guides corkboard parses to color-code the pile (see
+// studyGuideSource.ts), so its wording/prefix matters, not just its display value.
 export function useStudyGuideSelection(sourceLabel?: string) {
   const router = useRouter();
   const [selecting, setSelecting] = useState(false);

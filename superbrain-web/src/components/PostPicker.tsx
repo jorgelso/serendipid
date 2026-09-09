@@ -7,6 +7,7 @@ export interface LightPost {
   shortcode: string;
   title: string | null;
   username: string;
+  should_revisit: boolean;
 }
 
 interface PostPickerProps {
