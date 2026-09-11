@@ -3111,6 +3111,8 @@ class Database:
         "kylascan",
         "zowi.fit.feliz",
         "emmieedit",
+        "yourinvestmenthq",
+        "olamolam8",
     }
 
     def _sync_trusted_authors_board(self, username, shortcode):
