@@ -211,6 +211,45 @@ export interface EloquenceOverridesResponse {
   overrides: EloquenceOverride[];
 }
 
+// Mirrors backend/api.py's GET /eloquence/candidates — the "how many posts
+// pass the criteria" preview shown before scoring. candidate_count is what
+// would actually be scored; the rest explain the gap from total_over_threshold.
+export interface EloquenceCandidatesResponse {
+  success: boolean;
+  analysis_mode: "immediate" | "batch";
+  length_threshold: number;
+  force: boolean;
+  candidate_count: number;
+  total_over_threshold: number;
+  skipped_pending: number;
+  skipped_prefilter: number;
+}
+
+// Mirrors backend/api.py's in-memory eloquence scoring job (POST
+// /eloquence/score, GET /eloquence/score/status). In batch mode the job
+// completes as soon as the OpenAI Batch jobs are submitted, with
+// submitted/batch_jobs filled in; in immediate mode the verdict counters
+// advance post by post until processed === total.
+export interface EloquenceScoringJob {
+  id: string;
+  status: "running" | "complete" | "failed";
+  analysis_mode: "immediate" | "batch";
+  force: boolean;
+  requested: number | null;
+  total: number;
+  candidate_count: number;
+  processed: number;
+  eloquent: number;
+  not_eloquent: number;
+  failed: number;
+  submitted: number;
+  batch_jobs: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  log_tail: string;
+}
+
 export interface CategoriesResponse {
   success: boolean;
   categories: { id: string; name: string; count: number }[];
@@ -370,6 +409,8 @@ export interface BatchCheckResponse {
   summary_advanced?: string[];
   summary_failed?: string[];
   finalized?: string[];
+  // Eloquence pipeline's name for "finalized" (POST /eloquence/batches/check).
+  scored?: string[];
   still_waiting?: string[];
   skipped?: string;
 }

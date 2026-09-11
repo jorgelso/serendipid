@@ -31,11 +31,18 @@ Two modes, same candidate selection, picked by ANALYSIS_MODE (default
 There is no dry-run/print-only mode here; use scripts/validate_eloquence.py
 (or a one-off snippet) for that.
 
+The same candidate selection and scoring is exposed to the web admin panel
+by api.py's GET /eloquence/candidates and POST /eloquence/score, which
+share this module's helpers (select_eloquence_candidates() in
+core/eloquence.py, run_immediate()/run_batch() here) so the CLI and the
+panel can't drift on what "passes the criteria".
+
 Usage:
     cd backend
     .venv/bin/python scripts/score_eloquence.py                       # only unscored candidates
     .venv/bin/python scripts/score_eloquence.py --force                # re-score every candidate
                                                                           # (e.g. after a rubric change)
+    .venv/bin/python scripts/score_eloquence.py --limit 50             # only the first 50 candidates
     ANALYSIS_MODE=batch .venv/bin/python scripts/score_eloquence.py    # submit candidates as OpenAI batch jobs
 """
 
@@ -46,7 +53,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.database import get_db
-from core.eloquence import LENGTH_THRESHOLD, passes_prefilter, score_and_stamp_eloquence, build_eloquence_batch_request
+from core.eloquence import (
+    LENGTH_THRESHOLD,
+    build_eloquence_batch_request,
+    score_and_stamp_eloquence,
+    select_eloquence_candidates,
+)
 
 # See scripts/rescan_post.py's OPENAI_BATCH_CHUNK_SIZE for the same rationale:
 # chunking gives each chunk a durable checkpoint as soon as it's submitted,
@@ -56,22 +68,23 @@ BATCH_CHUNK_SIZE = int(os.getenv("ELOQUENCE_BATCH_CHUNK_SIZE", "50"))
 
 
 def _select_candidates(db, force: bool):
-    rows = db.get_posts_for_eloquence_scoring(LENGTH_THRESHOLD, include_scored=force)
-    pending = {j["shortcode"] for j in db.get_eloquence_batch_jobs()}
-    not_pending = [r for r in rows if r["shortcode"] not in pending]
-    candidates = [r for r in not_pending if passes_prefilter(r["audio_transcription"])]
+    sel = select_eloquence_candidates(db, force)
     print(
-        f"{len(rows)} post(s) over {LENGTH_THRESHOLD} chars"
+        f"{sel['total_over_threshold']} post(s) over {LENGTH_THRESHOLD} chars"
         f"{' (rescoring all)' if force else ' and unscored'}; "
-        f"{len(rows) - len(not_pending)} skipped (batch already in flight); "
-        f"{len(not_pending) - len(candidates)} skipped by filler-ratio pre-filter; "
-        f"{len(candidates)} candidate(s)."
+        f"{sel['skipped_pending']} skipped (batch already in flight); "
+        f"{sel['skipped_prefilter']} skipped by filler-ratio pre-filter; "
+        f"{len(sel['candidates'])} candidate(s)."
     )
-    return candidates
+    return sel["candidates"]
 
 
-def run_immediate(db, candidates: list) -> None:
-    ok = fail = 0
+def run_immediate(db, candidates: list, on_result=None) -> dict:
+    """Score `candidates` one by one, synchronously. `on_result(index, row,
+    verdict)` (verdict: True/False/None) is called after each post so api.py's
+    background-job runner can update its progress counters; the CLI just
+    prints. Returns {"eloquent", "not_eloquent", "failed"} counts."""
+    eloquent = not_eloquent = fail = 0
     for i, row in enumerate(candidates, start=1):
         shortcode = row["shortcode"]
         print(f"[{i}/{len(candidates)}] {shortcode} — {row['title']!r} ...", end=" ", flush=True)
@@ -80,14 +93,23 @@ def run_immediate(db, candidates: list) -> None:
         if is_eloquent is None:
             fail += 1
             print("FAILED (no parseable verdict returned)")
+        elif is_eloquent:
+            eloquent += 1
+            print("ELOQUENT")
         else:
-            ok += 1
-            print("ELOQUENT" if is_eloquent else "not eloquent")
+            not_eloquent += 1
+            print("not eloquent")
+        if on_result:
+            on_result(i, row, is_eloquent)
 
-    print(f"\nDone. {ok} succeeded, {fail} failed.")
+    print(f"\nDone. {eloquent + not_eloquent} succeeded, {fail} failed.")
+    return {"eloquent": eloquent, "not_eloquent": not_eloquent, "failed": fail}
 
 
-def run_batch(db, candidates: list) -> None:
+def run_batch(db, candidates: list) -> dict:
+    """Submit `candidates` as OpenAI Batch API jobs (chunked) and return
+    immediately — {"submitted": n, "batch_jobs": k}. Results are picked up
+    later by core/eloquence_batch_processor.py."""
     from core.model_router import get_router
 
     router = get_router()
@@ -103,15 +125,32 @@ def run_batch(db, candidates: list) -> None:
         submitted += len(chunk)
         print(f"  chunk {start // BATCH_CHUNK_SIZE + 1}: {len(chunk)} post(s) -> batch {batch_id}")
 
+    batch_jobs = (len(candidates) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
     print(
-        f"\nSubmitted {submitted} post(s) across "
-        f"{(len(candidates) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE} batch job(s). "
+        f"\nSubmitted {submitted} post(s) across {batch_jobs} batch job(s). "
         f"Results are picked up on the next backend startup or POST /eloquence/batches/check."
     )
+    return {"submitted": submitted, "batch_jobs": batch_jobs}
+
+
+def _parse_limit(argv: list):
+    """--limit N: only process the first N candidates. None when absent."""
+    if "--limit" not in argv:
+        return None
+    try:
+        limit = int(argv[argv.index("--limit") + 1])
+    except (IndexError, ValueError):
+        print("[ERROR] --limit needs a positive integer.")
+        sys.exit(2)
+    if limit < 1:
+        print("[ERROR] --limit needs a positive integer.")
+        sys.exit(2)
+    return limit
 
 
 def main() -> None:
     force = "--force" in sys.argv
+    limit = _parse_limit(sys.argv)
     analysis_mode = os.getenv("ANALYSIS_MODE", "immediate").strip().lower()
 
     db = get_db()
@@ -123,6 +162,9 @@ def main() -> None:
     if not candidates:
         print("Nothing to score.")
         return
+    if limit is not None and limit < len(candidates):
+        print(f"--limit {limit}: processing the first {limit} of {len(candidates)} candidate(s).")
+        candidates = candidates[:limit]
 
     if analysis_mode == "batch":
         run_batch(db, candidates)

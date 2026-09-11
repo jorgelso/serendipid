@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import CheckBatchesButton from "@/components/CheckBatchesButton";
+import EloquenceScoring from "@/components/EloquenceScoring";
 import RefreshButton from "@/components/RefreshButton";
 import StuckReels from "@/components/StuckReels";
 import type { ImportJob, InstagramExportPreview } from "@/types/domain";
@@ -193,6 +194,8 @@ export default function AdminPage() {
           <CheckBatchesButton />
         </div>
       </div>
+
+      <EloquenceScoring />
 
       <StuckReels />
 

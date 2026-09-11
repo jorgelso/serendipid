@@ -66,6 +66,31 @@ def passes_prefilter(transcript: str) -> bool:
     return fr is not None and fr < FILLER_RATIO_THRESHOLD
 
 
+def select_eloquence_candidates(db, force: bool = False) -> dict:
+    """Shared candidate selection for scripts/score_eloquence.py and the
+    /eloquence/candidates + /eloquence/score endpoints in api.py, so the
+    CLI and the admin panel always agree on "how many posts pass the
+    criteria". Applies, in order: the length threshold (in SQL, via
+    get_posts_for_eloquence_scoring), the already-scored skip (unless
+    force), the batch-already-in-flight skip, and passes_prefilter().
+
+    Returns {"candidates": [...rows...], "total_over_threshold": int,
+    "skipped_pending": int, "skipped_prefilter": int} — the counts are what
+    the admin panel shows next to the candidate total so a surprisingly
+    small number is explainable without reading this file.
+    """
+    rows = db.get_posts_for_eloquence_scoring(LENGTH_THRESHOLD, include_scored=force)
+    pending = {j["shortcode"] for j in db.get_eloquence_batch_jobs()}
+    not_pending = [r for r in rows if r["shortcode"] not in pending]
+    candidates = [r for r in not_pending if passes_prefilter(r["audio_transcription"])]
+    return {
+        "candidates": candidates,
+        "total_over_threshold": len(rows),
+        "skipped_pending": len(rows) - len(not_pending),
+        "skipped_prefilter": len(not_pending) - len(candidates),
+    }
+
+
 ELOQUENCE_PROMPT = """[You are judging a spoken-word transcript for ELOQUENCE IN THE ORATORY
 SENSE — not for topic, not for how useful or correct the content is, and not
 for whether the delivery is merely clear or well-organized on its own.

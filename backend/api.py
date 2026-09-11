@@ -2504,6 +2504,194 @@ async def list_eloquence_overrides(token: str = Depends(verify_token)):
     return {"success": True, "overrides": db.get_eloquence_overrides()}
 
 
+# ── Eloquence scoring from the admin panel ───────────────────────────────
+# Web-driven equivalent of scripts/score_eloquence.py: the candidate count
+# is previewed first (GET /eloquence/candidates) so the user can decide how
+# many to spend LLM calls on (POST /eloquence/score {limit}), instead of
+# the script's all-or-nothing run. Both share the script's own helpers so
+# the CLI and the panel can't disagree on what "passes the criteria".
+#
+# Job state is in-memory only (no table): each post's verdict is written to
+# `analyses` the moment it's scored, so a backend restart mid-run loses
+# nothing but the progress readout — the unscored remainder simply shows up
+# as candidates again. Single job at a time (409 otherwise), same as the
+# import jobs.
+
+_ELOQUENCE_SCORE_LOG_MAX_LINES = 200
+_eloquence_score_job: Optional[dict] = None
+_eloquence_score_lock = threading.Lock()
+
+
+class EloquenceScoreRequest(BaseModel):
+    # None = every candidate ("Score all"); otherwise only the first N.
+    limit: Optional[int] = None
+    # Re-score posts that already have a verdict (scripts/score_eloquence.py
+    # --force) — e.g. after an ELOQUENCE_PROMPT change.
+    force: bool = False
+
+
+def _eloquence_job_snapshot() -> Optional[dict]:
+    with _eloquence_score_lock:
+        if _eloquence_score_job is None:
+            return None
+        job = dict(_eloquence_score_job)
+        job["log_tail"] = "".join(job.pop("_log_lines"))
+        return job
+
+
+def _run_eloquence_score_job(job_id: str, candidates: list, analysis_mode: str):
+    """Background thread body for POST /eloquence/score. Drives
+    scripts/score_eloquence.py's run_immediate()/run_batch() directly (the
+    sys.path insert for the scripts dir happens further down this file, at
+    import time, so a lazy import here resolves)."""
+    import score_eloquence as _score  # noqa: E402  (scripts/ is on sys.path)
+
+    db = get_db()
+
+    def _log(line: str):
+        with _eloquence_score_lock:
+            lines = _eloquence_score_job["_log_lines"]
+            lines.append(line if line.endswith("\n") else line + "\n")
+            del lines[:-_ELOQUENCE_SCORE_LOG_MAX_LINES]
+
+    def _on_result(index: int, row: dict, verdict):
+        with _eloquence_score_lock:
+            job = _eloquence_score_job
+            job["processed"] = index
+            if verdict is None:
+                job["failed"] += 1
+            elif verdict:
+                job["eloquent"] += 1
+            else:
+                job["not_eloquent"] += 1
+        label = "FAILED (no parseable verdict)" if verdict is None else ("ELOQUENT" if verdict else "not eloquent")
+        _log(f"[{index}/{len(candidates)}] {row['shortcode']} — {row['title']!r}: {label}")
+
+    try:
+        if analysis_mode == "batch":
+            result = _score.run_batch(db, candidates)
+            with _eloquence_score_lock:
+                _eloquence_score_job.update(
+                    processed=result["submitted"], submitted=result["submitted"],
+                    batch_jobs=result["batch_jobs"],
+                )
+            _log(
+                f"Submitted {result['submitted']} post(s) across {result['batch_jobs']} batch job(s). "
+                "Results land on the next backend startup or POST /eloquence/batches/check."
+            )
+        else:
+            _score.run_immediate(db, candidates, on_result=_on_result)
+        with _eloquence_score_lock:
+            _eloquence_score_job.update(status="complete", finished_at=datetime.utcnow().isoformat())
+    except Exception as e:
+        logger.error(f"Eloquence scoring job {job_id} failed: {e}")
+        with _eloquence_score_lock:
+            _eloquence_score_job.update(
+                status="failed", finished_at=datetime.utcnow().isoformat(), error=str(e),
+            )
+
+
+@app.get("/eloquence/candidates")
+async def eloquence_candidates(force: bool = False, token: str = Depends(verify_token)):
+    """
+    How many posts would scripts/score_eloquence.py score right now, with
+    the same selection it uses (length threshold → not-yet-scored unless
+    force → no batch in flight → filler-ratio pre-filter). The breakdown
+    counts are returned so the admin panel can explain a small number.
+    Nothing is scored here — this is the preview before POST /eloquence/score.
+    """
+    from core.eloquence import LENGTH_THRESHOLD, select_eloquence_candidates
+
+    db = get_db()
+    sel = await asyncio.to_thread(select_eloquence_candidates, db, force)
+    return {
+        "success": True,
+        "analysis_mode": ANALYSIS_MODE,
+        "length_threshold": LENGTH_THRESHOLD,
+        "force": force,
+        "candidate_count": len(sel["candidates"]),
+        "total_over_threshold": sel["total_over_threshold"],
+        "skipped_pending": sel["skipped_pending"],
+        "skipped_prefilter": sel["skipped_prefilter"],
+    }
+
+
+@app.post("/eloquence/score")
+async def start_eloquence_score(req: EloquenceScoreRequest, token: str = Depends(verify_token)):
+    """
+    Score the first `limit` current candidates (all of them when limit is
+    null) in a background thread and return immediately with the job; poll
+    GET /eloquence/score/status. Honors ANALYSIS_MODE exactly like the
+    script: `immediate` scores synchronously post by post (the job stays
+    'running' until the last one), `batch` submits OpenAI Batch jobs and
+    completes as soon as they're submitted.
+
+    Candidates are re-selected at start time, so the count the panel
+    previewed may differ slightly if posts were analyzed in between.
+    """
+    global _eloquence_score_job
+
+    if req.limit is not None and req.limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be a positive integer or null.")
+
+    from core.eloquence import select_eloquence_candidates
+
+    with _eloquence_score_lock:
+        if _eloquence_score_job and _eloquence_score_job["status"] == "running":
+            raise HTTPException(status_code=409, detail="An eloquence scoring job is already running.")
+
+    db = get_db()
+    sel = await asyncio.to_thread(select_eloquence_candidates, db, req.force)
+    candidates = sel["candidates"]
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No posts currently pass the eloquence criteria.")
+    if req.limit is not None:
+        candidates = candidates[:req.limit]
+
+    job_id = uuid.uuid4().hex
+    with _eloquence_score_lock:
+        # Re-check under the lock — two clicks racing past the check above
+        # must not both start a thread.
+        if _eloquence_score_job and _eloquence_score_job["status"] == "running":
+            raise HTTPException(status_code=409, detail="An eloquence scoring job is already running.")
+        _eloquence_score_job = {
+            "id": job_id,
+            "status": "running",
+            "analysis_mode": ANALYSIS_MODE,
+            "force": req.force,
+            "requested": req.limit,
+            "total": len(candidates),
+            "candidate_count": len(sel["candidates"]),
+            "processed": 0,
+            "eloquent": 0,
+            "not_eloquent": 0,
+            "failed": 0,
+            "submitted": 0,
+            "batch_jobs": 0,
+            "error": None,
+            "started_at": datetime.utcnow().isoformat(),
+            "finished_at": None,
+            "_log_lines": [
+                f"Scoring {len(candidates)} of {len(sel['candidates'])} candidate(s) "
+                f"(mode: {ANALYSIS_MODE}{', re-scoring already-scored' if req.force else ''}).\n"
+            ],
+        }
+
+    threading.Thread(
+        target=_run_eloquence_score_job, args=(job_id, candidates, ANALYSIS_MODE), daemon=True,
+    ).start()
+    logger.info(f"🎙️ Eloquence scoring job {job_id}: {len(candidates)} post(s), mode={ANALYSIS_MODE}")
+    return {"success": True, "data": _eloquence_job_snapshot()}
+
+
+@app.get("/eloquence/score/status")
+async def eloquence_score_status(token: str = Depends(verify_token)):
+    """The most recent POST /eloquence/score job (running or finished) since
+    this backend process started, or null — in-memory only, see the comment
+    above _eloquence_score_job."""
+    return {"success": True, "data": _eloquence_job_snapshot()}
+
+
 @app.delete("/post/{shortcode}")
 async def delete_post(shortcode: str, token: str = Depends(verify_token)):
     """Delete a post by shortcode, killing any active analysis subprocess"""

@@ -11,7 +11,9 @@ import type {
   ChatMessageExchange,
   ChatThread,
   ChatThreadDetail,
+  EloquenceCandidatesResponse,
   EloquenceOverridesResponse,
+  EloquenceScoringJob,
   ExportPayload,
   ImportJob,
   InstagramExportPreview,
@@ -426,6 +428,15 @@ export async function checkRescanBatches(): Promise<BatchCheckResponse> {
   });
 }
 
+// And the third pipeline: scripts/score_eloquence.py --batch's jobs (see
+// backend/core/eloquence_batch_processor.py). Also its own table/endpoint.
+export async function checkEloquenceBatches(): Promise<BatchCheckResponse> {
+  return request<BatchCheckResponse>("/eloquence/batches/check", {
+    method: "POST",
+    timeoutMs: BATCH_CHECK_TIMEOUT_MS,
+  });
+}
+
 // Unlike reanalyzePost(), this returns almost immediately — the backend
 // either does a cheap synchronous fix (posts stamped exactly version 7) or
 // queues a full re-analysis for the background worker to run later, so it
@@ -490,6 +501,31 @@ export async function overrideEloquence(shortcodes: string[]): Promise<Eloquence
 // Audit log of the overrides above — see EloquenceOverride in domain.ts.
 export async function fetchEloquenceOverrides(): Promise<EloquenceOverridesResponse> {
   return request<EloquenceOverridesResponse>("/eloquence/overrides");
+}
+
+// Admin-panel eloquence scoring (the web equivalent of running
+// scripts/score_eloquence.py): preview how many posts pass the criteria,
+// then score only the first `limit` of them (null = all) in a backend
+// background job that's polled via fetchEloquenceScoringStatus().
+export async function fetchEloquenceCandidates(force: boolean): Promise<EloquenceCandidatesResponse> {
+  return request<EloquenceCandidatesResponse>("/eloquence/candidates", {
+    params: { force: String(force) },
+  });
+}
+
+export async function startEloquenceScoring(options: {
+  limit: number | null;
+  force: boolean;
+}): Promise<{ success: boolean; data: EloquenceScoringJob }> {
+  return request<{ success: boolean; data: EloquenceScoringJob }>("/eloquence/score", {
+    method: "POST",
+    body: options,
+    statusMessages: { 409: "An eloquence scoring job is already running." },
+  });
+}
+
+export async function fetchEloquenceScoringStatus(): Promise<{ success: boolean; data: EloquenceScoringJob | null }> {
+  return request<{ success: boolean; data: EloquenceScoringJob | null }>("/eloquence/score/status");
 }
 
 interface ChatThreadsResponse {

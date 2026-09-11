@@ -4,12 +4,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { BatchCheckResponse } from "@/types/domain";
 
-// Manual trigger for ANALYSIS_MODE=batch's completion check — checks BOTH
-// the first-analysis pipeline (backend/core/batch_processor.py, via
-// /api/batches/check) and the separate rescan pipeline (backend/core/
-// rescan_batch_processor.py, via /api/rescan-batches/check) from one click,
-// since from the user's perspective "check batches" means all of them, even
-// though the backend deliberately tracks the two with separate tables/locks.
+// Manual trigger for ANALYSIS_MODE=batch's completion check — checks ALL
+// THREE batch pipelines from one click: first-analysis (backend/core/
+// batch_processor.py, via /api/batches/check), rescan (backend/core/
+// rescan_batch_processor.py, via /api/rescan-batches/check) and the
+// eloquence backfill (backend/core/eloquence_batch_processor.py, via
+// /api/eloquence-batches/check), since from the user's perspective "check
+// batches" means all of them, even though the backend deliberately tracks
+// each with its own table/lock.
 // The backend also checks each one automatically on its own startup, but
 // there's no periodic polling on its own, so this is how a batch-pending
 // post gets picked up without restarting the backend. Harmless, near-instant
@@ -51,18 +53,22 @@ export default function CheckBatchesButton() {
     setState("loading");
     setMessage(null);
     try {
-      const [firstAnalysisRes, rescanRes] = await Promise.all([
+      const [firstAnalysisRes, rescanRes, eloquenceRes] = await Promise.all([
         fetch("/api/batches/check", { method: "POST" }),
         fetch("/api/rescan-batches/check", { method: "POST" }),
+        fetch("/api/eloquence-batches/check", { method: "POST" }),
       ]);
-      const [firstAnalysisData, rescanData]: (BatchCheckResponse & { error?: string })[] =
-        await Promise.all([firstAnalysisRes.json(), rescanRes.json()]);
+      const [firstAnalysisData, rescanData, eloquenceData]: (BatchCheckResponse & { error?: string })[] =
+        await Promise.all([firstAnalysisRes.json(), rescanRes.json(), eloquenceRes.json()]);
       if (!firstAnalysisRes.ok) throw new Error(firstAnalysisData.error ?? "Batch check failed.");
       if (!rescanRes.ok) throw new Error(rescanData.error ?? "Rescan batch check failed.");
+      if (!eloquenceRes.ok) throw new Error(eloquenceData.error ?? "Eloquence batch check failed.");
 
       setState("idle");
       const finalizedCount =
-        (firstAnalysisData.finalized?.length ?? 0) + (rescanData.finalized?.length ?? 0);
+        (firstAnalysisData.finalized?.length ?? 0) +
+        (rescanData.finalized?.length ?? 0) +
+        (eloquenceData.scored?.length ?? 0);
       setMessage(finalizedCount > 0 ? `${finalizedCount} post(s) finished.` : null);
       router.refresh();
     } catch (err) {

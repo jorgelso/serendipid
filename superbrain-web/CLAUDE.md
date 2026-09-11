@@ -71,7 +71,7 @@ Plots every post as a point in a rotatable 3D scene (`react-three-fiber` + `@rea
 - `/browse` — filtered feed (category / language / collection)
 - `/search` — semantic search
 - `/post/[shortcode]` — single post detail
-- `/admin` — import + background-job control. Also hosts the **Stuck reels** panel (`StuckReels.tsx`, below).
+- `/admin` — import + background-job control. Also hosts the **Stuck reels** panel (`StuckReels.tsx`, below). And the **Eloquence scoring** card (`EloquenceScoring.tsx`): the web twin of `backend/scripts/score_eloquence.py` — shows how many posts pass the criteria first (`/api/eloquence-scoring/candidates`), then "Score the first N" / "Score all" start a backend background job (`/api/eloquence-scoring`, polled via `/api/eloquence-scoring/status`, which is also where `invalidateCache()` fires as verdicts land, since they change the cached `/export` payload the `/eloquent` feed reads). Under `ANALYSIS_MODE=batch` the job completes on submission and verdicts arrive through "Check batches", which calls `/api/eloquence-batches/check` as its third pipeline.
 - `/insights` — stats / taxonomy view
 - `/space` — 3D vector-space view (every post plotted by embedding similarity, colored by cluster)
 - `/ideas` — recurring-tag list (optionally scoped to one theme via `?themeId=`), each row expandable to its source posts with a "Generate study guide" action. **v1 only** — see `src/lib/ideas.ts` below.
