@@ -12,6 +12,7 @@ import type {
   ChatThread,
   ChatThreadDetail,
   EloquenceCandidatesResponse,
+  EloquenceApproveResponse,
   EloquenceOverridesResponse,
   EloquenceScoringJob,
   ExportPayload,
@@ -493,6 +494,15 @@ export interface EloquenceOverrideResponse {
 // /eloquent page's multi-select toolbar. Backend: POST /eloquence/override.
 export async function overrideEloquence(shortcodes: string[]): Promise<EloquenceOverrideResponse> {
   return request<EloquenceOverrideResponse>("/eloquence/override", {
+    method: "POST",
+    body: { shortcodes },
+  });
+}
+
+// The opposite decision: a human confirmed the AI's eloquent verdict, from
+// the /eloquent page's per-card Approve button. Backend: POST /eloquence/approve.
+export async function approveEloquence(shortcodes: string[]): Promise<EloquenceApproveResponse> {
+  return request<EloquenceApproveResponse>("/eloquence/approve", {
     method: "POST",
     body: { shortcodes },
   });

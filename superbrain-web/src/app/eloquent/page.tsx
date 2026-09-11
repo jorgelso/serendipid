@@ -14,7 +14,9 @@ interface EloquentData {
   total: number;
 }
 
-async function loadEloquentData(tutorial: "" | "yes" | "no"): Promise<EloquentData> {
+type Reviewed = "" | "yes" | "no";
+
+async function loadEloquentData(tutorial: "" | "yes" | "no", reviewed: Reviewed): Promise<EloquentData> {
   const config = getConfig();
   const { posts } = await getExport();
 
@@ -22,6 +24,7 @@ async function loadEloquentData(tutorial: "" | "yes" | "no"): Promise<EloquentDa
     sort: "recent",
     eloquent: true,
     tutorial: tutorial || undefined,
+    reviewed: reviewed || undefined,
   });
 
   return {
@@ -34,12 +37,14 @@ export default async function EloquentPage(props: PageProps<"/eloquent">) {
   const searchParams = await props.searchParams;
   const tutorialParam = typeof searchParams.tutorial === "string" ? searchParams.tutorial : "";
   const tutorial = tutorialParam === "yes" || tutorialParam === "no" ? tutorialParam : "";
+  const reviewedParam = typeof searchParams.reviewed === "string" ? searchParams.reviewed : "";
+  const reviewed: Reviewed = reviewedParam === "yes" || reviewedParam === "no" ? reviewedParam : "";
 
   let data: EloquentData | null = null;
   let errorMessage: string | null = null;
 
   try {
-    data = await loadEloquentData(tutorial);
+    data = await loadEloquentData(tutorial, reviewed);
   } catch (err) {
     errorMessage =
       err instanceof SuperBrainApiError ? err.message : "Something went wrong loading eloquent posts.";
@@ -52,7 +57,8 @@ export default async function EloquentPage(props: PageProps<"/eloquent">) {
           <h1 className="font-display font-semibold text-3xl">Eloquent</h1>
           <p className="mt-1 text-ink-muted text-sm">
             Posts judged eloquent in the oratory sense — clear, well-spoken, and rhetorically skilled,
-            independent of topic. Filter between speeches/commentary and tutorial-style delivery.
+            independent of topic. Filter between speeches/commentary and tutorial-style delivery, and
+            approve or reject each card so new scoring runs don&rsquo;t mix into what you&rsquo;ve already checked.
           </p>
         </div>
         <Link
@@ -64,7 +70,7 @@ export default async function EloquentPage(props: PageProps<"/eloquent">) {
       </div>
 
       <div className="mb-6">
-        <EloquenceFilters tutorial={tutorial} />
+        <EloquenceFilters tutorial={tutorial} reviewed={reviewed} />
       </div>
 
       {errorMessage && (
@@ -75,21 +81,25 @@ export default async function EloquentPage(props: PageProps<"/eloquent">) {
 
       {data && data.total === 0 && (
         <p className="text-sm text-ink-muted py-10 text-center">
-          No eloquent posts found for this filter yet.
+          {reviewed === "no"
+            ? "Nothing left to review — every eloquent post here has been approved."
+            : "No eloquent posts found for this filter yet."}
         </p>
       )}
 
       {data && data.total > 0 && (
         <EloquentFeed
           // Same remount-on-filter-change trick as /browse — see its comment.
-          feedKey={`eloquent|${tutorial}`}
+          feedKey={`eloquent|${tutorial}|${reviewed}`}
           initialPosts={data.posts}
           total={data.total}
           pageSize={PAGE_SIZE}
           params={{
             eloquent: "true",
             ...(tutorial ? { tutorial } : {}),
+            ...(reviewed ? { reviewed } : {}),
           }}
+          hidesApproved={reviewed === "no"}
         />
       )}
     </div>

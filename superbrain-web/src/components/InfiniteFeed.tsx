@@ -18,6 +18,16 @@ interface InfiniteFeedProps {
   selectable?: boolean;
   selectedShortcodes?: Set<string>;
   onToggleSelect?: (shortcode: string) => void;
+  // Passthrough to PostCard's per-card Approve/Reject review (/eloquent).
+  eloquenceReview?: {
+    onApproved: (shortcode: string) => void;
+    onRejected: (shortcode: string) => void;
+  };
+  // How many already-loaded posts have since dropped out of the server-side
+  // list (rejected, or approved while the "Unreviewed" filter is on). They
+  // stay in `posts` (the card hides itself) but must not count toward the
+  // next page's offset, or "Load more" skips that many posts.
+  removedCount?: number;
 }
 
 export default function InfiniteFeed({
@@ -28,6 +38,8 @@ export default function InfiniteFeed({
   selectable,
   selectedShortcodes,
   onToggleSelect,
+  eloquenceReview,
+  removedCount = 0,
 }: InfiniteFeedProps) {
   const [posts, setPosts] = useState(initialPosts);
   const [loading, setLoading] = useState(false);
@@ -40,7 +52,7 @@ export default function InfiniteFeed({
     setError(null);
     try {
       const query = new URLSearchParams({
-        offset: String(posts.length),
+        offset: String(posts.length - removedCount),
         limit: String(pageSize),
         ...params,
       });
@@ -79,6 +91,7 @@ export default function InfiniteFeed({
             selectable={selectable}
             selected={selectedShortcodes?.has(post.shortcode)}
             onToggleSelect={onToggleSelect ? () => onToggleSelect(post.shortcode) : undefined}
+            eloquenceReview={eloquenceReview}
           />
         ))}
       </MasonryGrid>

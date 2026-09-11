@@ -2494,6 +2494,29 @@ async def override_eloquence(payload: dict, token: str = Depends(verify_token)):
     }
 
 
+@app.post("/eloquence/approve")
+async def approve_eloquence(payload: dict, token: str = Depends(verify_token)):
+    """
+    The other half of the /eloquent page's per-card review: a human looked
+    at the post and agrees it belongs there. Stamps analyses.eloquence_reviewed
+    = 1 (db.approve_eloquence()) so the page can hide its approve/reject
+    buttons for that card and filter to "unreviewed" — otherwise every fresh
+    scoring run's new arrivals are indistinguishable from posts already
+    checked. Nothing else changes; the verdict itself was already eloquent.
+    """
+    shortcodes = payload.get("shortcodes")
+    if not isinstance(shortcodes, list) or not shortcodes or not all(isinstance(s, str) for s in shortcodes):
+        raise HTTPException(status_code=400, detail="shortcodes must be a non-empty list of strings")
+
+    db = get_db()
+    buckets = {"approved": [], "already_approved": [], "not_eloquent": [], "not_found": []}
+    for shortcode in shortcodes:
+        buckets[db.approve_eloquence(shortcode)].append(shortcode)
+
+    logger.info(f"✅ Eloquence approved: {buckets['approved']}")
+    return {"success": True, **buckets}
+
+
 @app.get("/eloquence/overrides")
 async def list_eloquence_overrides(token: str = Depends(verify_token)):
     """Audit log of manual eloquence corrections (POST /eloquence/override) —

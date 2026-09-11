@@ -12,6 +12,9 @@ interface EloquentFeedProps {
   total: number;
   pageSize: number;
   params: Record<string, string>;
+  // Whether the active filter hides approved posts (reviewed=no) — decides
+  // whether an Approve click also shrinks the server-side list.
+  hidesApproved: boolean;
 }
 
 type ConfirmState = "idle" | "confirming" | "submitting" | "error";
@@ -21,12 +24,29 @@ type ConfirmState = "idle" | "confirming" | "submitting" | "error";
 // positives (POST /api/eloquence-override -> backend POST /eloquence/override).
 // Selection state lives here rather than in InfiniteFeed so it survives
 // "Load more" adding fresh posts to that component's own internal state.
-export default function EloquentFeed({ feedKey, initialPosts, total, pageSize, params }: EloquentFeedProps) {
+export default function EloquentFeed({
+  feedKey,
+  initialPosts,
+  total,
+  pageSize,
+  params,
+  hidesApproved,
+}: EloquentFeedProps) {
   const router = useRouter();
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmState, setConfirmState] = useState<ConfirmState>("idle");
   const [message, setMessage] = useState<string | null>(null);
+  // Per-card review (EloquenceReviewButtons via PostCard): cards handle
+  // their own hide/collapse; this only tracks how many have left the
+  // server-side list so InfiniteFeed's next "Load more" offset stays right.
+  const [removedCount, setRemovedCount] = useState(0);
+  const eloquenceReview = {
+    onApproved: () => {
+      if (hidesApproved) setRemovedCount((n) => n + 1);
+    },
+    onRejected: () => setRemovedCount((n) => n + 1),
+  };
 
   function toggleSelect(shortcode: string) {
     setSelected((prev) => {
@@ -94,6 +114,8 @@ export default function EloquentFeed({ feedKey, initialPosts, total, pageSize, p
         selectable={selecting}
         selectedShortcodes={selected}
         onToggleSelect={toggleSelect}
+        eloquenceReview={eloquenceReview}
+        removedCount={removedCount}
       />
 
       {(confirmState === "confirming" || confirmState === "submitting" || confirmState === "error") && (

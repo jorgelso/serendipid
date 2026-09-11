@@ -366,6 +366,19 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # Migration: eloquence_reviewed — a human has looked at this post on
+        # the web /eloquent page and confirmed the AI's "eloquent" verdict
+        # (POST /eloquence/approve). Distinct from the override log, which is
+        # the opposite decision: this exists so a fresh scoring run's new
+        # arrivals can be told apart from posts already reviewed, instead of
+        # the two blending into one undifferentiated list. NULL = not yet
+        # reviewed. Cleared when a post is overridden to not eloquent.
+        try:
+            self._conn.execute("ALTER TABLE analyses ADD COLUMN eloquence_reviewed INTEGER DEFAULT NULL")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Migration: add caption — the raw Instagram post caption (scraped by
         # instaloader into media/<shortcode>/info.txt), stored verbatim for
         # display under the AI summary. Empty for posts with no caption, non-
@@ -692,6 +705,12 @@ class Database:
                 stashed_at           TEXT
             );
         """)
+        # Additive migration for the stash: carry the human approval flag
+        # across a force re-analysis too, for the same reason as the verdict.
+        try:
+            self._conn.execute("ALTER TABLE eloquence_stash ADD COLUMN eloquence_reviewed INTEGER DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
         # post_views — one row per qualifying view (video >=60% watched, non-video
@@ -1343,13 +1362,15 @@ class Database:
                 # _create_tables. No-op for a normal first-time save/UPSERT where
                 # nothing was ever stashed for this shortcode.
                 stashed = self._conn.execute(
-                    "SELECT is_eloquent, eloquence_rationale, is_tutorial FROM eloquence_stash WHERE shortcode = ?",
+                    "SELECT is_eloquent, eloquence_rationale, is_tutorial, eloquence_reviewed "
+                    "FROM eloquence_stash WHERE shortcode = ?",
                     (shortcode,)
                 ).fetchone()
                 if stashed:
                     self._conn.execute(
-                        "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ?, is_tutorial = ? WHERE shortcode = ?",
-                        (stashed[0], stashed[1], stashed[2], shortcode),
+                        "UPDATE analyses SET is_eloquent = ?, eloquence_rationale = ?, is_tutorial = ?, "
+                        "eloquence_reviewed = ? WHERE shortcode = ?",
+                        (stashed[0], stashed[1], stashed[2], stashed[3], shortcode),
                     )
                     self._conn.execute("DELETE FROM eloquence_stash WHERE shortcode = ?", (shortcode,))
 
@@ -1579,13 +1600,46 @@ class Database:
                 (shortcode, row["eloquence_rationale"], row["is_tutorial"], datetime.utcnow().isoformat()),
             )
             self._conn.execute(
-                "UPDATE analyses SET is_eloquent = 0, eloquence_rationale = ? WHERE shortcode = ?",
+                "UPDATE analyses SET is_eloquent = 0, eloquence_rationale = ?, eloquence_reviewed = NULL "
+                "WHERE shortcode = ?",
                 ("Manually overridden: marked not eloquent from the web UI.", shortcode),
             )
             self._conn.commit()
             return "overridden"
         except Exception as e:
             print(f"[WARNING]  Error overriding eloquence for {shortcode}: {e}")
+            return "not_found"
+
+    def approve_eloquence(self, shortcode: str) -> str:
+        """Stamp one post as human-reviewed-and-confirmed eloquent
+        (eloquence_reviewed = 1) — the "approve" half of the /eloquent
+        page's per-card review, the other half being
+        override_eloquence_not_eloquent(). Only meaningful for a post that
+        is currently eloquent; approving anything else is refused rather
+        than silently stamping a post the page would never show.
+
+        Returns 'approved', 'already_approved', 'not_eloquent', or 'not_found'.
+        """
+        if not self.is_connected():
+            return "not_found"
+        try:
+            row = self._conn.execute(
+                "SELECT is_eloquent, eloquence_reviewed FROM analyses WHERE shortcode = ?",
+                (shortcode,)
+            ).fetchone()
+            if row is None:
+                return "not_found"
+            if row["is_eloquent"] != 1:
+                return "not_eloquent"
+            if row["eloquence_reviewed"] == 1:
+                return "already_approved"
+            self._conn.execute(
+                "UPDATE analyses SET eloquence_reviewed = 1 WHERE shortcode = ?", (shortcode,)
+            )
+            self._conn.commit()
+            return "approved"
+        except Exception as e:
+            print(f"[WARNING]  Error approving eloquence for {shortcode}: {e}")
             return "not_found"
 
     def get_eloquence_overrides(self):
@@ -2894,15 +2948,16 @@ class Database:
             return False
         try:
             row = self._conn.execute(
-                "SELECT is_eloquent, eloquence_rationale, is_tutorial FROM analyses WHERE shortcode = ?",
+                "SELECT is_eloquent, eloquence_rationale, is_tutorial, eloquence_reviewed "
+                "FROM analyses WHERE shortcode = ?",
                 (shortcode,)
             ).fetchone()
             if row and row[0] is not None:
                 self._conn.execute(
                     """INSERT OR REPLACE INTO eloquence_stash
-                       (shortcode, is_eloquent, eloquence_rationale, is_tutorial, stashed_at)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (shortcode, row[0], row[1], row[2], datetime.utcnow().isoformat()),
+                       (shortcode, is_eloquent, eloquence_rationale, is_tutorial, eloquence_reviewed, stashed_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (shortcode, row[0], row[1], row[2], row[3], datetime.utcnow().isoformat()),
                 )
             cur = self._conn.execute(
                 "DELETE FROM analyses WHERE shortcode = ?",

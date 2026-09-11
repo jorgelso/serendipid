@@ -20,6 +20,7 @@ import ReviewActions from "./ReviewActions";
 import PostModal from "./PostModal";
 import DeletePostButton from "./DeletePostButton";
 import AddToBoardMenu from "./AddToBoardMenu";
+import EloquenceReviewButtons from "./EloquenceReviewButtons";
 
 interface PostCardProps {
   post: ClientPost & { similarity?: number };
@@ -33,12 +34,35 @@ interface PostCardProps {
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
+  // Per-card Approve/Reject review on /eloquent (EloquenceReviewButtons) —
+  // only rendered while the post is eloquent and not yet approved. Reject
+  // collapses the card in place; both notify the caller so it can keep
+  // "Load more" offsets honest (see InfiniteFeed's removedCount).
+  eloquenceReview?: {
+    onApproved: (shortcode: string) => void;
+    onRejected: (shortcode: string) => void;
+  };
 }
 
-export default function PostCard({ post, rescanMode, selectable, selected, onToggleSelect }: PostCardProps) {
+export default function PostCard({
+  post,
+  rescanMode,
+  selectable,
+  selected,
+  onToggleSelect,
+  eloquenceReview,
+}: PostCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [reviewed, setReviewed] = useState<"approved" | "rejected" | null>(null);
   const missingVideo = isMissingVideo(post);
   const changelog = useChangelog();
+
+  // Rejected from /eloquent's review: the post is no longer eloquent, so it
+  // leaves the list right here rather than lingering until a reload.
+  if (reviewed === "rejected") return null;
+
+  const showEloquenceReview =
+    !!eloquenceReview && post.is_eloquent === 1 && post.eloquence_reviewed !== 1 && reviewed !== "approved";
 
   return (
     <article
@@ -154,6 +178,20 @@ export default function PostCard({ post, rescanMode, selectable, selected, onTog
             url={post.url}
             analysisVersion={post.analysis_version}
             rescanMode={rescanMode}
+          />
+        )}
+
+        {showEloquenceReview && (
+          <EloquenceReviewButtons
+            shortcode={post.shortcode}
+            onApproved={() => {
+              setReviewed("approved");
+              eloquenceReview!.onApproved(post.shortcode);
+            }}
+            onRejected={() => {
+              setReviewed("rejected");
+              eloquenceReview!.onRejected(post.shortcode);
+            }}
           />
         )}
       </div>

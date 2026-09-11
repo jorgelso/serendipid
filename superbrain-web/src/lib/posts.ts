@@ -137,6 +137,9 @@ export function filterPosts(
     // or ===0 ("no") among those — undefined/"all" applies no narrowing.
     eloquent?: boolean;
     tutorial?: "yes" | "no";
+    // Human review state among eloquent posts: "no" keeps only posts not
+    // yet approved (the review queue), "yes" only approved ones.
+    reviewed?: "yes" | "no";
   }
 ): Post[] {
   const dir = options.dir ?? "desc";
@@ -174,6 +177,11 @@ export function filterPosts(
     filtered = filtered.filter((p) => p.is_tutorial === 1);
   } else if (options.tutorial === "no") {
     filtered = filtered.filter((p) => p.is_tutorial === 0);
+  }
+  if (options.reviewed === "yes") {
+    filtered = filtered.filter((p) => p.eloquence_reviewed === 1);
+  } else if (options.reviewed === "no") {
+    filtered = filtered.filter((p) => p.eloquence_reviewed !== 1);
   }
   return filtered;
 }
@@ -388,6 +396,7 @@ export function mergeSearchHitsWithPosts(
           is_eloquent: null,
           is_tutorial: null,
           eloquence_rationale: null,
+          eloquence_reviewed: null,
         };
 
     return {

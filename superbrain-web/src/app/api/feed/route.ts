@@ -32,6 +32,8 @@ export async function GET(request: NextRequest) {
   const eloquent = searchParams.get("eloquent") === "true";
   const tutorialParam = searchParams.get("tutorial");
   const tutorial = tutorialParam === "yes" || tutorialParam === "no" ? tutorialParam : undefined;
+  const reviewedParam = searchParams.get("reviewed");
+  const reviewed = reviewedParam === "yes" || reviewedParam === "no" ? reviewedParam : undefined;
 
   try {
     const config = getConfig();
@@ -47,6 +49,7 @@ export async function GET(request: NextRequest) {
       importance,
       eloquent,
       tutorial,
+      reviewed,
     });
     const total = filtered.length;
     const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p, config.apiUrl));

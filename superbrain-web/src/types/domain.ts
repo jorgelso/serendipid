@@ -86,6 +86,12 @@ export interface Post {
   is_eloquent: 0 | 1 | null;
   is_tutorial: 0 | 1 | null;
   eloquence_rationale: string | null;
+  // Human confirmation of an eloquent verdict from /eloquent's per-card
+  // Approve button (backend POST /eloquence/approve) — 1 once approved,
+  // null otherwise. Lets a fresh scoring run's new arrivals be told apart
+  // from posts already reviewed (the "Unreviewed" filter). Cleared by a
+  // "not eloquent" override.
+  eloquence_reviewed: 0 | 1 | null;
 }
 
 export type RatingTier = "liked" | "loved" | null;
@@ -209,6 +215,15 @@ export interface EloquenceOverride {
 export interface EloquenceOverridesResponse {
   success: boolean;
   overrides: EloquenceOverride[];
+}
+
+// Mirrors backend/api.py's POST /eloquence/approve.
+export interface EloquenceApproveResponse {
+  success: boolean;
+  approved: string[];
+  already_approved: string[];
+  not_eloquent: string[];
+  not_found: string[];
 }
 
 // Mirrors backend/api.py's GET /eloquence/candidates — the "how many posts
