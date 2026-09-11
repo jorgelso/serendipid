@@ -638,6 +638,28 @@ async def _run_or_queue_analysis(
                 detail="This URL is already being analyzed. Please wait and try again in a moment."
             )
 
+        # status='batch' means main.py already did the download and the
+        # expensive local work, and the AI calls are in flight in an OpenAI
+        # Batch API job (ANALYSIS_MODE=batch), tracked in batch_jobs and
+        # finished later by core/batch_processor.check_and_advance_batches().
+        #
+        # Nothing below would notice: mark_processing() would overwrite the
+        # 'batch' status a few lines down and main.py would re-download and
+        # re-analyze the whole reel from scratch — paying for the work twice
+        # and orphaning the batch_jobs row, whose eventual completion then
+        # overwrites the fresh result. The row is only removed once the batch
+        # finalizes, so a plain "already in flight" refusal is correct and
+        # self-clearing.
+        if db.get_queue_status(shortcode) == "batch":
+            logger.warning(f"📦 [{shortcode}] Already submitted to an AI batch — refusing to duplicate.")
+            raise HTTPException(
+                status_code=409,
+                detail="This post's analysis is already in flight in an OpenAI batch and will "
+                       "finish on its own (up to 24h). Re-analyzing now would duplicate the work. "
+                       "Use POST /batches/check to advance it, or DELETE /queue/{shortcode} first "
+                       "if you really want to start over."
+            )
+
         queue_items = db.get_queue()
         for item in queue_items:
             if item['shortcode'] == shortcode:

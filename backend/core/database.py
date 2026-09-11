@@ -2263,6 +2263,26 @@ class Database:
 
     # ==================== QUEUE MANAGEMENT ====================
 
+    def get_queue_status(self, shortcode: str):
+        """Return one shortcode's processing_queue status, or None if absent.
+
+        A PK lookup, deliberately cheaper than get_processing()/get_queue()/
+        get_batch_jobs() for the "is this specific reel already in flight?"
+        admission check — which runs on every /analyze request.
+        """
+        if not self.is_connected():
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT status FROM processing_queue WHERE shortcode = ?", (shortcode,)
+            )
+            row = cur.fetchone()
+            return row["status"] if row else None
+        except Exception as e:
+            print(f"[WARNING]  Error getting queue status for {shortcode}: {e}")
+            return None
+
     def add_to_queue(self, shortcode, url, caption=None, hashtags=None, date_saved=None):
         """Add item to processing queue. Returns queue position (1-based), or -1 on error.
 
