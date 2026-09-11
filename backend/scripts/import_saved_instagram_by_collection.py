@@ -43,6 +43,7 @@ from import_saved_instagram import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_SERVER_URL,
     DEFAULT_STATE_FILE,
+    HANDED_OFF_TO_SERVER,
     analyze_url,
     build_url_metadata,
     ensure_post_in_collection,
@@ -244,15 +245,29 @@ def main() -> None:
                 success_count += 1
                 print(f"[{i}/{total}]   OK" + (" (cached)" if cached else ""))
             except ApiError as e:
-                entry["attempts"] += 1
                 entry["last_error"] = f"{e.status}: {e.detail}"
-                if e.status == 202:
-                    print(f"[{i}/{total}]   RATE-LIMITED / quota exhausted, server will retry in 24h: {e.detail}")
-                elif e.status == 503:
-                    print(f"[{i}/{total}]   SERVER BUSY, queued server-side: {e.detail}")
-                elif e.status == 409:
-                    print(f"[{i}/{total}]   ALREADY PROCESSING: {e.detail}")
-                elif e.status == 504:
+                if e.status in HANDED_OFF_TO_SERVER:
+                    # Backend owns this now and will finish it on its own — a
+                    # 24h retry or a Batch API submission (202), a
+                    # processing_queue slot (503), or an analysis already in
+                    # flight (409). Not a failed attempt, so it must not count
+                    # against --max-attempts; see the matching handler in
+                    # import_saved_instagram.py for the full reasoning.
+                    if e.status == 503:
+                        print(f"[{i}/{total}]   SERVER BUSY, queued server-side (will be analyzed automatically): {e.detail}")
+                    elif e.status == 409:
+                        print(f"[{i}/{total}]   ALREADY IN FLIGHT server-side: {e.detail}")
+                    else:
+                        print(f"[{i}/{total}]   RATE-LIMITED / quota exhausted, server will retry in 24h: {e.detail}")
+                    entry["status"] = "pending"
+                    pending_count += 1
+                    entry["last_updated"] = now_iso()
+                    save_state(args.state_file, state)
+                    time.sleep(random.uniform(args.delay_min, args.delay_max))
+                    continue
+
+                entry["attempts"] += 1
+                if e.status == 504:
                     print(f"[{i}/{total}]   TIMEOUT (10 min): {e.detail}")
                 elif e.status == 410:
                     # User deleted this post via a client — respect that and

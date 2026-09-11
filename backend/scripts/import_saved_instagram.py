@@ -68,6 +68,17 @@ DEFAULT_DELAY_MIN = 8.0
 DEFAULT_DELAY_MAX = 20.0
 DEFAULT_MAX_ATTEMPTS = 5
 
+# /analyze responses that mean "the backend owns this now and will finish it
+# itself", as opposed to "this attempt failed". These must never count against
+# --max-attempts — see the handler in run_import() for the full reasoning.
+# Shared with import_saved_instagram_by_collection.py, which imports it.
+#
+#   202  queued a 24h automatic retry, or submitted to the OpenAI Batch API
+#   503  backend busy — the request went into processing_queue
+#   409  already in flight: currently being analyzed, or (since the
+#        status='batch' admission guard) already submitted to a batch
+HANDED_OFF_TO_SERVER = frozenset({202, 409, 503})
+
 # Same shortcode pattern as backend/core/link_checker.py::_validate_instagram
 _IG_URL_RE = re.compile(
     r"https?://(?:www\.)?instagram\.com/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)",
@@ -780,28 +791,37 @@ def main() -> None:
                 print(f"[{i}/{total}]   OK" + (" (cached)" if cached else ""))
             except ApiError as e:
                 entry["last_error"] = f"{e.status}: {e.detail}"
-                if e.status == 202:
-                    # The backend itself queued this for a later automatic
-                    # retry (e.g. Whisper/transcription failed server-side,
-                    # or an AI quota is exhausted) — NOT a failure caused by
-                    # this script, and NOT something already saved. Deliberately
-                    # doesn't count against max_attempts (queue_worker() will
-                    # keep retrying this server-side on its own schedule
-                    # regardless of how many times this script happens to run
-                    # in the meantime) and always stays "pending" so a later
-                    # run of this script re-checks it — harmless either way:
-                    # an instant cache hit if the backend's own retry already
-                    # succeeded, or it gets queued again if not yet.
-                    print(f"[{i}/{total}]   QUEUED server-side (not yet saved), will retry automatically: {e.detail}")
+                if e.status in HANDED_OFF_TO_SERVER:
+                    # The backend took ownership of this URL and will finish
+                    # it on its own schedule — 202 means it queued a later
+                    # automatic retry (Whisper/transcription failed
+                    # server-side, an AI quota is exhausted) or submitted the
+                    # analysis to the OpenAI Batch API; 503 means it was busy
+                    # and put the request in processing_queue for
+                    # queue_worker() to pick up; 409 means it's already in
+                    # flight, either being analyzed right now or sitting in a
+                    # batch. None is a failure caused by this script, and
+                    # none is saved yet.
+                    #
+                    # Deliberately doesn't count against max_attempts: the
+                    # backend keeps working on it regardless of how many times
+                    # this script happens to run in the meantime, so letting
+                    # these burn attempts would mark a perfectly good reel
+                    # permanently_skipped for nothing. Always stays "pending"
+                    # so a later run re-checks it — harmless either way: an
+                    # instant cache hit if the backend already finished it, or
+                    # it simply gets queued again.
+                    if e.status == 503:
+                        print(f"[{i}/{total}]   SERVER BUSY, queued server-side (will be analyzed automatically): {e.detail}")
+                    elif e.status == 409:
+                        print(f"[{i}/{total}]   ALREADY IN FLIGHT server-side: {e.detail}")
+                    else:
+                        print(f"[{i}/{total}]   QUEUED server-side (not yet saved), will retry automatically: {e.detail}")
                     entry["status"] = "pending"
                     pending_count += 1
                 else:
                     entry["attempts"] += 1
-                    if e.status == 503:
-                        print(f"[{i}/{total}]   SERVER BUSY, queued server-side: {e.detail}")
-                    elif e.status == 409:
-                        print(f"[{i}/{total}]   ALREADY PROCESSING: {e.detail}")
-                    elif e.status == 504:
+                    if e.status == 504:
                         print(f"[{i}/{total}]   TIMEOUT (10 min): {e.detail}")
                     elif e.status == 410:
                         # User deleted this post via a client — respect that and
