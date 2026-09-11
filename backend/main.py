@@ -464,9 +464,14 @@ def main():
     # Step 1: Get URL (+ optional --caption / --hashtags / --date-saved passed
     # by the API or the bulk importer, so source-provided context can inform
     # the summary / be stored alongside the analysis)
+    #
+    # --media-folder is the manual-upload escape hatch (POST /manual-upload,
+    # core/manual_media.py): a folder of already-obtained media, shaped like
+    # a download folder, to analyze instead of downloading from Instagram.
     source_caption = ""
     source_hashtags: list = []
     date_saved = None
+    media_folder = None
     if len(sys.argv) > 1:
         instagram_url = sys.argv[1]
         print(f"📎 Link: {instagram_url}")
@@ -480,6 +485,9 @@ def main():
                 i += 2
             elif sys.argv[i] == "--date-saved" and i + 1 < len(sys.argv):
                 date_saved = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == "--media-folder" and i + 1 < len(sys.argv):
+                media_folder = sys.argv[i + 1]
                 i += 2
             else:
                 i += 1
@@ -561,7 +569,10 @@ def main():
     # Step 3: Download content
     print_section("📥 Step 3: Downloading Content")
     
-    print("Running Instagram downloader...")
+    if media_folder:
+        print(f"Using manually supplied media (skipping download): {media_folder}")
+    else:
+        print("Running Instagram downloader...")
     
     try:
         # Pass URL via stdin simulation
@@ -571,14 +582,20 @@ def main():
         # Import the downloader function
         from instagram.instagram_downloader import download_instagram_content, RetryableDownloadError
         
-        download_result = download_instagram_content(instagram_url)
+        # A hand-supplied folder short-circuits the download entirely — it is
+        # already shaped like one (core/manual_media.py), so every step below
+        # (glob, analyze, relocate to media/<shortcode>/) is unchanged.
+        download_result = media_folder or download_instagram_content(instagram_url)
         
         if download_result is None:
             print("❌ Download failed!")
             sys.exit(1)
         
         download_folder = download_result
-        print(f"\n✓ Content downloaded to: {download_folder}")
+        if media_folder:
+            print(f"\n✓ Using media at: {download_folder}")
+        else:
+            print(f"\n✓ Content downloaded to: {download_folder}")
 
     except RetryableDownloadError as e:
         msg = str(e)
@@ -616,6 +633,17 @@ def main():
     print(f"🎵 Audio files: {len(mp3_files)}")
     print(f"🖼️  Images: {len(jpg_files)}")
     print(f"📄 Info files: {len(info_files)}")
+
+    # A manual-upload folder that has gone empty means relocate_to_media_store()
+    # already moved its files into media/<shortcode>/ on an earlier run — which
+    # happens on the audio-transcription retry path (exit 2), leaving a queued
+    # retry pointing at an emptied folder. Analyzing that would save a post with
+    # no visual, no transcript and no caption. Fail loudly and let the user
+    # re-upload instead.
+    if media_folder and not (mp4_files or jpg_files):
+        print("❌ No media found in the supplied folder — the uploaded file has "
+              "already been consumed by an earlier run. Upload it again.")
+        sys.exit(1)
     
     # Step 5: Run analyses with SMART PARALLEL PROCESSING
     print_section("🚀 Step 4: Running Parallel Analysis")

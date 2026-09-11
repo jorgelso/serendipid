@@ -15,7 +15,13 @@ import type {
   ExportPayload,
   ImportJob,
   InstagramExportPreview,
+  ManualUploadResponse,
+  AnalysisOutcomeHeader,
+  ManualUploadResult,
+  QueueAttentionResponse,
   QueueStatusResponse,
+  RetryDownloadResult,
+  RetryFlushResponse,
   RatingTier,
   SearchHistoryEntry,
   SearchSemanticResponse,
@@ -189,6 +195,218 @@ export async function fetchQueueStatus(): Promise<QueueStatusResponse> {
 
 // Longer timeout than the default — this can involve several OpenAI
 // round-trips server-side (one per in-flight batch job being checked).
+// backend/api.py's ANALYSIS_OUTCOME_HEADER. Read it, never infer the outcome
+// from the 202 body text — `detail` is prose meant for humans and both 202
+// cases are phrased as "…may take up to 24h".
+const ANALYSIS_OUTCOME_HEADER = "X-Superbrain-Outcome";
+
+function readOutcomeHeader(res: Response): AnalysisOutcomeHeader {
+  // Default to retry_scheduled: it's the conservative reading (the UI offers
+  // a manual upload, which is never destructive) and it's what a backend
+  // predating this header would have meant most of the time.
+  return res.headers.get(ANALYSIS_OUTCOME_HEADER) === "batch_submitted"
+    ? "batch_submitted"
+    : "retry_scheduled";
+}
+
+function isTimeoutError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.name === "AbortError" ||
+      err.name === "TimeoutError" ||
+      /timeout/i.test((err as Error & { cause?: { code?: string } }).cause?.code ?? ""))
+  );
+}
+
+// One "try downloading this now" attempt for a stuck reel. Deliberately
+// bypasses request<T>(), which throws on any non-2xx and treats 2xx as
+// success — neither is right here, because POST /analyze answers with FOUR
+// meaningfully different outcomes and the UI has to tell them apart to know
+// whether to offer a manual upload:
+//
+//   200  analyzed         — the download worked; the reel is saved.
+//   202  retry_scheduled  — Instagram blocked it (or an AI quota ran out).
+//        OR batch_submitted — under ANALYSIS_MODE=batch, the analysis went to
+//                           OpenAI's Batch API and is working. Same status
+//                           code, opposite meaning; only the
+//                           X-Superbrain-Outcome header separates them.
+//                           FastAPI returns HTTPException(202) as a real 202,
+//                           so res.ok is TRUE here: treating this as success
+//                           would silently report a blocked reel as analyzed,
+//                           and treating it as failure reports a healthy
+//                           batch submission as a blocked download.
+//   409  already_in_flight — being analyzed right now, or already submitted
+//                           to a batch (the backend refuses to duplicate it).
+//   503  queued           — backend busy (max_concurrent is 1, and a bulk
+//                           import holds that slot); queue_worker will run it.
+//   ***  failed           — a genuine failure, including 410 for a post the
+//                           user has deleted.
+//
+// force is deliberately false: these reels have no saved row to replace, and
+// force=true would hard-delete one if a concurrent path had just created it.
+// Same reasoning (and the same undici ~5 min ceiling) as the manual upload
+// below: a real download plus the full pipeline runs inside this request.
+const RETRY_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+
+export async function retryDownload(url: string): Promise<RetryDownloadResult> {
+  const config = getConfig();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RETRY_DOWNLOAD_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${config.apiUrl}/analyze`, {
+      method: "POST",
+      headers: {
+        "X-API-Key": config.apiKey,
+        "X-Client-Env": process.env.NODE_ENV === "production" ? "prod" : "dev",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url, force: false }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+  } catch (err) {
+    if (isTimeoutError(err)) return { outcome: "timeout" };
+    throw new SuperBrainApiError(
+      `Could not reach the backend at ${config.apiUrl}. ` +
+        "Check that it's running and that SUPERBRAIN_API_URL is correct."
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const raw = await res.text().catch(() => "");
+  let parsed: { detail?: string; data?: { title?: string }; cached?: boolean; error?: string } = {};
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Non-JSON body — the raw text is the best detail available.
+  }
+  const detail = parsed.detail ?? parsed.error ?? raw.slice(0, 300);
+
+  if (res.status === 202) return { outcome: readOutcomeHeader(res), detail };
+  if (res.status === 409) return { outcome: "already_in_flight", detail };
+  if (res.status === 503) return { outcome: "queued", detail };
+  if (!res.ok) return { outcome: "failed", detail: detail || `Backend error ${res.status}.`, status: res.status };
+  return {
+    outcome: "analyzed",
+    title: parsed.data?.title ?? "",
+    cached: Boolean(parsed.cached),
+  };
+}
+
+// Drains the retry queue back into the active queue. force=true ignores each
+// item's scheduled retry_after — see the backend route's docstring for why
+// that is usually a re-run of the same rate-limited failures rather than a
+// shortcut to results.
+export async function flushRetryQueue(force: boolean): Promise<RetryFlushResponse> {
+  return request<RetryFlushResponse>("/queue/retry/flush", {
+    method: "POST",
+    params: { force: String(force) },
+  });
+}
+
+// Stuck-reel triage — everything pending or abandoned, in one call. See
+// backend/api.py's queue_attention() for why this can't just read
+// /queue-status: a hard analysis failure leaves no row in the DB at all,
+// only an entry in the import script's state file.
+export async function fetchQueueAttention(options: {
+  includeAnalyzed?: boolean;
+  includeDeleted?: boolean;
+} = {}): Promise<QueueAttentionResponse> {
+  return request<QueueAttentionResponse>("/queue/attention", {
+    params: {
+      include_analyzed: String(options.includeAnalyzed ?? false),
+      include_deleted: String(options.includeDeleted ?? false),
+    },
+  });
+}
+
+// A full analysis runs synchronously behind this upload (download step
+// skipped, everything else identical), so it needs far more than the
+// default timeout. Note this is an upper bound, not the effective one:
+// Node's fetch (undici) applies its own ~5 minute headers/body timeout that
+// no standard fetch option overrides, so a genuinely long analysis can drop
+// the connection here while the backend keeps going and still saves the
+// post — which is why the error path below says exactly that instead of
+// claiming the upload failed.
+const MANUAL_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+
+// Bypasses request<T>() entirely: that wrapper JSON-encodes its body, and a
+// video re-encoded as base64 JSON would be ~33% larger and buffered twice on
+// each hop. This streams the multipart form straight through instead, which
+// is also the shape the backend's UploadFile parameter expects.
+export async function uploadManualMedia(params: {
+  url: string;
+  file: File | Blob;
+  filename: string;
+  caption?: string;
+  username?: string;
+}): Promise<ManualUploadResult> {
+  const config = getConfig();
+  const form = new FormData();
+  form.append("url", params.url);
+  form.append("file", params.file, params.filename);
+  if (params.caption) form.append("caption", params.caption);
+  if (params.username) form.append("username", params.username);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MANUAL_UPLOAD_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${config.apiUrl}/manual-upload`, {
+      method: "POST",
+      headers: {
+        "X-API-Key": config.apiKey,
+        "X-Client-Env": process.env.NODE_ENV === "production" ? "prod" : "dev",
+        // Deliberately no Content-Type — fetch must set it itself so the
+        // multipart boundary it generates matches the body.
+      },
+      body: form,
+      signal: controller.signal,
+      cache: "no-store",
+    });
+  } catch (err) {
+    // Either our own AbortController firing or undici's internal timeout —
+    // both mean "no answer yet", not "the analysis failed". The file already
+    // reached the backend, so re-uploading would just repeat paid AI work.
+    if (isTimeoutError(err)) return { outcome: "timeout" };
+    throw new SuperBrainApiError(
+      `Could not reach the backend at ${config.apiUrl}. ` +
+        "Check that it's running and that SUPERBRAIN_API_URL is correct."
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const raw = await res.text().catch(() => "");
+  let parsed: (Partial<ManualUploadResponse> & { detail?: string; error?: string }) | null = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Non-JSON body — the raw text is the best detail available.
+  }
+  const detail = parsed?.detail ?? parsed?.error ?? raw.slice(0, 300);
+
+  // 202 is NOT a plain success here: under ANALYSIS_MODE=batch a manual
+  // upload is submitted to the Batch API exactly like any other analysis,
+  // and the same status also carries "the media was relocated and a retry
+  // was scheduled". `res.ok` covers both, so checking it alone would report
+  // either one as a finished analysis.
+  if (res.status === 202) return { outcome: readOutcomeHeader(res), detail };
+
+  if (!res.ok) {
+    throw new SuperBrainApiError(detail || `Backend error ${res.status}.`, res.status);
+  }
+
+  if (parsed?.status === "queued") {
+    return { outcome: "queued", position: parsed.position ?? null };
+  }
+  return { outcome: "analyzed", title: parsed?.data?.title ?? "" };
+}
+
 const BATCH_CHECK_TIMEOUT_MS = 60 * 1000;
 
 export async function checkBatches(): Promise<BatchCheckResponse> {

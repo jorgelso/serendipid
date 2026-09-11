@@ -201,6 +201,14 @@ class Database:
             # caption/hashtags so it isn't lost if this request has to wait
             # in the queue before queue_worker spawns main.py for it.
             ("date_saved",   "TEXT"),
+            # Manually uploaded media (POST /manual-upload, core/manual_media.py):
+            # the temp/ folder to analyze *instead of* downloading from
+            # Instagram. Persisted for the same reason as caption/hashtags
+            # above — max_concurrent is 1, so a manual upload arriving while
+            # anything else is analyzing has to wait in the queue, and a
+            # queued row that lost this would come back as a plain download
+            # attempt: the exact attempt that already failed.
+            ("media_folder", "TEXT"),
         ]:
             try:
                 self._conn.execute(
@@ -2261,7 +2269,40 @@ class Database:
             print(f"[WARNING]  Error getting retry queue: {e}")
             return []
 
-    # ==================== QUEUE MANAGEMENT ====================
+    def get_queue_overview(self):
+        """Every processing_queue row that hasn't finished, with the full
+        context the admin "needs attention" view needs in one query.
+
+        get_processing()/get_queue()/get_retry_queue() each return a
+        different subset with a different column list (and get_processing()
+        returns bare shortcodes, no URL), which is fine for their callers
+        but can't answer "show me everything that is stuck". This returns
+        every non-terminal status in one pass instead — a finished item is
+        deleted from this table by remove_from_queue(), so "still here" is
+        exactly "not done".
+        """
+        if not self.is_connected():
+            return []
+        try:
+            cur = self._conn.cursor()
+            cur.execute("""
+                SELECT shortcode, url, status, content_type, reason, attempts,
+                       retry_after, added_at, updated_at, started_at, position
+                FROM processing_queue
+                WHERE status IN ('queued', 'processing', 'retry', 'batch')
+                ORDER BY
+                    CASE status
+                        WHEN 'processing' THEN 0
+                        WHEN 'queued'     THEN 1
+                        WHEN 'batch'      THEN 2
+                        ELSE 3
+                    END,
+                    position, retry_after
+            """)
+            return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARNING]  Error getting queue overview: {e}")
+            return []
 
     def get_queue_status(self, shortcode: str):
         """Return one shortcode's processing_queue status, or None if absent.
@@ -2283,13 +2324,57 @@ class Database:
             print(f"[WARNING]  Error getting queue status for {shortcode}: {e}")
             return None
 
-    def add_to_queue(self, shortcode, url, caption=None, hashtags=None, date_saved=None):
+    def get_analyzed_shortcodes(self) -> set:
+        """Every shortcode that has a saved row in `analyses`.
+
+        Used to tell "still stuck" apart from "already analyzed by some
+        other path" when reconciling the resumable importer's state file
+        against reality — that file only learns a post succeeded on the
+        next run of the import script that touches it.
+        """
+        if not self.is_connected():
+            return set()
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT shortcode FROM analyses")
+            return {r["shortcode"] for r in cur.fetchall()}
+        except Exception as e:
+            print(f"[WARNING]  Error getting analyzed shortcodes: {e}")
+            return set()
+
+    def get_deleted_shortcodes(self) -> set:
+        """Every shortcode the user has deleted (soft-delete sync log).
+
+        A deleted post that a stale import-state file still lists as
+        pending must not be presented as work to redo.
+        """
+        if not self.is_connected():
+            return set()
+        try:
+            cur = self._conn.cursor()
+            cur.execute("SELECT shortcode FROM deleted_log")
+            return {r["shortcode"] for r in cur.fetchall()}
+        except Exception as e:
+            print(f"[WARNING]  Error getting deleted shortcodes: {e}")
+            return set()
+
+    # ==================== QUEUE MANAGEMENT ====================
+
+    def add_to_queue(self, shortcode, url, caption=None, hashtags=None, date_saved=None,
+                     media_folder=None):
         """Add item to processing queue. Returns queue position (1-based), or -1 on error.
 
         caption/hashtags/date_saved: optional client-supplied hint (see
         AnalyzeRequest), persisted so queue_worker can still forward it to
         main.py once this item is eventually picked up — otherwise it's
         silently lost for any request that arrives while the server is busy.
+
+        media_folder: manually uploaded media to analyze instead of
+        downloading (POST /manual-upload). Unlike the fields above, an
+        omitted value here does NOT clear a stored one — the retry drain
+        re-queues with `add_to_queue(shortcode, url)` and nothing else, and
+        wiping the folder there would turn a queued manual upload back into
+        the download attempt it was meant to replace.
         """
         if not self.is_connected():
             return -1
@@ -2314,17 +2399,22 @@ class Database:
             now = datetime.utcnow().isoformat()
             hashtags_json = json.dumps(hashtags) if hashtags else ''
             self._conn.execute("""
-                INSERT INTO processing_queue (shortcode, url, status, position, added_at, updated_at, caption, hashtags, date_saved)
-                VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+                INSERT INTO processing_queue (shortcode, url, status, position, added_at, updated_at, caption, hashtags, date_saved, media_folder)
+                VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(shortcode) DO UPDATE SET
-                    url        = excluded.url,
-                    status     = 'queued',
-                    position   = excluded.position,
-                    updated_at = excluded.updated_at,
-                    caption    = excluded.caption,
-                    hashtags   = excluded.hashtags,
-                    date_saved = excluded.date_saved
-            """, (shortcode, url, position, now, now, caption or '', hashtags_json, date_saved))
+                    url          = excluded.url,
+                    status       = 'queued',
+                    position     = excluded.position,
+                    updated_at   = excluded.updated_at,
+                    caption      = excluded.caption,
+                    hashtags     = excluded.hashtags,
+                    date_saved   = excluded.date_saved,
+                    media_folder = CASE
+                        WHEN excluded.media_folder IS NOT NULL THEN excluded.media_folder
+                        ELSE processing_queue.media_folder
+                    END
+            """, (shortcode, url, position, now, now, caption or '', hashtags_json, date_saved,
+                  media_folder))
             self._conn.commit()
             return position
         except Exception as e:
@@ -2338,8 +2428,8 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                "SELECT shortcode, url, position, caption, hashtags, date_saved FROM processing_queue "
-                "WHERE status = 'queued' ORDER BY position"
+                "SELECT shortcode, url, position, caption, hashtags, date_saved, media_folder "
+                "FROM processing_queue WHERE status = 'queued' ORDER BY position"
             )
             result = []
             for r in cur.fetchall():
@@ -2354,6 +2444,7 @@ class Database:
                     "caption": r["caption"] or '',
                     "hashtags": hashtags,
                     "date_saved": r["date_saved"] or None,
+                    "media_folder": r["media_folder"] or None,
                 })
             return result
         except Exception as e:

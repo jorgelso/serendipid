@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import CheckBatchesButton from "@/components/CheckBatchesButton";
 import RefreshButton from "@/components/RefreshButton";
+import StuckReels from "@/components/StuckReels";
 import type { ImportJob, InstagramExportPreview } from "@/types/domain";
 
 const POLL_INTERVAL_MS = 3000;
@@ -192,6 +193,8 @@ export default function AdminPage() {
           <CheckBatchesButton />
         </div>
       </div>
+
+      <StuckReels />
 
       <div className="mb-6">
         <h2 className="text-sm font-bold text-ink-muted">Import</h2>

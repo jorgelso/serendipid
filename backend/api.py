@@ -5,7 +5,7 @@ FastAPI REST endpoints for analyzing Instagram content with MongoDB caching
 With request queuing, live progress logging, and API key authentication
 """
 
-from fastapi import FastAPI, HTTPException, Query, Header, Depends, Request, UploadFile, File, Body
+from fastapi import FastAPI, HTTPException, Query, Header, Depends, Request, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, HttpUrl
@@ -17,6 +17,7 @@ import os
 import json
 import re
 import uuid
+import shutil
 import zipfile
 import io
 from datetime import datetime
@@ -93,6 +94,17 @@ TOKEN_FILE = Path(__file__).parent / "token.txt"
 # subprocess spawner (below) builds its --server-url from the same source of
 # truth instead of a second hardcoded literal.
 API_SELF_PORT = 5050
+
+# 202 from /analyze (and /manual-upload) means two completely different
+# things — "Instagram blocked the download, a retry is scheduled" and
+# "submitted to OpenAI's Batch API, this is working and will land within
+# 24h" — and a caller that can't tell them apart reports a perfectly
+# successful batch submission as a failure. This header carries the
+# distinction; `detail` stays a plain string so no existing consumer (the
+# import scripts, the mobile app) sees any change at all.
+#
+# Values: "retry_scheduled" (main.py exit 2) | "batch_submitted" (exit 3).
+ANALYSIS_OUTCOME_HEADER = "X-Superbrain-Outcome"
 
 # Ceiling on how long a single Instagram analysis subprocess (main.py) is allowed
 # to run before being force-killed. Default raised from the original 600s (10 min)
@@ -352,6 +364,8 @@ def queue_worker():
                         cmd += ["--hashtags", ",".join(item['hashtags'])]
                     if item.get('date_saved'):
                         cmd += ["--date-saved", item['date_saved']]
+                    if item.get('media_folder'):
+                        cmd += ["--media-folder", item['media_folder']]
                     process = subprocess.Popen(
                         cmd,
                         cwd=Path(__file__).parent,
@@ -608,6 +622,7 @@ async def _run_or_queue_analysis(
     date_saved: Optional[str] = None,
     *,
     run_inline: bool = True,
+    media_folder: Optional[str] = None,
 ) -> dict:
     """
     Shared by POST /analyze (called after Step 1 there has already handled
@@ -626,6 +641,14 @@ async def _run_or_queue_analysis(
     run_inline=False unconditionally queues even when a processing slot is
     free, so a bulk caller's HTTP response never blocks on one item's
     multi-minute subprocess.
+
+    media_folder (POST /manual-upload) points main.py at already-obtained
+    media instead of letting it download from Instagram. It is persisted on
+    the queue row like caption/hashtags/date_saved, so an upload arriving
+    while something else is analyzing (max_concurrent is 1, and a bulk
+    import keeps that slot busy for hours) waits its turn and still gets
+    analyzed from the uploaded file rather than silently reverting to the
+    download attempt that already failed.
     """
     db = get_db()
 
@@ -671,7 +694,8 @@ async def _run_or_queue_analysis(
         slot_free = len(processing_items) < max_concurrent
         if not run_inline or not slot_free:
             logger.warning(f"🚦 [{shortcode}] Server busy or queuing requested — adding to queue...")
-            queue_position = db.add_to_queue(shortcode, url_str, caption, hashtags, date_saved)
+            queue_position = db.add_to_queue(shortcode, url_str, caption, hashtags, date_saved,
+                                             media_folder)
             if queue_position > 0:
                 logger.info(f"📝 [{shortcode}] ✅ Added to queue at position {queue_position}")
                 logger.info(f"📊 Queue status: {len(queue_items) + 1} waiting | {len(processing_items)} analyzing")
@@ -690,6 +714,8 @@ async def _run_or_queue_analysis(
 
     def _run_subprocess() -> tuple:
         cmd = [sys.executable, "main.py", url_str]
+        if media_folder:
+            cmd += ["--media-folder", media_folder]
         if caption:
             cmd += ["--caption", caption]
         if hashtags:
@@ -746,7 +772,8 @@ async def _run_or_queue_analysis(
             logger.info(f"⏰ [{shortcode}] Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours.")
             raise HTTPException(
                 status_code=202,
-                detail="Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours."
+                detail="Rate limit or quota exhausted (often Instagram blocking the download). Your request has been queued for automatic retry in 24 hours.",
+                headers={ANALYSIS_OUTCOME_HEADER: "retry_scheduled"},
             )
 
         if returncode == 3:
@@ -757,7 +784,8 @@ async def _run_or_queue_analysis(
             logger.info(f"📦 [{shortcode}] Submitted for batch processing (lower cost, may take up to 24h).")
             raise HTTPException(
                 status_code=202,
-                detail="Submitted for batch processing (lower cost, may take up to 24h). Check back later or trigger a manual batch check."
+                detail="Submitted for batch processing (lower cost, may take up to 24h). Check back later or trigger a manual batch check.",
+                headers={ANALYSIS_OUTCOME_HEADER: "batch_submitted"},
             )
 
         if returncode != 0:
@@ -2656,17 +2684,42 @@ async def get_retry_queue(token: str = Depends(verify_token)):
 
 
 @app.post("/queue/retry/flush")
-async def flush_retry_queue(token: str = Depends(verify_token)):
-    """Immediately promote all retry-ready items to the active queue"""
+async def flush_retry_queue(
+    force: bool = Query(
+        False,
+        description="Also promote items whose retry_after is still in the future, "
+                    "ignoring the scheduled wait entirely.",
+    ),
+    token: str = Depends(verify_token),
+):
+    """
+    Promote retry-queued items back into the active queue right now.
+
+    By default this only takes items whose `retry_after` has already passed —
+    the same set queue_worker()'s periodic drain would pick up on its own, so
+    calling it just makes that happen sooner.
+
+    `force=true` ignores `retry_after` and promotes every status='retry' row.
+    That's the "don't wait 24 hours" button. Worth knowing before using it:
+    nearly all of these are waiting because Instagram rate-limited the
+    download, and that block is time-based — flushing them early mostly
+    re-attempts requests that will fail again and be re-queued, and hammering
+    a live block can extend it. It costs nothing but time (a failed download
+    never reaches the AI providers), and max_concurrent is 1, so a large
+    flush drains one reel at a time rather than in a burst.
+    """
     try:
         db = get_db()
-        ready = db.get_retry_ready()
-        for item in ready:
+        items = db.get_retry_queue() if force else db.get_retry_ready()
+        for item in items:
             db.add_to_queue(item['shortcode'], item['url'])
             logger.info(f"🔄 Flushed retry item: {item['shortcode']} ({item['reason']})")
+        if force:
+            logger.warning(f"⏩ Force-flushed {len(items)} retry item(s), ignoring their scheduled wait")
         return {
-            "flushed": len(ready),
-            "items": [i['shortcode'] for i in ready]
+            "flushed": len(items),
+            "forced": force,
+            "items": [i['shortcode'] for i in items]
         }
     except Exception as e:
         logger.error(f"Error flushing retry queue: {e}")
@@ -2682,6 +2735,278 @@ async def delete_queue_item(shortcode: str, token: str = Depends(verify_token)):
     except Exception as e:
         logger.error(f"Error removing {shortcode} from queue: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────
+# Stuck-reel triage + manual media upload
+#
+# A reel can stop making progress in two different places, and neither one
+# is visible from /queue-status alone:
+#
+#   1. processing_queue — queued / processing / retry / batch. Still being
+#      worked on (a status='retry' row is retried automatically after
+#      retry_after), so: pending.
+#   2. scripts/import_state.json — the bulk importer's resumable state. A
+#      hard analysis failure is *deleted* from processing_queue by
+#      _run_or_queue_analysis's cleanup, so the DB keeps no record of it at
+#      all; the only trace is this file's per-URL entry. Its
+#      "permanently_skipped" status (max_attempts exhausted, or an HTTP 410)
+#      is the one that means nothing will ever retry this again.
+#
+# GET /queue/attention reconciles both against the `analyses` table so
+# "still stuck" is distinguishable from "the state file just hasn't caught
+# up yet", and POST /manual-upload is the way out for the abandoned ones:
+# hand over the video yourself and analyze that instead of re-attempting a
+# download Instagram keeps refusing.
+#
+# Deliberately read-only with respect to import_state.json — a bulk import
+# job may be running and writing that file right now, and the backend
+# racing it over the same non-atomic state would lose entries. A manual
+# upload lands in `analyses` instead, and the importer's next run sees a
+# cache hit and marks it success on its own.
+# ─────────────────────────────────────────────────────────────────
+
+def _import_state_file() -> Path:
+    """Path of the bulk importer's resumable state file.
+
+    Read from the import script itself rather than rebuilt here, so this and
+    the scripts can never disagree about which file is authoritative. A
+    function, not a module constant, because `_ig_import` is imported much
+    further down this file (next to the /instagram-export routes it mainly
+    serves) — resolving it at call time avoids a load-order dependency.
+    """
+    return Path(_ig_import.DEFAULT_STATE_FILE)
+
+
+def _read_import_state() -> dict:
+    """Read the bulk importer's resumable state file, tolerating absence.
+
+    save_state() writes via os.replace(), so a read is always of a complete
+    file even while an import job is running — but the file may legitimately
+    not exist yet (no import has ever been run), which is not an error.
+    """
+    try:
+        state_file = _import_state_file()
+        if not state_file.exists():
+            return {}
+        return json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"Could not read import state file: {e}")
+        return {}
+
+
+def _instagram_url_for(shortcode: str) -> str:
+    """Best-effort canonical reel URL for a shortcode with no recorded URL."""
+    return f"https://www.instagram.com/reel/{shortcode}/"
+
+
+@app.get("/queue/attention")
+async def queue_attention(
+    include_analyzed: bool = Query(
+        False,
+        description="Include items whose shortcode already has a row in `analyses` "
+                    "(the state file lags reality until the importer next runs).",
+    ),
+    include_deleted: bool = Query(
+        False, description="Include items the user has since deleted."
+    ),
+    token: str = Depends(verify_token),
+):
+    """
+    Every reel that is either still pending or abandoned, in one list.
+
+    Returns two buckets:
+      - `pending`   — will still be attempted (live queue row, or a state
+                      file entry the importer hasn't reached yet).
+      - `abandoned` — nothing will retry this: the importer gave up on it
+                      (max attempts, or the post is gone). These are the
+                      ones POST /manual-upload exists for.
+    """
+    try:
+        db = get_db()
+        analyzed = db.get_analyzed_shortcodes()
+        deleted = db.get_deleted_shortcodes()
+
+        items: Dict[str, dict] = {}
+
+        # ── 1. Live queue rows ───────────────────────────────────────────
+        for row in db.get_queue_overview():
+            shortcode = row.get("shortcode")
+            if not shortcode:
+                continue
+            items[shortcode] = {
+                "shortcode": shortcode,
+                "url": row.get("url") or _instagram_url_for(shortcode),
+                "bucket": "pending",
+                "state": row.get("status") or "queued",
+                "source": "queue",
+                "content_type": row.get("content_type") or "instagram",
+                "reason": row.get("reason"),
+                "last_error": None,
+                "attempts": row.get("attempts") or 0,
+                "retry_after": row.get("retry_after"),
+                "position": row.get("position"),
+                "folders": [],
+                "last_updated": row.get("updated_at") or row.get("added_at"),
+            }
+
+        # ── 2. Importer state file ───────────────────────────────────────
+        for url, entry in (_read_import_state().get("posts") or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            status = entry.get("status")
+            if status == "success":
+                continue
+            shortcode = entry.get("shortcode") or _ig_import.shortcode_for(url)
+            if not shortcode:
+                continue
+
+            existing = items.get(shortcode)
+            if existing:
+                # A live queue row is the more current truth about *state*;
+                # the state file still carries context the queue never had
+                # (which Instagram folders it came from, the last error text
+                # the importer actually saw).
+                existing["folders"] = entry.get("folders") or []
+                existing["last_error"] = entry.get("last_error")
+                existing["attempts"] = max(
+                    existing["attempts"], entry.get("attempts") or 0
+                )
+                continue
+
+            abandoned = status == "permanently_skipped"
+            items[shortcode] = {
+                "shortcode": shortcode,
+                "url": url,
+                "bucket": "abandoned" if abandoned else "pending",
+                "state": "abandoned" if abandoned else "import_pending",
+                "source": "import_state",
+                "content_type": "instagram",
+                "reason": None,
+                "last_error": entry.get("last_error"),
+                "attempts": entry.get("attempts") or 0,
+                "retry_after": None,
+                "position": None,
+                "folders": entry.get("folders") or [],
+                "last_updated": entry.get("last_updated"),
+            }
+
+        # ── 3. Reconcile against reality ─────────────────────────────────
+        pending, abandoned_items = [], []
+        hidden_analyzed = hidden_deleted = 0
+        for item in items.values():
+            item["analyzed"] = item["shortcode"] in analyzed
+            item["deleted"] = item["shortcode"] in deleted
+            if item["deleted"] and not include_deleted:
+                hidden_deleted += 1
+                continue
+            if item["analyzed"] and not include_analyzed:
+                hidden_analyzed += 1
+                continue
+            (abandoned_items if item["bucket"] == "abandoned" else pending).append(item)
+
+        def _sort_key(i: dict):
+            return (i.get("last_updated") or "", i["shortcode"])
+
+        pending.sort(key=_sort_key, reverse=True)
+        abandoned_items.sort(key=_sort_key, reverse=True)
+
+        return {
+            "success": True,
+            "pending": pending,
+            "pending_count": len(pending),
+            "abandoned": abandoned_items,
+            "abandoned_count": len(abandoned_items),
+            "hidden_analyzed": hidden_analyzed,
+            "hidden_deleted": hidden_deleted,
+            "state_file": str(_import_state_file()),
+            "state_file_present": _import_state_file().exists(),
+        }
+    except Exception as e:
+        logger.error(f"Error building attention queue: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/manual-upload")
+async def manual_upload(
+    url: str = Form(..., description="The original Instagram post/reel URL."),
+    file: UploadFile = File(..., description="The video or image, obtained by hand."),
+    caption: str = Form("", description="Optional caption text to analyze alongside the media."),
+    username: str = Form("", description="Optional author handle, stored on the post."),
+    token: str = Depends(verify_token),
+):
+    """
+    Analyze a reel from a manually supplied file instead of downloading it.
+
+    For posts Instagram will not serve this backend (rate limited, login
+    walled, or removed) but that the user can still get some other way. The
+    upload is normalized into a folder shaped exactly like a download
+    (core/manual_media.py) and handed to the normal pipeline via `main.py
+    --media-folder`, so the resulting post is indistinguishable from any
+    other — same analyzers, same media/<shortcode>/ storage, same row.
+    """
+    validation = validate_link(url)
+    if not validation.get("valid"):
+        raise HTTPException(
+            status_code=400,
+            detail=validation.get("error") or "That doesn't look like a valid link.",
+        )
+    if validation.get("content_type") != "instagram":
+        raise HTTPException(
+            status_code=400,
+            detail="Manual upload is for Instagram posts only — YouTube and web "
+                   "pages are analyzed from their URL and never need a media file.",
+        )
+
+    shortcode = validation["shortcode"]
+    url_str = validation["url"]
+
+    try:
+        data = await file.read()
+    finally:
+        await file.close()
+
+    from core.manual_media import ManualMediaError, prepare_manual_media_folder
+
+    try:
+        folder = await asyncio.to_thread(
+            prepare_manual_media_folder,
+            shortcode, url_str, file.filename or "", data, caption, username,
+        )
+    except ManualMediaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ [{shortcode}] Could not prepare manual media: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not prepare the uploaded file: {e}")
+
+    logger.info(f"📤 [{shortcode}] Manual media upload — analyzing from {folder}")
+
+    # Re-analyze even if a row already exists: someone uploading media by
+    # hand is explicitly replacing whatever is there (typically nothing, or
+    # a stub from a failed run). save_analysis() upserts.
+    # "queued" is the one outcome where the uploaded file is still needed —
+    # it stays on disk with processing_queue.media_folder pointing at this
+    # exact path, so queue_worker can use it instead of re-downloading.
+    # Every other outcome means main.py is done with the folder: it either
+    # relocated the media into media/<shortcode>/ (success, and both 202
+    # paths — batch-submitted and retry-scheduled — relocate before exiting),
+    # or it short-circuited on its own cache check and never touched it
+    # (uploading a post that turns out to be already analyzed), which would
+    # otherwise orphan a full copy of the video in temp/ forever.
+    try:
+        result = await _run_or_queue_analysis(
+            shortcode, url_str, "instagram",
+            caption=caption or None,
+            media_folder=str(folder),
+        )
+    except HTTPException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+    if result.get("status") != "queued":
+        shutil.rmtree(folder, ignore_errors=True)
+
+    return {"success": True, "shortcode": shortcode, **result}
 
 
 # ─────────────────────────────────────────────────────────────────

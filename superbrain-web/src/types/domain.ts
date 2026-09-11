@@ -223,6 +223,125 @@ export interface CategoriesResponse {
 // Mirrors backend/api.py's GET /queue-status. max_concurrent is currently
 // always 1 (backend/api.py), so the whole processing_queue is effectively a
 // single-file line — see the /versions bulk-rescan progress hook.
+// One reel that has stopped making progress — GET /queue/attention.
+// Mirrors backend/api.py's queue_attention(), which reconciles two sources
+// that neither knows about the other: the live `processing_queue` table and
+// scripts/import_state.json (the bulk importer's resumable state, the ONLY
+// record of a hard failure, since api.py deletes those queue rows).
+export interface AttentionItem {
+  shortcode: string;
+  url: string;
+  // "pending" — something will still retry this on its own.
+  // "abandoned" — nothing will; a manual upload is the only way forward.
+  bucket: "pending" | "abandoned";
+  // The finer-grained state behind `bucket`. "import_pending" means the
+  // importer simply hasn't reached this URL yet.
+  state: "queued" | "processing" | "retry" | "batch" | "import_pending" | "abandoned";
+  source: "queue" | "import_state";
+  content_type: string;
+  // Backend-side retry reason, e.g. "instagram_rate_limit".
+  reason: string | null;
+  // Last error the import script itself saw, e.g. "202: Rate limit or quota…".
+  last_error: string | null;
+  attempts: number;
+  // ISO timestamp — when the automatic retry is next due (retry rows only).
+  retry_after: string | null;
+  position: number | null;
+  // Instagram collection(s) this URL was saved in, per the export.
+  folders: string[];
+  last_updated: string | null;
+  analyzed: boolean;
+  deleted: boolean;
+}
+
+// POST /queue/retry/flush — promote retry-queued reels back into the active
+// queue now. `forced` echoes whether the scheduled retry_after wait was
+// ignored (the "don't wait 24 hours" case) or merely brought forward.
+export interface RetryFlushResponse {
+  flushed: number;
+  forced: boolean;
+  items: string[];
+}
+
+export interface QueueAttentionResponse {
+  success: boolean;
+  pending: AttentionItem[];
+  pending_count: number;
+  abandoned: AttentionItem[];
+  abandoned_count: number;
+  // Counts excluded by the default filters — an item can linger in the
+  // state file long after it actually succeeded, or after being deleted.
+  hidden_analyzed: number;
+  hidden_deleted: number;
+  state_file: string;
+  state_file_present: boolean;
+}
+
+// The backend answers an analysis request with 202 for TWO completely
+// different things, and the response body's `detail` is the only thing that
+// differs — so a client keying off HTTP status alone reports one as the
+// other. `X-Superbrain-Outcome` (backend/api.py's ANALYSIS_OUTCOME_HEADER)
+// carries the distinction:
+//
+//   retry_scheduled — Instagram blocked the download (main.py exit 2). A
+//                     real dead end for now; a manual upload is the way out.
+//   batch_submitted — submitted to OpenAI's Batch API under
+//                     ANALYSIS_MODE=batch (exit 3). This is the pipeline
+//                     WORKING; it lands within 24h. Reporting it as a
+//                     blocked download is exactly the bug this header fixes.
+export type AnalysisOutcomeHeader = "retry_scheduled" | "batch_submitted";
+
+// POST /analyze, re-dispatched from the Stuck reels panel as "try downloading
+// this again". Decoded rather than thrown, since HTTP status can't separate
+// the outcomes above.
+export type RetryDownloadResult =
+  | { outcome: "analyzed"; title: string; cached: boolean }
+  | { outcome: "retry_scheduled"; detail: string }
+  | { outcome: "batch_submitted"; detail: string }
+  | { outcome: "queued"; detail: string }
+  // 409: the backend is already working on this reel — being analyzed right
+  // now, or sitting in an AI batch (which it refuses to duplicate). Nothing
+  // is wrong and a manual upload is not the answer, so this is deliberately
+  // NOT folded into "failed".
+  | { outcome: "already_in_flight"; detail: string }
+  | { outcome: "timeout" }
+  | { outcome: "failed"; detail: string; status: number };
+
+// POST /manual-upload. Same 202 split applies — a manual upload under
+// ANALYSIS_MODE=batch submits to the Batch API just like any other analysis,
+// so this can't just check res.ok either.
+export type ManualUploadResult =
+  | { outcome: "analyzed"; title: string }
+  | { outcome: "queued"; position: number | null }
+  | { outcome: "retry_scheduled"; detail: string }
+  | { outcome: "batch_submitted"; detail: string }
+  | { outcome: "timeout" };
+
+// POST /manual-upload — analyzing a reel from a hand-supplied media file.
+// Shares POST /analyze's two outcomes: "ran" carries the finished analysis,
+// "queued" means the backend's single analysis slot was busy (a bulk import
+// holds it for hours) and this is waiting its turn. The uploaded file is
+// already on the backend either way — processing_queue.media_folder keeps
+// it attached to the queued row.
+export interface ManualUploadResponse {
+  success: boolean;
+  shortcode: string;
+  status: "ran" | "queued";
+  position?: number;
+  data?: {
+    url: string;
+    username: string;
+    content_type: string;
+    thumbnail: string;
+    title: string;
+    summary: string;
+    tags: string[];
+    music: string;
+    category: string;
+    needs_review: boolean;
+  };
+}
+
 export interface QueueStatusResponse {
   currently_processing: string[];
   processing_count: number;
