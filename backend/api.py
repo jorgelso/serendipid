@@ -1832,8 +1832,10 @@ async def get_study_guide_pdf(study_guide_id: int, token: str = Depends(verify_t
 @app.get("/study-guides/{study_guide_id}/thumbnail")
 async def get_study_guide_thumbnail(study_guide_id: int, token: str = Depends(verify_token)):
     """
-    Rasterize the first page of a saved study guide's PDF as a PNG, on
-    demand — used by superbrain-web's collection view for a thumbnail grid.
+    Rasterize the first page of a saved study guide's PDF as a PNG — used by
+    superbrain-web's collection view for a thumbnail grid. Rendered once per
+    guide content and then served from the on-disk cache (see
+    core/study_guide_pdf.py's get_cached_study_guide_thumbnail).
 
     Requires API authentication.
     """
@@ -1843,7 +1845,10 @@ async def get_study_guide_thumbnail(study_guide_id: int, token: str = Depends(ve
         if not guide:
             raise HTTPException(status_code=404, detail="Study guide not found.")
         png_bytes = await asyncio.to_thread(
-            study_guide_pdf.render_study_guide_thumbnail, guide.get("title") or "Study Guide", guide["content"]
+            study_guide_pdf.get_cached_study_guide_thumbnail,
+            study_guide_id,
+            guide.get("title") or "Study Guide",
+            guide["content"],
         )
         return Response(content=png_bytes, media_type="image/png")
     except HTTPException:

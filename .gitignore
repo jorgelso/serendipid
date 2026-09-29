@@ -47,6 +47,7 @@ backend/uploads/
 
 # ── Backend temp / generated ─────────────────────────────────────────────────
 backend/temp/
+backend/cache/
 backend/static/
 backend/*.apk
 

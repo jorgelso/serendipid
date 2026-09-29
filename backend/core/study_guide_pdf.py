@@ -4,10 +4,17 @@ PDF rendering for study guides (core/study_guide.py).
 Every saved study guide can be viewed/downloaded as a PDF
 (GET /study-guides/{id}/pdf) and the collections list shows a thumbnail of
 each guide's first page (GET /study-guides/{id}/thumbnail). Both are
-rendered on demand from the stored markdown `content` rather than persisted
-as separate files — cheap, deterministic (pure rendering, no LLM call), and
-always in sync with the stored text; nothing to clean up if a guide is ever
-deleted.
+rendered from the stored markdown `content` — deterministic (pure
+rendering, no LLM call) and always in sync with the stored text. PDFs are
+rendered fresh per request; thumbnails are cached on disk (see
+get_cached_study_guide_thumbnail) because the collections grid asks for a
+whole page of them at once, on every visit.
+
+All rendering is serialized behind _render_lock. WeasyPrint's native text
+stack (Pango/HarfBuzz/fontconfig) and PyMuPDF are not thread-safe, and the
+endpoints run renders via asyncio.to_thread — a collections page firing ~6
+thumbnail requests at once had several renders running concurrently, which
+segfaulted the whole API process (not a catchable Python exception).
 
 Renders via WeasyPrint (markdown -> HTML -> a real CSS box layout), not
 fpdf2's simplified write_html(). Two real bugs in the fpdf2 version drove
@@ -29,7 +36,11 @@ speculation:
      throughout with no stranded single-line pages.
 """
 
+import hashlib
 import html as html_module
+import os
+import threading
+from pathlib import Path
 
 import markdown
 from weasyprint import HTML
@@ -63,8 +74,20 @@ a { color: #1a1a1a; }
 """
 
 
+# One process-wide lock for every WeasyPrint/PyMuPDF call — see the module
+# docstring for the segfault this prevents.
+_render_lock = threading.Lock()
+
+_THUMBNAIL_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "study_guide_thumbnails"
+
+
 def render_study_guide_pdf(title: str, content: str) -> bytes:
     """Render a study guide's markdown content to a PDF, returned as bytes."""
+    with _render_lock:
+        return _render_pdf_unlocked(title, content)
+
+
+def _render_pdf_unlocked(title: str, content: str) -> bytes:
     body_html = markdown.markdown(content or "", extensions=["extra", "sane_lists"])
     doc_title = html_module.escape(title or "Study Guide")
     full_html = f"<html><head><title>{doc_title}</title><style>{_PDF_CSS}</style></head><body>{body_html}</body></html>"
@@ -79,11 +102,48 @@ def render_study_guide_thumbnail(title: str, content: str, dpi: int = 96) -> byt
     """
     import pymupdf
 
-    pdf_bytes = render_study_guide_pdf(title, content)
-    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    with _render_lock:
+        pdf_bytes = _render_pdf_unlocked(title, content)
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            page = doc.load_page(0)
+            pix = page.get_pixmap(dpi=dpi)
+            return pix.tobytes("png")
+        finally:
+            doc.close()
+
+
+def get_cached_study_guide_thumbnail(study_guide_id: int, title: str, content: str, dpi: int = 96) -> bytes:
+    """render_study_guide_thumbnail, cached on disk as
+    cache/study_guide_thumbnails/<id>-<hash>.png.
+
+    The hash covers everything that affects the rendered image (title,
+    content, CSS, dpi), so a changed guide or stylesheet just misses the
+    cache — no invalidation hooks needed elsewhere. The id prefix is only so
+    older variants of the same guide can be cleaned up when a new one is
+    written.
+    """
+    digest = hashlib.sha256(
+        "\0".join([title or "", content or "", _PDF_CSS, str(dpi)]).encode("utf-8")
+    ).hexdigest()[:32]
+    path = _THUMBNAIL_CACHE_DIR / f"{study_guide_id}-{digest}.png"
     try:
-        page = doc.load_page(0)
-        pix = page.get_pixmap(dpi=dpi)
-        return pix.tobytes("png")
-    finally:
-        doc.close()
+        return path.read_bytes()
+    except FileNotFoundError:
+        pass
+
+    png_bytes = render_study_guide_thumbnail(title, content, dpi=dpi)
+
+    # Cache writes are best-effort: a failure here should never fail the
+    # request that already has its PNG in hand.
+    try:
+        _THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for stale in _THUMBNAIL_CACHE_DIR.glob(f"{study_guide_id}-*.png"):
+            if stale != path:
+                stale.unlink(missing_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_bytes(png_bytes)
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"[WARNING]  Could not cache study guide thumbnail {path.name}: {e}")
+    return png_bytes
