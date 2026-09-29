@@ -1,5 +1,5 @@
 {
-  "cached_at": "2026-09-11T04:42:02.841945",
+  "cached_at": "2026-09-29T22:25:52.669083",
   "models": [
     {
       "id": "nvidia/nemotron-3.5-lightning:free",
@@ -50,13 +50,74 @@
       "benchmarks": {
         "design_arena": [],
         "artificial_analysis": {
-          "intelligence_index": 13.6,
+          "intelligence_index": 12.9,
           "coding_index": 26.8,
-          "agentic_index": 6.1
+          "agentic_index": 3.5
         }
       },
       "reasoning": {
         "mandatory": false
+      }
+    },
+    {
+      "id": "stealth/space-bunny-alpha",
+      "canonical_slug": "stealth/space-bunny-alpha",
+      "hugging_face_id": null,
+      "name": "Space Bunny Alpha",
+      "created": 1790174884,
+      "description": "Space Bunny Alpha is an anonymous large model with blazing-fast inference, strong coding capabilities and native multimodal input support. It delivers adjustable reasoning effort, and a 1M-token context window. Space...",
+      "context_length": 1000000,
+      "architecture": {
+        "modality": "text+image+video->text",
+        "input_modalities": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "top_provider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 524288,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "reasoning_effort",
+        "response_format",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "default_parameters": {},
+      "supported_voices": null,
+      "knowledge_cutoff": null,
+      "expiration_date": null,
+      "links": {
+        "details": "/api/v1/models/stealth/space-bunny-alpha/endpoints"
+      },
+      "reasoning": {
+        "mandatory": true,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low"
+        ],
+        "default_effort": "max"
       }
     },
     {
@@ -120,9 +181,9 @@
       "benchmarks": {
         "design_arena": [],
         "artificial_analysis": {
-          "intelligence_index": 26.1,
+          "intelligence_index": null,
           "coding_index": 52.9,
-          "agentic_index": 25
+          "agentic_index": null
         }
       },
       "reasoning": {
@@ -198,64 +259,64 @@
           {
             "arena": "models",
             "category": "3d",
-            "elo": 1165,
-            "win_rate": 40.6,
-            "rank": 61
+            "elo": 1150,
+            "win_rate": 39.4,
+            "rank": 65
           },
           {
             "arena": "models",
             "category": "asciiart",
-            "elo": 1099,
-            "win_rate": 36.6,
-            "rank": 59
+            "elo": 1104,
+            "win_rate": 37.9,
+            "rank": 61
           },
           {
             "arena": "models",
             "category": "codecategories",
-            "elo": 1154,
-            "win_rate": 36.3,
-            "rank": 78
+            "elo": 1153,
+            "win_rate": 36.2,
+            "rank": 75
           },
           {
             "arena": "models",
             "category": "dataviz",
-            "elo": 1157,
-            "win_rate": 38.4,
-            "rank": 74
+            "elo": 1150,
+            "win_rate": 37.6,
+            "rank": 76
           },
           {
             "arena": "models",
             "category": "gamedev",
-            "elo": 1155,
-            "win_rate": 37,
-            "rank": 72
+            "elo": 1152,
+            "win_rate": 36.8,
+            "rank": 68
           },
           {
             "arena": "models",
             "category": "svg",
-            "elo": 1101,
-            "win_rate": 35.8,
-            "rank": 60
+            "elo": 1067,
+            "win_rate": 33,
+            "rank": 67
           },
           {
             "arena": "models",
             "category": "uicomponent",
-            "elo": 1152,
-            "win_rate": 37.3,
-            "rank": 73
+            "elo": 1147,
+            "win_rate": 36.4,
+            "rank": 74
           },
           {
             "arena": "models",
             "category": "website",
-            "elo": 1144,
-            "win_rate": 34.4,
-            "rank": 84
+            "elo": 1147,
+            "win_rate": 34.9,
+            "rank": 85
           }
         ],
         "artificial_analysis": {
-          "intelligence_index": 23.4,
+          "intelligence_index": 22.9,
           "coding_index": 49.3,
-          "agentic_index": 21.7
+          "agentic_index": 20.1
         }
       },
       "reasoning": {
@@ -332,64 +393,64 @@
           {
             "arena": "models",
             "category": "3d",
-            "elo": 1190,
-            "win_rate": 41.8,
-            "rank": 53
-          },
-          {
-            "arena": "models",
-            "category": "asciiart",
-            "elo": 1118,
-            "win_rate": 35.1,
+            "elo": 1178,
+            "win_rate": 40.4,
             "rank": 55
           },
           {
             "arena": "models",
-            "category": "codecategories",
-            "elo": 1214,
-            "win_rate": 42.1,
-            "rank": 48
-          },
-          {
-            "arena": "models",
-            "category": "dataviz",
-            "elo": 1191,
-            "win_rate": 40.2,
+            "category": "asciiart",
+            "elo": 1109,
+            "win_rate": 34.6,
             "rank": 58
           },
           {
             "arena": "models",
+            "category": "codecategories",
+            "elo": 1213,
+            "win_rate": 42.1,
+            "rank": 49
+          },
+          {
+            "arena": "models",
+            "category": "dataviz",
+            "elo": 1175,
+            "win_rate": 38.2,
+            "rank": 66
+          },
+          {
+            "arena": "models",
             "category": "gamedev",
-            "elo": 1179,
-            "win_rate": 37.2,
-            "rank": 60
+            "elo": 1176,
+            "win_rate": 37.8,
+            "rank": 61
           },
           {
             "arena": "models",
             "category": "svg",
-            "elo": 1131,
-            "win_rate": 34.5,
+            "elo": 1112,
+            "win_rate": 34.4,
             "rank": 54
           },
           {
             "arena": "models",
             "category": "uicomponent",
             "elo": 1209,
-            "win_rate": 41.7,
-            "rank": 48
+            "win_rate": 41.4,
+            "rank": 49
           },
           {
             "arena": "models",
             "category": "website",
-            "elo": 1226,
-            "win_rate": 43.4,
+            "elo": 1229,
+            "win_rate": 44.2,
             "rank": 47
           }
         ],
         "artificial_analysis": {
-          "intelligence_index": 25.5,
+          "intelligence_index": 25,
           "coding_index": 52.1,
-          "agentic_index": 24.3
+          "agentic_index": 22.5
         }
       },
       "reasoning": {
@@ -556,7 +617,7 @@
       "default_parameters": {},
       "supported_voices": null,
       "knowledge_cutoff": null,
-      "expiration_date": "2026-09-30",
+      "expiration_date": null,
       "links": {
         "details": "/api/v1/models/dots-studio/dots-3-note-preview-20260813/endpoints"
       },
@@ -565,12 +626,12 @@
       }
     },
     {
-      "id": "inclusionai/ling-3.0-flash-vl:free",
-      "canonical_slug": "inclusionai/ling-3.0-flash-vl-20260910",
-      "hugging_face_id": "inclusionAI/Ling-3.0-flash-VL",
-      "name": "inclusionAI: Ling 3.0 Flash VL (free)",
-      "created": 1789056114,
-      "description": "Ling 3.0 Flash VL builds on Ling 3.0 Flash (124B total / 5.5B active MoE from InclusionAI), further strengthening its language capabilities while adding native visual perception and advanced visual...",
+      "id": "qwen/qwen3.8-27b:free",
+      "canonical_slug": "qwen/qwen3.8-27b-20260814",
+      "hugging_face_id": "Qwen/Qwen3.8-27B",
+      "name": "Qwen: Qwen3.8 27B (free)",
+      "created": 1786722910,
+      "description": "Qwen3.8 27B is an open-weight dense vision-language model from Qwen. It is suited for coding, professional workflows, research, multimodal interaction, and long-running agent tasks, with flexible thinking that can be...",
       "context_length": 262144,
       "architecture": {
         "modality": "text+image+video->text",
@@ -582,7 +643,7 @@
         "output_modalities": [
           "text"
         ],
-        "tokenizer": "Other",
+        "tokenizer": "Qwen",
         "instruct_type": null
       },
       "pricing": {
@@ -591,177 +652,53 @@
       },
       "top_provider": {
         "context_length": 262144,
-        "max_completion_tokens": 32768,
+        "max_completion_tokens": 235929,
         "is_moderated": false
       },
       "per_request_limits": null,
       "supported_parameters": [
         "frequency_penalty",
         "include_reasoning",
-        "logprobs",
         "max_tokens",
         "presence_penalty",
         "reasoning",
+        "reasoning_effort",
         "repetition_penalty",
-        "seed",
         "stop",
+        "structured_outputs",
         "temperature",
         "tool_choice",
         "tools",
-        "top_k",
-        "top_logprobs",
         "top_p"
       ],
-      "default_parameters": {},
+      "default_parameters": {
+        "temperature": 1,
+        "top_p": 0.95,
+        "top_k": 20
+      },
       "supported_voices": null,
       "knowledge_cutoff": null,
       "expiration_date": null,
       "links": {
-        "details": "/api/v1/models/inclusionai/ling-3.0-flash-vl-20260910/endpoints"
+        "details": "/api/v1/models/qwen/qwen3.8-27b-20260814/endpoints"
       },
       "benchmarks": {
         "design_arena": [],
         "artificial_analysis": {
-          "intelligence_index": 24.8,
-          "coding_index": 57,
-          "agentic_index": 30
+          "intelligence_index": 33.7,
+          "coding_index": 68.1,
+          "agentic_index": 45.8
         }
       },
       "reasoning": {
         "mandatory": false,
-        "default_enabled": true
-      }
-    },
-    {
-      "id": "nex-agi/nex-n2.5-mini:free",
-      "canonical_slug": "nex-agi/nex-n2.5-mini-20260908",
-      "hugging_face_id": "nex-agi/Nex-N2.5-mini",
-      "name": "Nex AGI: Nex-N2.5-Mini (free)",
-      "created": 1788890061,
-      "description": "Nex-N2.5 is an agentic model built to turn goals into working, verified outcomes. Its core strength is agentic coding within a visual feedback loop: it can explore codebases, implement multi-file...",
-      "context_length": 262144,
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": [
-          "text",
-          "image"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "Qwen3",
-        "instruct_type": null
-      },
-      "pricing": {
-        "prompt": "0",
-        "completion": "0"
-      },
-      "top_provider": {
-        "context_length": 262144,
-        "max_completion_tokens": 235929,
-        "is_moderated": false
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "include_reasoning",
-        "logprobs",
-        "max_tokens",
-        "reasoning",
-        "reasoning_effort",
-        "response_format",
-        "structured_outputs",
-        "temperature",
-        "tool_choice",
-        "tools",
-        "top_k",
-        "top_logprobs",
-        "top_p"
-      ],
-      "default_parameters": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "top_k": 40
-      },
-      "supported_voices": null,
-      "knowledge_cutoff": null,
-      "expiration_date": null,
-      "links": {
-        "details": "/api/v1/models/nex-agi/nex-n2.5-mini-20260908/endpoints"
-      },
-      "reasoning": {
-        "mandatory": false,
+        "default_enabled": true,
         "supported_efforts": [
-          "high",
+          "xhigh",
           "medium",
-          "none"
+          "low"
         ],
-        "default_effort": "high"
-      }
-    },
-    {
-      "id": "nex-agi/nex-n2.5-pro:free",
-      "canonical_slug": "nex-agi/nex-n2.5-pro-20260907",
-      "hugging_face_id": "nex-agi/Nex-N2.5-Pro",
-      "name": "Nex AGI: Nex-N2.5-Pro (free)",
-      "created": 1788890050,
-      "description": "Nex-N2.5 is an agentic model built to turn goals into working, verified outcomes. Its core strength is agentic coding within a visual feedback loop: it can explore codebases, implement multi-file...",
-      "context_length": 262144,
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": [
-          "text",
-          "image"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "Qwen3",
-        "instruct_type": null
-      },
-      "pricing": {
-        "prompt": "0",
-        "completion": "0"
-      },
-      "top_provider": {
-        "context_length": 262144,
-        "max_completion_tokens": 235929,
-        "is_moderated": false
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "include_reasoning",
-        "logprobs",
-        "max_tokens",
-        "reasoning",
-        "reasoning_effort",
-        "response_format",
-        "structured_outputs",
-        "temperature",
-        "tool_choice",
-        "tools",
-        "top_k",
-        "top_logprobs",
-        "top_p"
-      ],
-      "default_parameters": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "top_k": 40
-      },
-      "supported_voices": null,
-      "knowledge_cutoff": null,
-      "expiration_date": null,
-      "links": {
-        "details": "/api/v1/models/nex-agi/nex-n2.5-pro-20260907/endpoints"
-      },
-      "reasoning": {
-        "mandatory": false,
-        "supported_efforts": [
-          "high",
-          "medium",
-          "none"
-        ],
-        "default_effort": "high"
+        "default_effort": "xhigh"
       }
     },
     {
@@ -816,64 +753,6 @@
       "expiration_date": null,
       "links": {
         "details": "/api/v1/models/inclusionai/ling-3.0-flash-sante-20260904/endpoints"
-      },
-      "reasoning": {
-        "mandatory": false,
-        "default_enabled": true
-      }
-    },
-    {
-      "id": "inclusionai/ling-3.0-flash-fin:free",
-      "canonical_slug": "inclusionai/ling-3.0-flash-fin-20260827",
-      "hugging_face_id": null,
-      "name": "inclusionAI: Ling 3.0 Flash Fin (free)",
-      "created": 1787846290,
-      "description": "Ling 3.0 Flash Fin is a finance-focused mixture-of-experts model from InclusionAI, built on Ling 3.0 Flash with 5.1B active parameters out of 124B total. It is designed for real-world investment...",
-      "context_length": 262144,
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": [
-          "text"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "Other",
-        "instruct_type": null
-      },
-      "pricing": {
-        "prompt": "0",
-        "completion": "0"
-      },
-      "top_provider": {
-        "context_length": 262144,
-        "max_completion_tokens": 32768,
-        "is_moderated": false
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "frequency_penalty",
-        "include_reasoning",
-        "logprobs",
-        "max_tokens",
-        "presence_penalty",
-        "reasoning",
-        "repetition_penalty",
-        "seed",
-        "stop",
-        "temperature",
-        "tool_choice",
-        "tools",
-        "top_k",
-        "top_logprobs",
-        "top_p"
-      ],
-      "default_parameters": {},
-      "supported_voices": null,
-      "knowledge_cutoff": null,
-      "expiration_date": null,
-      "links": {
-        "details": "/api/v1/models/inclusionai/ling-3.0-flash-fin-20260827/endpoints"
       },
       "reasoning": {
         "mandatory": false,
@@ -1005,9 +884,9 @@
       "benchmarks": {
         "design_arena": [],
         "artificial_analysis": {
-          "intelligence_index": 15.4,
+          "intelligence_index": null,
           "coding_index": 43.4,
-          "agentic_index": 6.7
+          "agentic_index": 4.2
         }
       },
       "reasoning": {
@@ -1074,9 +953,9 @@
       "benchmarks": {
         "design_arena": [],
         "artificial_analysis": {
-          "intelligence_index": 13.6,
+          "intelligence_index": 12.8,
           "coding_index": 37.7,
-          "agentic_index": 4.1
+          "agentic_index": 1.7
         }
       },
       "reasoning": {
@@ -1150,7 +1029,7 @@
       "benchmarks": {
         "design_arena": [],
         "artificial_analysis": {
-          "intelligence_index": null,
+          "intelligence_index": 9.9,
           "coding_index": 36.5,
           "agentic_index": 1.1
         }
