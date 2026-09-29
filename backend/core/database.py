@@ -6,6 +6,7 @@ Self-hosted, zero-config, file-based database
 """
 
 import sqlite3
+import hashlib
 import json
 import os
 import threading
@@ -1840,6 +1841,32 @@ class Database:
         except Exception as e:
             print(f"[WARNING]  Error fetching embeddings: {e}")
             return []
+
+    def get_embeddings_fingerprint(self) -> str:
+        """Cheap change-detector for the set returned by get_all_embeddings().
+
+        Reads only each vector's length and first 64 characters of JSON text
+        (its first few floats at full precision) in SQL, never the full ~30 KB
+        vectors, so it's safe to compute on every /export. Changes whenever a
+        post gains, loses (deleted/hidden) or changes its embedding — how
+        GET /embeddings and superbrain-web decide whether their cached vectors
+        are stale.
+        """
+        if not self.is_connected():
+            return ""
+        try:
+            cur = self._conn.execute(
+                "SELECT shortcode, length(embedding), substr(embedding, 1, 64) FROM analyses "
+                "WHERE embedding IS NOT NULL AND embedding != '' "
+                "AND (is_hidden IS NULL OR is_hidden = 0) ORDER BY shortcode"
+            )
+            h = hashlib.sha256()
+            for shortcode, length, prefix in cur.fetchall():
+                h.update(f"{shortcode}\0{length}\0{prefix}\n".encode("utf-8"))
+            return h.hexdigest()[:32]
+        except Exception as e:
+            print(f"[WARNING]  Error fingerprinting embeddings: {e}")
+            return ""
 
     # ------------------------------------------------------------------
     # Personalization signals — view/search history + embedding cache

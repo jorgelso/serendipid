@@ -7,7 +7,7 @@
 
 import { UMAP } from "umap-js";
 import type { Post, Theme, VectorSpaceColorSlot, VectorSpacePoint } from "@/types/domain";
-import { centroid, dot, normalize, parseEmbedding } from "./clustering";
+import { centroid, dot } from "./clustering";
 import { classifyMedia } from "./media";
 import { resolveMediaUrls } from "./posts";
 
@@ -296,6 +296,7 @@ const MIN_POINTS_FOR_UMAP = 4;
 export function computeVectorSpaceLayout(
   posts: Post[],
   themes: Theme[],
+  embeddings: Map<string, Float32Array>,
   apiBaseUrl: string
 ): VectorSpacePoint[] {
   const postsByShortcode = new Map(posts.map((p) => [p.shortcode, p]));
@@ -305,9 +306,8 @@ export function computeVectorSpaceLayout(
   const vectors: number[][] = [];
   const vectorByShortcode = new Map<string, Float32Array>();
   posts.forEach((post) => {
-    const vector = parseEmbedding(post.embedding);
-    if (!vector) return;
-    const normalized = normalize(vector);
+    const normalized = embeddings.get(post.shortcode);
+    if (!normalized) return;
     shortcodes.push(post.shortcode);
     vectors.push(Array.from(normalized));
     vectorByShortcode.set(post.shortcode, normalized);

@@ -15,24 +15,7 @@ import type { MicroCluster, Post, Theme } from "@/types/domain";
 export interface EmbeddedPost {
   index: number;
   shortcode: string;
-  vector: Float32Array; // pre-normalized
-}
-
-export function parseEmbedding(raw: string | null): Float32Array | null {
-  if (!raw) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const out = new Float32Array(parsed.length);
-    for (let i = 0; i < parsed.length; i++) {
-      const n = Number(parsed[i]);
-      if (!Number.isFinite(n)) return null;
-      out[i] = n;
-    }
-    return out;
-  } catch {
-    return null;
-  }
+  vector: Float32Array; // pre-normalized (see fetchEmbeddings)
 }
 
 export function normalize(v: Float32Array): Float32Array {
@@ -43,6 +26,16 @@ export function normalize(v: Float32Array): Float32Array {
   const out = new Float32Array(v.length);
   for (let i = 0; i < v.length; i++) out[i] = v[i] / norm;
   return out;
+}
+
+/** normalize() without the copy — for the freshly decoded /embeddings
+ * buffer (src/lib/apiClient.ts fetchEmbeddings), which nothing else holds. */
+export function normalizeInPlace(v: Float32Array): void {
+  let sumSq = 0;
+  for (let i = 0; i < v.length; i++) sumSq += v[i] * v[i];
+  const norm = Math.sqrt(sumSq);
+  if (norm === 0) return;
+  for (let i = 0; i < v.length; i++) v[i] /= norm;
 }
 
 export function dot(a: Float32Array, b: Float32Array): number {
@@ -406,6 +399,7 @@ function buildThemes(
 
 export function computeThemes(
   posts: Post[],
+  embeddings: Map<string, Float32Array>,
   options?: ClusteringOptions
 ): { themes: Theme[]; unclusteredShortcodes: string[] } {
   const opts = { ...DEFAULT_OPTIONS, ...options };
@@ -416,8 +410,8 @@ export function computeThemes(
 
   const embeddedPosts: EmbeddedPost[] = [];
   posts.forEach((post, index) => {
-    const vector = parseEmbedding(post.embedding);
-    if (vector) embeddedPosts.push({ index, shortcode: post.shortcode, vector: normalize(vector) });
+    const vector = embeddings.get(post.shortcode);
+    if (vector) embeddedPosts.push({ index, shortcode: post.shortcode, vector });
   });
 
   if (embeddedPosts.length === 0) {
@@ -456,20 +450,20 @@ export function computeThemes(
 export function findRelatedPosts(
   target: Post,
   posts: Post[],
+  embeddings: Map<string, Float32Array>,
   limit = 8
 ): { shortcode: string; similarity: number }[] {
-  const targetVector = parseEmbedding(target.embedding);
+  const targetVector = embeddings.get(target.shortcode);
   if (!targetVector) return [];
-  const targetNormalized = normalize(targetVector);
 
   const scored: { shortcode: string; similarity: number }[] = [];
   for (const post of posts) {
     if (post.shortcode === target.shortcode) continue;
-    const vector = parseEmbedding(post.embedding);
+    const vector = embeddings.get(post.shortcode);
     if (!vector) continue;
     scored.push({
       shortcode: post.shortcode,
-      similarity: dot(targetNormalized, normalize(vector)),
+      similarity: dot(targetVector, vector),
     });
   }
 

@@ -3311,18 +3311,94 @@ async def reset_database(
 # Import/Export endpoints
 # ─────────────────────────────────────────────────────────────────
 
+# Last GET /embeddings response, keyed by get_embeddings_fingerprint() so
+# repeat requests skip re-parsing every stored vector's JSON text.
+_embeddings_blob_cache: Dict[str, Any] = {"fingerprint": None, "blob": None}
+
+
+def _build_embeddings_blob(db) -> tuple:
+    """Pack every non-hidden post's embedding as little-endian float32.
+
+    Layout: uint32 LE header length | UTF-8 JSON header, space-padded so the
+    vectors start 4-byte aligned | float32 LE vectors, count x dim, in the
+    header's shortcode order. Header: {"fingerprint", "dim", "count",
+    "shortcodes"}. Vectors whose length isn't the library's most common
+    dimension are skipped rather than mis-framing everything after them.
+    """
+    from array import array
+    from collections import Counter
+    import struct
+
+    fingerprint = db.get_embeddings_fingerprint()
+    if fingerprint and _embeddings_blob_cache["fingerprint"] == fingerprint:
+        return fingerprint, _embeddings_blob_cache["blob"]
+
+    rows = db.get_all_embeddings()
+    dims = Counter(len(r["embedding"]) for r in rows)
+    dim = dims.most_common(1)[0][0] if dims else 0
+    shortcodes = []
+    values = array("f")
+    for r in rows:
+        if len(r["embedding"]) != dim:
+            continue
+        shortcodes.append(r["shortcode"])
+        values.extend(r["embedding"])
+    if sys.byteorder != "little":
+        values.byteswap()
+
+    header = json.dumps(
+        {"fingerprint": fingerprint, "dim": dim, "count": len(shortcodes), "shortcodes": shortcodes}
+    ).encode("utf-8")
+    header += b" " * ((-(4 + len(header))) % 4)
+    blob = struct.pack("<I", len(header)) + header + values.tobytes()
+
+    _embeddings_blob_cache["fingerprint"] = fingerprint
+    _embeddings_blob_cache["blob"] = blob
+    return fingerprint, blob
+
+
+@app.get("/embeddings")
+async def get_embeddings(token: str = Depends(verify_token)):
+    """
+    Every non-hidden post's embedding as one binary float32 blob (see
+    _build_embeddings_blob for the layout) — about 6 KB per post versus
+    ~30 KB of JSON text in /export, and readable client-side as a
+    Float32Array with no parsing. Pair with /export?include_embeddings=false:
+    its `embeddings_fingerprint` matches the X-Embeddings-Fingerprint header
+    here, so clients only refetch when the vectors actually changed.
+
+    Requires API authentication.
+    """
+    try:
+        fingerprint, blob = _build_embeddings_blob(get_db())
+        return Response(
+            content=blob,
+            media_type="application/octet-stream",
+            headers={"X-Embeddings-Fingerprint": fingerprint},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/export")
 async def export_data(
     background_tasks: __import__('fastapi').BackgroundTasks,
     token: str = Depends(verify_token),
     limit: int = Query(default=10000, ge=1, le=50000, description="Max posts to export"),
     offset: int = Query(default=0, ge=0, description="Offset for pagination"),
-    format: str = Query(default="json", description="Export format: json or zip")
+    format: str = Query(default="json", description="Export format: json or zip"),
+    include_embeddings: bool = Query(default=True, description="Include each post's embedding vector"),
 ):
     """
     Export data as JSON or ZIP (posts, collections, settings).
     - Requires API authentication
     - Supports pagination with limit and offset
+    - include_embeddings=false drops each post's `embedding` (~30 KB of JSON
+      text per post, 90%+ of the payload) and adds a top-level
+      `embeddings_fingerprint` instead; fetch the vectors from GET /embeddings.
+      superbrain-web does this — a full-library export with embeddings grew
+      past V8's max string length. Defaults to true so backups stay complete
+      for /import.
     """
     import tempfile
     import os
@@ -3346,6 +3422,10 @@ async def export_data(
             "collections": collections,
             "stats": stats
         }
+        if not include_embeddings:
+            for p in posts_list:
+                p.pop("embedding", None)
+            export_payload["embeddings_fingerprint"] = db.get_embeddings_fingerprint()
         
         if format.lower() == "zip":
             # Create a zip file on disk to avoid memory explosion

@@ -18,11 +18,13 @@ export function resolveThumbnailUrl(
   return null;
 }
 
-/** Strips the raw embedding field before a post is ever handed to a client
- * component or serialized in an API response. */
+/** Strips any raw embedding field before a post is ever handed to a client
+ * component or serialized in an API response. /export is requested without
+ * embeddings, so this is only a guard against a backend that ignores
+ * include_embeddings=false. */
 export function toClientPost(post: Post): ClientPost {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { embedding, ...rest } = post;
+  const { embedding, ...rest } = post as Post & { embedding?: unknown };
   return rest;
 }
 
@@ -34,7 +36,7 @@ export function resolveMediaUrls(mediaUrls: string[], apiBaseUrl: string): strin
   return mediaUrls.map((u) => (u.startsWith("/media/") ? `${apiBaseUrl}${u}` : u));
 }
 
-/** Strips the embedding and resolves the thumbnail + media URLs to absolute
+/** Strips any embedding and resolves the thumbnail + media URLs to absolute
  * URLs in one step — the shape every post should be in by the time it
  * reaches a client component. */
 export function toDisplayPost(post: Post, apiBaseUrl: string): ClientPost {

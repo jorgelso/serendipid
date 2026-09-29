@@ -63,9 +63,8 @@ export interface Post {
   // needs_review so the UI can surface it and offer to re-run or dismiss.
   analysis_version: number;
   needs_review: boolean;
-  // Raw JSON-text TEXT column as /export returns it (1536-dim OpenAI vector).
-  // Only ever parsed server-side for clustering — never sent to the client.
-  embedding: string | null;
+  // No `embedding`: the web app fetches /export with include_embeddings=false
+  // and gets the vectors separately (see EmbeddingIndex below).
   // Netflix-style tri-state manual ratings — null (default) | 'liked' | 'loved'.
   // Distinct from the AI-scored `importance` above: these are the user's own
   // subjective judgment, fed into the Home recommendation engine
@@ -96,8 +95,10 @@ export interface Post {
 
 export type RatingTier = "liked" | "loved" | null;
 
-// Post shape safe to send to the browser: embedding stripped.
-export type ClientPost = Omit<Post, "embedding">;
+// Post shape safe to send to the browser. Identical to Post now that /export
+// is fetched without embeddings; kept as its own name so client-facing code
+// keeps saying which shape it means.
+export type ClientPost = Post;
 
 export interface Collection {
   id: string;
@@ -181,6 +182,18 @@ export interface ExportPayload {
   posts: Post[];
   collections: Collection[];
   stats: Record<string, unknown>;
+  // Set because we request include_embeddings=false — changes whenever any
+  // post's embedding does. Matches EmbeddingIndex.fingerprint when that index
+  // was fetched against this same export.
+  embeddings_fingerprint?: string;
+}
+
+// Decoded GET /embeddings (backend/api.py's binary float32 blob): every
+// post's vector, L2-normalized, keyed by shortcode. Server-only — like the
+// old inline Post.embedding, never sent to the browser.
+export interface EmbeddingIndex {
+  fingerprint: string;
+  vectors: Map<string, Float32Array>;
 }
 
 // Mirrors backend/api.py's GET /changelog (backend/core/database.py's

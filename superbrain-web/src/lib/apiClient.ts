@@ -1,3 +1,4 @@
+import { normalizeInPlace } from "./clustering";
 import { getConfig } from "./config";
 import type {
   BatchCheckResponse,
@@ -11,6 +12,7 @@ import type {
   ChatMessageExchange,
   ChatThread,
   ChatThreadDetail,
+  EmbeddingIndex,
   EloquenceCandidatesResponse,
   EloquenceApproveResponse,
   EloquenceOverridesResponse,
@@ -57,6 +59,14 @@ interface RequestOptions {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const res = await send(path, options);
+  return (await res.json()) as T;
+}
+
+/** Performs the request and maps every failure to a SuperBrainApiError;
+ * returns the still-unread successful Response so callers pick the body
+ * format (JSON via request() above, binary for fetchEmbeddings()). */
+async function send(path: string, options: RequestOptions = {}): Promise<Response> {
   const config = getConfig();
   const url = new URL(`${config.apiUrl}${path}`);
   for (const [key, value] of Object.entries(options.params ?? {})) {
@@ -126,11 +136,42 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     );
   }
 
-  return (await res.json()) as T;
+  return res;
 }
 
+// include_embeddings=false: the vectors come from fetchEmbeddings() instead —
+// with them inline, a full-library /export outgrew V8's max string length.
 export async function fetchExport(limit = 50000, offset = 0): Promise<ExportPayload> {
-  return request<ExportPayload>("/export", { params: { limit, offset, format: "json" } });
+  return request<ExportPayload>("/export", {
+    params: { limit, offset, format: "json", include_embeddings: "false" },
+  });
+}
+
+// Building the blob parses every stored vector backend-side on a cold cache.
+const EMBEDDINGS_TIMEOUT_MS = 60_000;
+
+/** GET /embeddings — every post's vector, decoded from backend/api.py's
+ * binary layout (_build_embeddings_blob) and L2-normalized in place, keyed
+ * by shortcode. Each vector is a view into the one response buffer. */
+export async function fetchEmbeddings(): Promise<EmbeddingIndex> {
+  const res = await send("/embeddings", { timeoutMs: EMBEDDINGS_TIMEOUT_MS });
+  const buffer = await res.arrayBuffer();
+  const headerLength = new DataView(buffer).getUint32(0, true);
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 4, headerLength))) as {
+    fingerprint: string;
+    dim: number;
+    count: number;
+    shortcodes: string[];
+  };
+  const data = new Float32Array(buffer, 4 + headerLength, header.count * header.dim);
+
+  const vectors = new Map<string, Float32Array>();
+  header.shortcodes.forEach((shortcode, i) => {
+    const vector = data.subarray(i * header.dim, (i + 1) * header.dim);
+    normalizeInPlace(vector);
+    vectors.set(shortcode, vector);
+  });
+  return { fingerprint: header.fingerprint, vectors };
 }
 
 export async function fetchChangelog(): Promise<ChangelogResponse> {

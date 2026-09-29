@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { SuperBrainApiError } from "@/lib/apiClient";
 import { getConfig } from "@/lib/config";
-import { getExport } from "@/lib/cache";
+import { getEmbeddings, getExport } from "@/lib/cache";
 import { toDisplayPost } from "@/lib/posts";
 import { findRelatedPosts } from "@/lib/clustering";
 import type { ClientPost } from "@/types/domain";
@@ -20,7 +20,7 @@ async function loadPostPage(shortcode: string): Promise<PageData | null> {
   const rawPost = posts.find((p) => p.shortcode === shortcode);
   if (!rawPost) return null;
 
-  const relatedScored = findRelatedPosts(rawPost, posts, 8);
+  const relatedScored = findRelatedPosts(rawPost, posts, await getEmbeddings(), 8);
   const byShortcode = new Map(posts.map((p) => [p.shortcode, p]));
   const related = relatedScored
     .map((r) => {

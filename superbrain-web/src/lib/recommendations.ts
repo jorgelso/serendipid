@@ -13,9 +13,9 @@
 // here is read live from getThemes() on each call — no cluster id is ever
 // persisted or passed in from outside this module.
 
-import { getExport, getThemes } from "./cache";
+import { getEmbeddings, getExport, getThemes } from "./cache";
 import { fetchSearchHistory, fetchStudyGuideReelHistory, fetchViewHistory } from "./apiClient";
-import { centroid, dot, normalize, parseEmbedding } from "./clustering";
+import { centroid, dot, normalize } from "./clustering";
 import type {
   Post,
   RecommendationStrategy,
@@ -90,10 +90,18 @@ interface Signals {
 }
 
 async function loadSignals(): Promise<Signals> {
-  const [{ posts }, { themes, unclusteredShortcodes }, viewHistoryResp, studyGuideReelHistoryResp, searchHistoryResp] =
+  const [
+    { posts },
+    { themes, unclusteredShortcodes },
+    embeddingByShortcode,
+    viewHistoryResp,
+    studyGuideReelHistoryResp,
+    searchHistoryResp,
+  ] =
     await Promise.all([
       getExport(),
       getThemes(),
+      getEmbeddings(),
       fetchViewHistory(),
       fetchStudyGuideReelHistory(),
       fetchSearchHistory(),
@@ -101,11 +109,6 @@ async function loadSignals(): Promise<Signals> {
 
   const postsByShortcode = new Map(posts.map((p) => [p.shortcode, p]));
 
-  const embeddingByShortcode = new Map<string, Float32Array>();
-  for (const post of posts) {
-    const vec = parseEmbedding(post.embedding);
-    if (vec) embeddingByShortcode.set(post.shortcode, normalize(vec));
-  }
 
   const themeOf = new Map<string, string>();
   for (const sc of unclusteredShortcodes) themeOf.set(sc, "unclustered");
