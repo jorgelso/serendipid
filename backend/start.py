@@ -9,6 +9,11 @@
 Usage:
     python start.py          — interactive setup on first run, then start server
     python start.py --reset  — re-run the full setup wizard
+    python start.py --show-sensitive — also serve posts from sensitive
+                                       Instagram folders (core/sensitive.py)
+    python start.py --prefer anthropic — try this AI provider first for this
+                                       run (openai, anthropic, groq, gemini,
+                                       openrouter, ollama; core/model_router.py)
 """
 
 import sys
@@ -1403,6 +1408,23 @@ def launch_backend_status():
 def main():
     os.chdir(BASE_DIR)
     banner()
+
+    # Exported before uvicorn starts so both it and its --reload child see it
+    # (core/sensitive.py reads SUPERBRAIN_SHOW_SENSITIVE).
+    if "--show-sensitive" in sys.argv:
+        os.environ["SUPERBRAIN_SHOW_SENSITIVE"] = "1"
+        print("  --show-sensitive: sensitive-folder posts will be visible to clients")
+
+    # Same reasoning: exported so uvicorn and every main.py subprocess see it
+    # (core/model_router.py reads SUPERBRAIN_PREFERRED_PROVIDER).
+    from core.model_router import preferred_provider_from_argv
+    try:
+        prefer = preferred_provider_from_argv(sys.argv)
+    except ValueError as e:
+        err(str(e))
+        sys.exit(2)
+    if prefer:
+        print(f"  --prefer: {prefer} models will be tried first")
 
     status_mode = "--status" in sys.argv
     if status_mode:

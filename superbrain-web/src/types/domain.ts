@@ -46,6 +46,11 @@ export interface Post {
   audio_transcription: string | null;
   text_analysis: string | null;
   is_hidden: number;
+  // 1 for a post in a sensitive Instagram folder (backend/core/sensitive.py).
+  // Only ever present when the backend runs with --show-sensitive (otherwise
+  // these posts aren't served at all); such posts must never be used by
+  // recommendations or "Related" suggestions.
+  is_sensitive?: number;
   source_hashtags: string[];
   // Filenames/paths for the permanently-stored original media (backend/core/
   // media_store.py). Carousels use numbered entries ("1.mp4", "2.jpg", ...)

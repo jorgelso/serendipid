@@ -18,7 +18,8 @@ public enum RelatedPosts {
         let normalizedTarget = EmbeddingMath.normalize(targetVector)
 
         var scored: [RelatedPost] = []
-        for candidate in posts where candidate.shortcode != target.shortcode {
+        // Never suggest a sensitive-folder post (backend/core/sensitive.py).
+        for candidate in posts where candidate.shortcode != target.shortcode && candidate.is_sensitive != 1 {
             guard let candidateVector = EmbeddingMath.parse(candidate.embedding) else { continue }
             let similarity = EmbeddingMath.cosineSimilarity(
                 normalizedA: normalizedTarget,

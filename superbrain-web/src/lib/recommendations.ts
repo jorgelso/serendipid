@@ -91,7 +91,7 @@ interface Signals {
 
 async function loadSignals(): Promise<Signals> {
   const [
-    { posts },
+    { posts: allPosts },
     { themes, unclusteredShortcodes },
     embeddingByShortcode,
     viewHistoryResp,
@@ -107,6 +107,11 @@ async function loadSignals(): Promise<Signals> {
       fetchSearchHistory(),
     ]);
 
+  // Sensitive-folder posts (backend/core/sensitive.py) are never a
+  // recommendation candidate or signal — not even when the backend serves
+  // them (--show-sensitive). Dropping them here keeps them out of every
+  // scorer, the cold-start fallback, rating boosts and theme centroids.
+  const posts = allPosts.filter((p) => !p.is_sensitive);
   const postsByShortcode = new Map(posts.map((p) => [p.shortcode, p]));
 
 
@@ -128,6 +133,7 @@ async function loadSignals(): Promise<Signals> {
     const vecs: Float32Array[] = [];
     for (const mc of theme.microClusters) {
       for (const sc of mc.postShortcodes) {
+        if (!postsByShortcode.has(sc)) continue;
         const v = embeddingByShortcode.get(sc);
         if (v) vecs.push(v);
       }

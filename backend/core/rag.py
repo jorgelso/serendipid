@@ -72,7 +72,10 @@ def retrieve_relevant_posts(router, db, query, limit=8, min_similarity=0.2):
     if not query_embedding:
         return [], None
 
-    stored = db.get_all_embeddings()
+    # Chat answers are a suggestion surface, so sensitive-folder posts
+    # (core/sensitive.py) are never retrieved — even with --show-sensitive.
+    sensitive = db.get_sensitive_shortcodes()
+    stored = [row for row in db.get_all_embeddings() if row["shortcode"] not in sensitive]
     if not stored:
         return [], query_embedding
 

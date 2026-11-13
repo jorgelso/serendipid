@@ -459,6 +459,8 @@ export function findRelatedPosts(
   const scored: { shortcode: string; similarity: number }[] = [];
   for (const post of posts) {
     if (post.shortcode === target.shortcode) continue;
+    // Never suggest a sensitive-folder post (backend/core/sensitive.py).
+    if (post.is_sensitive) continue;
     const vector = embeddings.get(post.shortcode);
     if (!vector) continue;
     scored.push({

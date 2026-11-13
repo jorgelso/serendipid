@@ -58,6 +58,7 @@ from import_saved_instagram import (
     save_state,
     shortcode_for,
 )
+from core.sensitive import is_excluded_folder  # import_saved_instagram put backend/ on sys.path
 
 DEFAULT_PRIORITY_FOLDER = "Important"
 
@@ -217,6 +218,9 @@ def main() -> None:
             for f in folders:
                 if f not in entry["folders"]:
                     entry["folders"].append(f)
+            # State written before EXCLUDED_IMPORT_FOLDERS existed may still
+            # list one — never assign the post to it.
+            entry["folders"] = [f for f in entry["folders"] if not is_excluded_folder(f)]
 
         shortcode = entry["shortcode"]
         if not shortcode:

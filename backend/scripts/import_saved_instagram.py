@@ -62,6 +62,9 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = SCRIPT_DIR.parent
 
+sys.path.insert(0, str(BACKEND_DIR))
+from core.sensitive import is_excluded_folder  # noqa: E402
+
 DEFAULT_SERVER_URL = "http://localhost:5050"
 DEFAULT_STATE_FILE = SCRIPT_DIR / "import_state.json"
 DEFAULT_DELAY_MIN = 8.0
@@ -347,9 +350,14 @@ def parse_export(path: Path) -> List[Tuple[str, str, str, List[str]]]:
 
         all_records.extend(records)
 
-    # Keep only actual Instagram post/reel/tv URLs, normalize away tracking params
+    # Keep only actual Instagram post/reel/tv URLs, normalize away tracking params.
+    # Records from an excluded folder (core/sensitive.py) are dropped here, so
+    # a post saved only there is never imported, and one also saved elsewhere
+    # is imported without ever being assigned to it.
     cleaned: List[Tuple[str, str, str, List[str]]] = []
     for folder, url, caption, hashtags in all_records:
+        if is_excluded_folder(folder):
+            continue
         code = shortcode_for(url)
         if not code:
             continue
@@ -762,6 +770,9 @@ def main() -> None:
             for f in folders:
                 if f not in entry["folders"]:
                     entry["folders"].append(f)
+            # State written before EXCLUDED_IMPORT_FOLDERS existed may still
+            # list one — never assign the post to it.
+            entry["folders"] = [f for f in entry["folders"] if not is_excluded_folder(f)]
 
         shortcode = entry["shortcode"]
         if not shortcode:

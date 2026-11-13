@@ -15,17 +15,22 @@ Inspired by / referencing:
   • openrouter-free-model (jomonylw) — free model detection logic
 
 Priority order (defaults, adjusted dynamically by measured latency):
-  TEXT:   OpenAI (if configured) → Groq → Gemini → OpenRouter (hardcoded best) → Dynamic free OpenRouter → Local Ollama
-  VISION: OpenAI (if configured) → Gemini → Groq Vision → OpenRouter Vision → Local Ollama Vision
+  TEXT:   OpenAI (if configured) → Anthropic (if configured) → Groq → Gemini → OpenRouter (hardcoded best) → Dynamic free OpenRouter → Local Ollama
+  VISION: OpenAI (if configured) → Anthropic (if configured) → Gemini → Groq Vision → OpenRouter Vision → Local Ollama Vision
 
 API keys — store in backend/.api_keys (gitignored), one per line:
     GROQ_API_KEY=gsk_...
     GEMINI_API_KEY=AIza...
     OPENROUTER_API_KEY=sk-or-...
     OPENAI_API_KEY=sk-...
+    ANTHROPIC_API_KEY=sk-ant-...
 
 Performance state persisted to backend/model_rankings.json (rankings survive restarts).
 Dynamic model list cached in backend/openrouter_free_models.json (refreshed every 6 h).
+
+Preferred provider: start the backend with --prefer <provider> (start.py or
+api.py; or set SUPERBRAIN_PREFERRED_PROVIDER) to try that provider's models
+before everything else for that run — the rest of the fallback order is unchanged.
 
 CLI:
   python model_router.py                  → show rankings
@@ -90,6 +95,57 @@ OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4.1")
 # here, not via an env var, if this ever needs to move off GPT-5.6 Luna.
 IMPORTANCE_MODEL = "gpt-5.6-luna"
 
+# The Anthropic (Claude) model used for the router's "anthropic" provider
+# slot — text, vision, and chat all resolve to this one value, same
+# single-knob shape as OPENAI_TEXT_MODEL above. Sits right behind OpenAI in
+# every task's default order (base_priority 0.25 for text/vision — below
+# OpenAI's 0, above Groq's 0.5). Override with ANTHROPIC_TEXT_MODEL.
+ANTHROPIC_TEXT_MODEL = os.getenv("ANTHROPIC_TEXT_MODEL", "claude-sonnet-5-5")
+ANTHROPIC_API_VERSION = "2023-06-01"
+
+# Per-run provider preference (`--prefer anthropic` on start.py / api.py).
+# Carried in an env var rather than router state so it reaches every process
+# that builds its own router — uvicorn's --reload child and each main.py
+# analysis subprocess inherit it. A preferred provider's models get
+# PREFERRED_PROVIDER_BOOST subtracted from their effective priority, so they
+# always rank first (still latency-ordered among themselves) and everything
+# else keeps its usual order as fallback. The pinned paths
+# (generate_openai_only_text, batch mode) ignore it; generate_importance_text
+# honors --prefer anthropic by pinning to ANTHROPIC_TEXT_MODEL instead.
+PREFERRED_PROVIDER_ENV = "SUPERBRAIN_PREFERRED_PROVIDER"
+PROVIDERS = ("openai", "anthropic", "groq", "gemini", "openrouter", "ollama")
+PREFERRED_PROVIDER_BOOST = 1000
+
+
+def preferred_provider() -> Optional[str]:
+    """The provider chosen with --prefer for this run, or None."""
+    v = os.getenv(PREFERRED_PROVIDER_ENV, "").strip().lower()
+    return v if v in PROVIDERS else None
+
+
+def preferred_provider_from_argv(argv: List[str]) -> Optional[str]:
+    """Consume `--prefer <provider>` / `--prefer=<provider>` from argv (in
+    place) and export it to the environment. Returns the provider, or None
+    if the flag wasn't given. Raises ValueError for a missing/unknown name."""
+    for i, arg in enumerate(argv):
+        if arg == "--prefer" or arg.startswith("--prefer="):
+            if arg == "--prefer":
+                if i + 1 >= len(argv):
+                    raise ValueError(f"--prefer needs a provider: {', '.join(PROVIDERS)}")
+                value = argv[i + 1]
+                del argv[i:i + 2]
+            else:
+                value = arg.split("=", 1)[1]
+                del argv[i]
+            value = value.strip().lower()
+            if value not in PROVIDERS:
+                raise ValueError(
+                    f"Unknown provider '{value}' for --prefer. Choose one of: {', '.join(PROVIDERS)}"
+                )
+            os.environ[PREFERRED_PROVIDER_ENV] = value
+            return value
+    return None
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  MODEL REGISTRY
 #  Each entry defines the key, provider, model ID, task type, and base priority.
@@ -105,6 +161,14 @@ MODELS: List[Dict[str, Any]] = [
         "type": "text",
         "base_priority": 0,
         "desc": f"OpenAI {OPENAI_TEXT_MODEL} — primary provider (paid, tried first when configured)",
+    },
+    {
+        "key": "anthropic_claude",
+        "provider": "anthropic",
+        "model_id": ANTHROPIC_TEXT_MODEL,
+        "type": "text",
+        "base_priority": 0.25,
+        "desc": f"Anthropic {ANTHROPIC_TEXT_MODEL} — second provider (paid, tried right after OpenAI when configured)",
     },
     {
         "key": "groq_gpt_oss_20b",
@@ -366,6 +430,14 @@ MODELS: List[Dict[str, Any]] = [
         "desc": f"OpenAI {OPENAI_TEXT_MODEL} Vision — primary provider (paid, tried first when configured)",
     },
     {
+        "key": "anthropic_claude_vision",
+        "provider": "anthropic",
+        "model_id": ANTHROPIC_TEXT_MODEL,
+        "type": "vision",
+        "base_priority": 0.25,
+        "desc": f"Anthropic {ANTHROPIC_TEXT_MODEL} Vision — second provider (paid, tried right after OpenAI when configured)",
+    },
+    {
         "key": "gemini_25_flash_vision",
         "provider": "gemini",
         "model_id": "gemini-2.5-flash",
@@ -515,7 +587,7 @@ MODELS: List[Dict[str, Any]] = [
     # Deliberately separate from the "text" task's provider order/keys above
     # — the chatbot always tries Gemini, then OpenAI (its own dedicated
     # OPENAI_CHAT_API_KEY, kept independent from OPENAI_API_KEY which is used
-    # for analysis summaries and embeddings), then local Ollama.
+    # for analysis summaries and embeddings), then Anthropic, then local Ollama.
     {
         "key": "chat_gemini_flash",
         "provider": "gemini",
@@ -532,6 +604,14 @@ MODELS: List[Dict[str, Any]] = [
         "base_priority": 1,
         "key_name": "OPENAI_CHAT_API_KEY",
         "desc": f"OpenAI {OPENAI_TEXT_MODEL} (dedicated chatbot key) — second fallback for RAG chatbot",
+    },
+    {
+        "key": "chat_anthropic_claude",
+        "provider": "anthropic",
+        "model_id": ANTHROPIC_TEXT_MODEL,
+        "type": "chat",
+        "base_priority": 1.5,
+        "desc": f"Anthropic {ANTHROPIC_TEXT_MODEL} — fallback after OpenAI for RAG chatbot",
     },
     {
         "key": "chat_local_qwen3",
@@ -594,7 +674,8 @@ class ModelRouter:
 
     def _load_api_keys(self):
         """Load API keys from environment and .api_keys file."""
-        for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_CHAT_API_KEY"):
+        for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENAI_CHAT_API_KEY",
+                  "ANTHROPIC_API_KEY"):
             v = os.environ.get(k)
             if v:
                 self._api_keys[k] = v
@@ -614,7 +695,7 @@ class ModelRouter:
         """Reload API keys from environment and .api_keys file."""
         self._api_keys.clear()
         self._load_api_keys()
-        logger.info("🔑 API keys reloaded")
+        print("🔑 API keys reloaded")
 
     def get_available_providers(self) -> Dict[str, bool]:
         """Return dict of provider -> has_key."""
@@ -623,13 +704,14 @@ class ModelRouter:
             "gemini": bool(self._key("GEMINI_API_KEY")),
             "openrouter": bool(self._key("OPENROUTER_API_KEY")),
             "openai": bool(self._key("OPENAI_API_KEY")),
+            "anthropic": bool(self._key("ANTHROPIC_API_KEY")),
             "ollama": True,  # Always available
         }
 
     def set_api_key(self, provider: str, api_key: str) -> bool:
         """Set an API key for a provider and persist to file."""
         key_name = f"{provider.upper()}_API_KEY"
-        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]
+        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
         
         if key_name not in valid_providers:
             return False
@@ -644,7 +726,7 @@ class ModelRouter:
     def delete_api_key(self, provider: str) -> bool:
         """Delete an API key for a provider."""
         key_name = f"{provider.upper()}_API_KEY"
-        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]
+        valid_providers = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
         
         if key_name not in valid_providers:
             return False
@@ -926,6 +1008,8 @@ class ModelRouter:
         # kept independent from the key used for analysis/embeddings).
         if prov == "openai" and not self._key(m.get("key_name", "OPENAI_API_KEY")):
             return False
+        if prov == "anthropic" and not self._key("ANTHROPIC_API_KEY"):
+            return False
 
         s = self._state.get(model_key, self._default_model_state_dynamic(model_key))
         if s.get("down_until"):
@@ -946,11 +1030,10 @@ class ModelRouter:
         s = self._state.get(model_key) or {}
         base = s.get("base_priority", m.get("base_priority", 50))
         avg_t = s.get("avg_response_s")
-        if avg_t is None:
-            return float(base)
         # Each extra 3 s above a 2 s baseline adds 1 point of penalty (max 10)
-        penalty = min(10.0, max(0.0, (avg_t - 2.0) / 3.0))
-        return float(base) + penalty
+        penalty = 0.0 if avg_t is None else min(10.0, max(0.0, (avg_t - 2.0) / 3.0))
+        boost = PREFERRED_PROVIDER_BOOST if m.get("provider") == preferred_provider() else 0.0
+        return float(base) + penalty - boost
 
     def _ranked_models(self, task_type: str) -> List[str]:
         """Return available model keys for task_type, best first (static + dynamic)."""
@@ -1195,6 +1278,39 @@ class ModelRouter:
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
 
+    def _anthropic_messages(self, model_id: str, content: Any, timeout: int) -> str:
+        import requests
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": self._key("ANTHROPIC_API_KEY"),
+                "anthropic-version": ANTHROPIC_API_VERSION,
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model_id,
+                "max_tokens": 4000,
+                "messages": [{"role": "user", "content": content}],
+            },
+            timeout=timeout,
+        )
+        if resp.status_code == 429:
+            raise Exception(f"429 rate limit: {resp.text[:200]}")
+        resp.raise_for_status()
+        blocks = resp.json().get("content", [])
+        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+
+    def _anthropic_text(self, model_id: str, prompt: str) -> str:
+        return self._anthropic_messages(model_id, prompt, timeout=60)
+
+    def _anthropic_vision(self, model_id: str, prompt: str, images_b64: List[str]) -> str:
+        content: List[Dict] = [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}}
+            for b64 in images_b64
+        ]
+        content.append({"type": "text", "text": prompt})
+        return self._anthropic_messages(model_id, content, timeout=90)
+
     def _ollama_text(self, model_id: str, prompt: str) -> str:
         import ollama
         r = ollama.generate(
@@ -1244,6 +1360,8 @@ class ModelRouter:
                     result = self._openrouter_text(m["model_id"], prompt)
                 elif prov == "openai":
                     result = self._openai_text(m["model_id"], prompt)
+                elif prov == "anthropic":
+                    result = self._anthropic_text(m["model_id"], prompt)
                 elif prov == "ollama":
                     result = self._ollama_text(m["model_id"], prompt)
                 else:
@@ -1279,12 +1397,23 @@ class ModelRouter:
         unavailable or fails, so scoring doesn't hard-break for setups
         without an OpenAI key.
 
+        With --prefer anthropic, pins to ANTHROPIC_TEXT_MODEL instead (still
+        one fixed model, so scores stay consistent within the run), falling
+        back to the IMPORTANCE_MODEL path above if Claude is unavailable or
+        fails. Scores from the two models aren't strictly comparable, so a
+        run mixing both is worth avoiding for a big re-score.
+
         Deliberately does not call _record_success/_record_failure — mixing
         IMPORTANCE_MODEL's stats into "openai_gpt41"'s ranking entry (which
         tracks whatever OPENAI_TEXT_MODEL actually resolves to, a different
         model) would misattribute them. Same trap documented on
         generate_openai_only_text() below.
         """
+        if preferred_provider() == "anthropic" and self._is_available("anthropic_claude"):
+            try:
+                return self._anthropic_text(ANTHROPIC_TEXT_MODEL, prompt)
+            except Exception as e:
+                print(f"  ✗ [{ANTHROPIC_TEXT_MODEL}] importance scoring failed ({e}), falling back to {IMPORTANCE_MODEL} …", flush=True)
         if self._is_available("openai_gpt41"):
             try:
                 return self._openai_text(IMPORTANCE_MODEL, prompt)
@@ -1331,7 +1460,7 @@ class ModelRouter:
     def generate_chat_text(self, prompt: str) -> str:
         """
         Generate a RAG chatbot answer using the "chat" task's own provider
-        order (Gemini → OpenAI[dedicated OPENAI_CHAT_API_KEY] → local Ollama)
+        order (Gemini → OpenAI[dedicated OPENAI_CHAT_API_KEY] → Anthropic → local Ollama)
         — deliberately separate from generate_text()'s "text" task, so the
         chatbot's provider/key choice never depends on what's configured for
         analysis/summary generation.
@@ -1341,7 +1470,7 @@ class ModelRouter:
         if not ranked:
             raise RuntimeError(
                 "No chat models available. Add GEMINI_API_KEY, OPENAI_CHAT_API_KEY, "
-                "or run local Ollama."
+                "ANTHROPIC_API_KEY, or run local Ollama."
             )
 
         for key in ranked:
@@ -1358,6 +1487,8 @@ class ModelRouter:
                     result = self._openai_text(
                         m["model_id"], prompt, api_key=self._key(m.get("key_name", "OPENAI_API_KEY"))
                     )
+                elif prov == "anthropic":
+                    result = self._anthropic_text(m["model_id"], prompt)
                 elif prov == "ollama":
                     result = self._ollama_text(m["model_id"], prompt)
                 else:
@@ -1404,6 +1535,8 @@ class ModelRouter:
                     result = self._openrouter_vision(m["model_id"], prompt, images_b64)
                 elif prov == "openai":
                     result = self._openai_vision(m["model_id"], prompt, images_b64)
+                elif prov == "anthropic":
+                    result = self._anthropic_vision(m["model_id"], prompt, images_b64)
                 elif prov == "ollama":
                     result = self._ollama_vision(m["model_id"], prompt, images_b64)
                 else:
@@ -1666,8 +1799,16 @@ class ModelRouter:
         parts.append("Gemini ✓"      if self._key("GEMINI_API_KEY")      else "Gemini ✗")
         parts.append("OpenRouter ✓"  if self._key("OPENROUTER_API_KEY")  else "OpenRouter ✗")
         parts.append("OpenAI ✓"      if self._key("OPENAI_API_KEY")      else "OpenAI ✗")
+        parts.append("Anthropic ✓"   if self._key("ANTHROPIC_API_KEY")   else "Anthropic ✗")
         parts.append("Ollama (fallback)")
         print(f"🌐 Model Router initialised: {' | '.join(parts)}")
+        pref = preferred_provider()
+        if pref:
+            print(f"⭐ Preferred provider for this run: {pref}")
+            if not self.get_available_providers().get(pref):
+                print(f"  ⚠️  No API key configured for {pref} — falling back to the normal order")
+        elif os.getenv(PREFERRED_PROVIDER_ENV, "").strip():
+            print(f"  ⚠️  Ignoring unknown {PREFERRED_PROVIDER_ENV}={os.getenv(PREFERRED_PROVIDER_ENV)!r}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

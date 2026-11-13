@@ -85,7 +85,10 @@ def build_final_summary_prompt(results, instagram_url, source_caption="", source
             lang = output.split('Detected Language:')[1].split('(')[0].strip() if 'Detected Language:' in output else 'Unknown'
             audio_summary += f"- Language: {lang}\n"
             if clean:
-                audio_summary += f"- Content: {clean[:400]}\n"
+                # Was [:400] through analysis_version 8, which cut most
+                # talking-head reels off mid-sentence — see version 9 in
+                # core/database.py.
+                audio_summary += f"- Content: {clean[:3000]}\n"
 
     # Extract music identification
     if results['music_identification']:

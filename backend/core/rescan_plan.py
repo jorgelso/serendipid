@@ -18,11 +18,14 @@ from core.rescan_dates import (
     older_than,
 )
 from core.media_store import MEDIA_DIR
+from core.database import PRE_V9_TRANSCRIPT_PROMPT_CAP
 
 # The one version gap that's fixable with nothing but a re-score — no
 # summary rebuild, no analyzer re-runs, no redownload. Currently just the
 # 7->8 importance-rubric fix; extend this set if a future version bump is
 # ever similarly cheap (e.g. another importance-only or embedding-only fix).
+# Only cheap when the post isn't also caught by the 8->9 transcript fix
+# (see is_importance_only_gap()).
 IMPORTANCE_ONLY_VERSIONS = {7}
 
 
@@ -43,11 +46,22 @@ def _media_dir_has(shortcode: str, *suffixes: str) -> bool:
     return any(f.suffix.lower() in suffixes for f in d.iterdir() if f.is_file())
 
 
+def transcript_was_truncated(row: dict) -> bool:
+    """True if this post's summary was built from a truncated transcript
+    (the 8->9 gap) — see PRE_V9_TRANSCRIPT_PROMPT_CAP."""
+    return len(row.get("audio_transcription") or "") > PRE_V9_TRANSCRIPT_PROMPT_CAP
+
+
+def is_importance_only_gap(row: dict) -> bool:
+    return (row.get("analysis_version") in IMPORTANCE_ONLY_VERSIONS
+            and not transcript_was_truncated(row))
+
+
 def decide_rescan_plan(row: dict) -> RescanPlan:
     shortcode = row["shortcode"]
     reasons = []
 
-    if row.get("analysis_version") in IMPORTANCE_ONLY_VERSIONS:
+    if is_importance_only_gap(row):
         return RescanPlan(
             shortcode=shortcode, cheap_importance_only=True,
             redo_visual=False, redo_audio=False, needs_redownload=False,

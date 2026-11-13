@@ -7,16 +7,20 @@
 #   Gemini      → https://aistudio.google.com/apikey (free)
 #   OpenRouter  → https://openrouter.ai/keys (free models available)
 #   OpenAI      → https://platform.openai.com/api-keys (paid)
+#   Anthropic   → https://console.anthropic.com/settings/keys (paid)
 #
 # You don't need all of these — the router falls back automatically.
 # If OPENAI_API_KEY is set, GPT-4.1 is tried first (paid, but the model
 # quality/setup tradeoff was a deliberate choice for this deployment).
+# If ANTHROPIC_API_KEY is set, Claude (ANTHROPIC_TEXT_MODEL, default
+# claude-sonnet-5-5) is tried second, right after OpenAI.
 # Local Ollama is always available as the last resort (no key needed).
 
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 GEMINI_API_KEY=AIzaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 OPENROUTER_API_KEY=sk-or-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Used ONLY by the RAG chatbot's answer-generation step (core/rag.py via
 # ModelRouter.generate_chat_text's "chat" task: Gemini -> OpenAI -> local

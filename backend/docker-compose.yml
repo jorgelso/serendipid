@@ -30,6 +30,8 @@ services:
       
       # Database
       DATABASE_PATH: /app/data/superbrain.db
+      # 1 = serve sensitive-folder posts (Docker's equivalent of --show-sensitive)
+      SUPERBRAIN_SHOW_SENSITIVE: ${SUPERBRAIN_SHOW_SENSITIVE:-0}
       DATABASE_TIMEOUT: 30
       
       # API Keys (load from .env file)
@@ -37,6 +39,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       
       # Instagram credentials
       INSTAGRAM_USERNAME: ${INSTAGRAM_USERNAME}

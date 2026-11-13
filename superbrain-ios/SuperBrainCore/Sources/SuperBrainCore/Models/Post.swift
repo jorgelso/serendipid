@@ -39,6 +39,11 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
     public let audio_transcription: String?
     public let text_analysis: String?
     public let is_hidden: Int
+    /// `1` for a post in a sensitive Instagram folder (`backend/core/sensitive.py`).
+    /// Only ever served when the backend runs with `--show-sensitive`; such
+    /// posts must never feed `RecommendationsEngine` or `RelatedPosts`. Same
+    /// raw-integer wire format as `is_eloquent` below.
+    public let is_sensitive: Int?
     public let source_hashtags: [String]
     public let media_files: [String]
     /// Relative paths ("/media/{shortcode}/...") — prefix with the backend
@@ -78,7 +83,8 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
         is_hidden: Int, source_hashtags: [String], media_files: [String],
         media_urls: [String], analysis_version: Int, needs_review: Bool, embedding: String?,
         enjoyment_rating: String? = nil, perceived_importance_rating: String? = nil,
-        is_eloquent: Int? = nil, is_tutorial: Int? = nil, eloquence_rationale: String? = nil
+        is_eloquent: Int? = nil, is_tutorial: Int? = nil, eloquence_rationale: String? = nil,
+        is_sensitive: Int? = nil
     ) {
         self.shortcode = shortcode
         self.url = url
@@ -100,6 +106,7 @@ public struct Post: Codable, Identifiable, Hashable, Sendable {
         self.audio_transcription = audio_transcription
         self.text_analysis = text_analysis
         self.is_hidden = is_hidden
+        self.is_sensitive = is_sensitive
         self.source_hashtags = source_hashtags
         self.media_files = media_files
         self.media_urls = media_urls

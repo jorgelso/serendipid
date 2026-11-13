@@ -149,7 +149,7 @@ def _audio_backend(output: str) -> str:
 def build_rescan_prompt(visual_text: str, audio_text: str, music_text: str, text_text: str,
                          url: str, caption: str = "", hashtags=None) -> str:
     visual_summary = f"VISUAL ANALYSIS:\n- {visual_text[:3000]}\n" if visual_text else ""
-    audio_summary = f"AUDIO TRANSCRIPTION:\n- {audio_text[:2000]}\n" if audio_text else ""
+    audio_summary = f"AUDIO TRANSCRIPTION:\n- {audio_text[:3000]}\n" if audio_text else ""
     music_info = f"MUSIC:\n- {music_text}\n" if music_text else ""
     text_summary = f"TEXT ANALYSIS:\n{text_text[:2000]}\n" if text_text else ""
 

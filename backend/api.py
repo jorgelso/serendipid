@@ -62,9 +62,11 @@ from core.link_checker import validate_link
 from core.model_router import get_router
 from core.categories import CATEGORIES
 from core.importance import score_and_stamp_importance
+from core.rescan_plan import is_importance_only_gap
 from core import rag
 from core import study_guide
 from core import study_guide_pdf
+from core import sensitive
 
 # Configure logging
 logging.basicConfig(
@@ -930,6 +932,11 @@ async def analyze_instagram(request: AnalyzeRequest, token: str = Depends(verify
             else:
                 logger.info(f"⚡ [{shortcode}] Found in cache! Returning instantly.")
 
+        if cached_result and not db.is_post_visible(shortcode):
+            # Sensitive-folder post while --show-sensitive is off: acknowledge
+            # it's already saved, but don't send its content.
+            cached_result = {'url': cached_result.get('url', ''), 'content_type': cached_result.get('content_type', content_type)}
+
         if cached_result:
             # Filter response
             filtered_data = {
@@ -1070,8 +1077,10 @@ async def reanalyze_bulk(request: BulkReanalyzeRequest, token: str = Depends(ver
 
     For each shortcode:
     - Not found -> `errors`.
-    - Stamped exactly version 7 (the one version whose gap to current is
-      purely the importance-scoring rubric fix) -> cheap, synchronous,
+    - Stamped exactly version 7 with a transcript short enough to have
+      missed the version-9 fix (core.rescan_plan.is_importance_only_gap —
+      the only gap to current is then the importance-scoring rubric fix)
+      -> cheap, synchronous,
       no-redownload fix via core.importance.score_and_stamp_importance ->
       `rescored`.
     - A single non-cheap shortcode -> spawn `scripts/rescan_post.py
@@ -1099,7 +1108,7 @@ async def reanalyze_bulk(request: BulkReanalyzeRequest, token: str = Depends(ver
         if not row:
             errors.append(BulkReanalyzeError(shortcode=shortcode, error="Post not found"))
             continue
-        if row.get("analysis_version") == 7:
+        if is_importance_only_gap(row):
             cheap.append((shortcode, row))
         else:
             full.append(shortcode)
@@ -1157,7 +1166,7 @@ async def check_cache(shortcode: str, token: str = Depends(verify_token)):
         db = get_db()
         result = db.check_cache(shortcode)
         
-        if not result:
+        if not result or not db.is_post_visible(shortcode):
             raise HTTPException(status_code=404, detail="Not found in cache")
         
         # Filter response to only include essential fields
@@ -1711,7 +1720,7 @@ async def create_study_guide(
                        f"{study_guide.ABSOLUTE_MAX_STUDY_GUIDE_POSTS} per generation."
             )
         db = get_db()
-        posts = db.get_posts_by_shortcodes(shortcodes)
+        posts = [p for p in db.get_posts_by_shortcodes(shortcodes) if db.is_post_visible(p["shortcode"])]
         if not posts:
             raise HTTPException(status_code=404, detail="None of the given shortcodes were found.")
 
@@ -1986,6 +1995,8 @@ async def analysis_status(shortcode: str, token: str = Depends(verify_token)):
 
         # Check if fully analyzed
         cached = db.check_cache(shortcode)
+        if cached and not db.is_post_visible(shortcode):
+            return {"status": "complete", "shortcode": shortcode}
         if cached:
             return {
                 "status": "complete",
@@ -2084,12 +2095,68 @@ class ImportData(BaseModel):
     collections: List[dict] = []
 
 
+def _hidden_shortcodes(db) -> set:
+    """Sensitive-folder shortcodes clients must not see right now — empty
+    when the backend was started with --show-sensitive (core/sensitive.py)."""
+    return set() if sensitive.show_sensitive() else db.get_sensitive_shortcodes()
+
+
+def _redact_collections(collections, db):
+    """Drop sensitive collections (unless --show-sensitive) and strip hidden
+    shortcodes from every other collection's post_ids. Response-only — the
+    stored rows keep their full membership."""
+    hidden = _hidden_shortcodes(db)
+    out = []
+    for c in collections:
+        if not c:
+            continue
+        if not sensitive.show_sensitive() and sensitive.is_sensitive_collection_name(c.get("name")):
+            continue
+        ids = c.get("post_ids")
+        if hidden and isinstance(ids, str):
+            try:
+                ids = json.loads(ids)
+            except Exception:
+                ids = []
+        if hidden and isinstance(ids, list):
+            c = {**c, "post_ids": [sc for sc in ids if sc not in hidden]}
+        out.append(c)
+    return out
+
+
+def _preserve_hidden_members(db, collection_id, post_ids):
+    """Write-side twin of _redact_collections(): a client replacing a
+    collection's post_ids never saw its hidden members, so keep them rather
+    than letting a read-modify-write (e.g. the import scripts'
+    ensure_post_in_collection()) silently drop them."""
+    hidden = _hidden_shortcodes(db)
+    existing = db.get_collection(collection_id) if hidden else None
+    if not existing:
+        return post_ids
+    kept = [sc for sc in existing.get("post_ids") or [] if sc in hidden and sc not in post_ids]
+    return list(post_ids) + kept
+
+
+def _redact_board(board, db):
+    """Same as _redact_collections() for a board and its subcollections."""
+    hidden = _hidden_shortcodes(db)
+    if not hidden or not board:
+        return board
+    board = {**board, "post_ids": [sc for sc in board.get("post_ids") or [] if sc not in hidden]}
+    if board.get("subcollections"):
+        board["subcollections"] = [
+            {**sub, "post_ids": [sc for sc in sub.get("post_ids") or [] if sc not in hidden]}
+            for sub in board["subcollections"]
+        ]
+    return board
+
+
 @app.get("/collections")
 async def get_collections(token: str = Depends(verify_token)):
     """Return all collections stored on the server."""
     try:
         db = get_db()
-        return {"success": True, "data": db.get_collections()}
+        return {"success": True, "data": _redact_collections(db.get_collections(), db)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2097,14 +2164,17 @@ async def get_collections(token: str = Depends(verify_token)):
 @app.post("/collections")
 async def upsert_collection(req: CollectionUpsertRequest, token: str = Depends(verify_token)):
     """Create or fully replace a collection (upsert by id)."""
+    if sensitive.is_excluded_folder(req.name):
+        raise HTTPException(status_code=400, detail=f"'{req.name.strip()}' is never stored as a collection")
     try:
         db = get_db()
         saved = db.upsert_collection(
-            req.id, req.name, req.icon, req.post_ids,
+            req.id, req.name, req.icon, _preserve_hidden_members(db, req.id, req.post_ids),
             req.created_at, req.updated_at
         )
         if saved:
-            return {"success": True, "data": saved}
+            redacted = _redact_collections([saved], db)
+            return {"success": True, "data": redacted[0] if redacted else None}
         raise HTTPException(status_code=500, detail="Failed to save collection")
     except HTTPException:
         raise
@@ -2118,9 +2188,10 @@ async def update_collection_posts(collection_id: str, req: CollectionPostsReques
     """Replace the post_ids list for a collection."""
     try:
         db = get_db()
-        ok = db.update_collection_posts(collection_id, req.post_ids)
+        ok = db.update_collection_posts(collection_id, _preserve_hidden_members(db, collection_id, req.post_ids))
         if ok:
-            return {"success": True, "data": db.get_collection(collection_id)}
+            redacted = _redact_collections([db.get_collection(collection_id)], db)
+            return {"success": True, "data": redacted[0] if redacted else None}
         raise HTTPException(status_code=404, detail="Collection not found")
     except HTTPException:
         raise
@@ -2172,7 +2243,7 @@ async def get_boards(token: str = Depends(verify_token)):
     """Return all boards, each with its subcollections attached."""
     try:
         db = get_db()
-        return {"success": True, "data": db.get_boards()}
+        return {"success": True, "data": [_redact_board(b, db) for b in db.get_boards()]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2200,7 +2271,7 @@ async def get_board(board_id: str, token: str = Depends(verify_token)):
         db = get_db()
         board = db.get_board(board_id)
         if board:
-            return {"success": True, "data": board}
+            return {"success": True, "data": _redact_board(board, db)}
         raise HTTPException(status_code=404, detail="Board not found")
     except HTTPException:
         raise
@@ -3110,7 +3181,17 @@ async def queue_attention(
         # ── 3. Reconcile against reality ─────────────────────────────────
         pending, abandoned_items = [], []
         hidden_analyzed = hidden_deleted = 0
+        hidden_sensitive = _hidden_shortcodes(db)
         for item in items.values():
+            # Sensitive-folder reels stay out of this list too unless
+            # --show-sensitive (core/sensitive.py) — by folder for ones not
+            # analyzed yet, by shortcode for ones already filed.
+            if not sensitive.show_sensitive() and (
+                item["shortcode"] in hidden_sensitive
+                or any(sensitive.is_sensitive_collection_name(f) for f in item.get("folders") or [])
+            ):
+                continue
+            item["folders"] = [f for f in item.get("folders") or [] if not sensitive.is_excluded_folder(f)]
             item["analyzed"] = item["shortcode"] in analyzed
             item["deleted"] = item["shortcode"] in deleted
             if item["deleted"] and not include_deleted:
@@ -3412,7 +3493,7 @@ async def export_data(
         # Convert sqlite3.Row objects to fully mutable dictionaries
         posts_list = [dict(p) for p in posts]
         
-        collections = db.get_all_collections()
+        collections = _redact_collections(db.get_all_collections(), db)
         stats = db.get_stats()
         
         export_payload = {
@@ -3980,7 +4061,7 @@ async def _process_import_data(data: dict, mode: str):
                 collection_id=coll_id,
                 name=coll.get("name", "Untitled"),
                 icon=coll.get("icon", "folder"),
-                post_ids=post_ids if isinstance(post_ids, list) else [],
+                post_ids=_preserve_hidden_members(db, coll_id, post_ids if isinstance(post_ids, list) else []),
                 created_at=coll.get("created_at") or coll.get("createdAt"),
                 updated_at=coll.get("updated_at") or coll.get("updatedAt"),
             )
@@ -4271,6 +4352,14 @@ async def delete_instagram_credentials(token: str = Depends(verify_token)):
 
 if __name__ == "__main__":
     import uvicorn
+    if sensitive.enable_from_argv(sys.argv):
+        print("👁  --show-sensitive: sensitive-folder posts are visible to clients")
+    from core.model_router import preferred_provider_from_argv
+    try:
+        if prefer := preferred_provider_from_argv(sys.argv):
+            print(f"⭐ --prefer: {prefer} models will be tried first")
+    except ValueError as e:
+        sys.exit(str(e))
     print("🚀 Starting SuperBrain API...")
     print(f"📖 API Docs: http://localhost:{API_SELF_PORT}/docs")
     print(f"🔍 Interactive: http://localhost:{API_SELF_PORT}/redoc")

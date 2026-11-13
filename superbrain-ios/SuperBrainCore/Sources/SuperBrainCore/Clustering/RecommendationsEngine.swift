@@ -29,6 +29,9 @@ public enum RecommendationsEngine {
         searchHistory: [SearchHistoryEntry] = [],
         limit: Int = 12
     ) -> [Post] {
+        // Sensitive-folder posts (backend/core/sensitive.py) are never a
+        // candidate or an interest signal, even when the backend serves them.
+        let posts = posts.filter { $0.is_sensitive != 1 }
         let viewedShortcodes = Set(viewHistory.map(\.shortcode))
         let candidates = posts.filter { !viewedShortcodes.contains($0.shortcode) }
         guard !candidates.isEmpty else { return [] }

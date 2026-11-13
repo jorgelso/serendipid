@@ -14,8 +14,22 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 
+from core.sensitive import SENSITIVE_COLLECTION_NAMES, is_excluded_folder, show_sensitive
+
 # Database file path can be overridden for Docker deployments
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.parent / 'superbrain.db')))
+
+# Shortcodes of every post in a sensitive Instagram folder (core/sensitive.py),
+# as a subquery — membership lives in collections.post_ids (a JSON array), so
+# this is computed live from that table on every query rather than stored on
+# the analyses row, and a folder import picks it up with no extra write.
+_SENSITIVE_NAMES_SQL = ", ".join("'" + n.replace("'", "''") + "'" for n in sorted(SENSITIVE_COLLECTION_NAMES))
+SENSITIVE_SHORTCODES_SQL = (
+    "SELECT j.value FROM collections c, "
+    "json_each(CASE WHEN json_valid(c.post_ids) THEN c.post_ids ELSE '[]' END) j "
+    f"WHERE lower(trim(c.name)) IN ({_SENSITIVE_NAMES_SQL})"
+)
+IS_SENSITIVE_COLUMN = f"(shortcode IN ({SENSITIVE_SHORTCODES_SQL})) AS is_sensitive"
 
 # Bump this whenever a change to the analysis pipeline is significant enough
 # that previously-saved posts are worth a human re-look (e.g. a prompt
@@ -76,9 +90,25 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.pa
 #       demonstrably inconsistent method; run
 #       `python scripts/score_importance.py --force` to re-score every post
 #       (not just unscored ones) without a full re-analysis.
+#   9 — 2026-10-30: the combined-summary prompt (core/summary_parser.py
+#       build_final_summary_prompt()) only passed the first 400 characters
+#       of the audio transcript to the model, so most talking-head reels got
+#       summaries/titles/tags built from speech cut off mid-sentence (the full
+#       transcript was always stored — only the prompt was truncated). Now
+#       3000. Unlike earlier bumps, only actually-affected posts are flagged:
+#       on startup, version-8 posts whose stored transcript fits within the
+#       old cap are restamped to 9 (see the migration in _create_tables), so
+#       only truncated ones land in needs_review. Their rescan rebuilds the
+#       summary from the stored transcript and re-scores importance, since
+#       the old score was judged from the truncated summary.
 # This history is also kept queryable in the analysis_changelog table (see
 # _seed_changelog() below) rather than only living as a comment.
-CURRENT_ANALYSIS_VERSION = 8
+CURRENT_ANALYSIS_VERSION = 9
+
+# The transcript cap build_final_summary_prompt() used through version 8 —
+# a post whose stored audio_transcription is longer than this had its
+# summary built from a truncated transcript.
+PRE_V9_TRANSCRIPT_PROMPT_CAP = 400
 
 
 class Database:
@@ -248,6 +278,21 @@ class Database:
         # 'needs_review' relative to any versioned pipeline change.
         try:
             self._conn.execute("ALTER TABLE analyses ADD COLUMN analysis_version INTEGER DEFAULT 0")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migration: version 9 only affects posts whose transcript exceeded
+        # PRE_V9_TRANSCRIPT_PROMPT_CAP — restamp every other version-8 post
+        # so it doesn't show up in needs_review for a gap it never had.
+        # Idempotent: a version-8 row with a short transcript is unaffected
+        # whenever it appears (including one restored from a backup).
+        try:
+            self._conn.execute(
+                "UPDATE analyses SET analysis_version = 9 "
+                "WHERE analysis_version = 8 AND length(coalesce(audio_transcription, '')) <= ?",
+                (PRE_V9_TRANSCRIPT_PROMPT_CAP,),
+            )
             self._conn.commit()
         except sqlite3.OperationalError:
             pass
@@ -1105,6 +1150,17 @@ class Database:
              "`python scripts/score_importance.py --force` to re-score "
              "every post (not just unscored ones) without a full "
              "re-analysis."),
+            (9, "2026-10-30", "Full transcripts in summaries",
+             "The summary prompt only passed the first 400 characters of the "
+             "audio transcript to the model, so reels with a lot of speech "
+             "(lists, tutorials, \"N types of...\" videos) got summaries, "
+             "titles and tags built from speech cut off mid-sentence — the "
+             "full transcript was always stored, only the prompt truncated "
+             "it. Now 3000 characters. Only posts whose transcript was "
+             "actually longer than 400 characters are flagged; rescanning "
+             "them rebuilds the summary from the stored transcript and "
+             "re-scores importance (the old score was judged from the "
+             "truncated summary); boards and ratings are kept."),
         ]
         for version, released_at, title, description in entries:
             try:
@@ -1131,8 +1187,45 @@ class Database:
         "shortcode, url, username, content_type, analyzed_at, updated_at, "
         "post_date, likes, thumbnail, title, summary, tags, music, category, "
         "language, is_hidden, analysis_version, media_files, importance, "
-        "enjoyment_rating, perceived_importance_rating, caption, date_saved"
+        "enjoyment_rating, perceived_importance_rating, caption, date_saved, "
+        + IS_SENSITIVE_COLUMN
     )
+
+    def _visible_sql(self):
+        """WHERE-clause fragment for "posts a client may see": not
+        soft-deleted, and — unless the backend was started with
+        --show-sensitive — not in a sensitive Instagram folder (see
+        core/sensitive.py). Every client-facing read path filters on this."""
+        clause = "(is_hidden IS NULL OR is_hidden = 0)"
+        if not show_sensitive():
+            clause += f" AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL})"
+        return f"({clause})"
+
+    def get_sensitive_shortcodes(self) -> set:
+        """Shortcodes in a sensitive Instagram folder, regardless of
+        --show-sensitive — for the recommendation-signal exclusions, which
+        apply even when those posts are being shown."""
+        if not self.is_connected():
+            return set()
+        try:
+            return {r[0] for r in self._conn.execute(SENSITIVE_SHORTCODES_SQL).fetchall()}
+        except Exception as e:
+            print(f"[WARNING]  Error fetching sensitive shortcodes: {e}")
+            return set()
+
+    def is_post_visible(self, shortcode) -> bool:
+        """Single-post form of _visible_sql() for API routes that look one
+        post up by shortcode (check_cache() itself stays unfiltered — main.py
+        and the rescan pipeline rely on it seeing every row)."""
+        if not self.is_connected():
+            return False
+        try:
+            return self._conn.execute(
+                f"SELECT 1 FROM analyses WHERE shortcode = ? AND {self._visible_sql()}", (shortcode,)
+            ).fetchone() is not None
+        except Exception as e:
+            print(f"[WARNING]  Error checking post visibility: {e}")
+            return False
 
     def _row_to_dict(self, row):
         if row is None:
@@ -1829,7 +1922,7 @@ class Database:
             cur = self._conn.execute(
                 "SELECT shortcode, embedding FROM analyses "
                 "WHERE embedding IS NOT NULL AND embedding != '' "
-                "AND (is_hidden IS NULL OR is_hidden = 0)"
+                f"AND {self._visible_sql()}"
             )
             out = []
             for shortcode, emb_json in cur.fetchall():
@@ -1858,7 +1951,7 @@ class Database:
             cur = self._conn.execute(
                 "SELECT shortcode, length(embedding), substr(embedding, 1, 64) FROM analyses "
                 "WHERE embedding IS NOT NULL AND embedding != '' "
-                "AND (is_hidden IS NULL OR is_hidden = 0) ORDER BY shortcode"
+                f"AND {self._visible_sql()} ORDER BY shortcode"
             )
             h = hashlib.sha256()
             for shortcode, length, prefix in cur.fetchall():
@@ -1880,13 +1973,15 @@ class Database:
         harmless, the web engine drops unmatched shortcodes when hydrating.
         client_env should be 'dev' or 'prod' (api.py normalizes anything else
         to 'prod') — see the client_env migration above post_views' CREATE
-        TABLE for why."""
+        TABLE for why. A sensitive-folder post (core/sensitive.py) is never
+        logged — it must never become a recommendation signal."""
         if not self.is_connected():
             return False
         try:
             self._conn.execute(
-                "INSERT INTO post_views (shortcode, viewed_at, client_env) VALUES (?, ?, ?)",
-                (shortcode, datetime.utcnow().isoformat(), client_env),
+                "INSERT INTO post_views (shortcode, viewed_at, client_env) "
+                f"SELECT ?, ?, ? WHERE ? NOT IN ({SENSITIVE_SHORTCODES_SQL})",
+                (shortcode, datetime.utcnow().isoformat(), client_env, shortcode),
             )
             self._conn.commit()
             return True
@@ -1898,20 +1993,23 @@ class Database:
         """Return [{shortcode, viewed_at}], newest first. Only 'prod'-tagged
         rows — this feeds the recommendation engine exclusively, so dev-build
         testing traffic must never appear here (see the client_env
-        migration)."""
+        migration). Sensitive-folder posts are always left out, including
+        views logged before the post landed in that folder."""
         if not self.is_connected():
             return []
         try:
             if since:
                 cur = self._conn.execute(
                     "SELECT shortcode, viewed_at FROM post_views "
-                    "WHERE viewed_at >= ? AND client_env = 'prod' ORDER BY viewed_at DESC LIMIT ?",
+                    "WHERE viewed_at >= ? AND client_env = 'prod' "
+                    f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) ORDER BY viewed_at DESC LIMIT ?",
                     (since, limit),
                 )
             else:
                 cur = self._conn.execute(
                     "SELECT shortcode, viewed_at FROM post_views "
-                    "WHERE client_env = 'prod' ORDER BY viewed_at DESC LIMIT ?",
+                    "WHERE client_env = 'prod' "
+                    f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) ORDER BY viewed_at DESC LIMIT ?",
                     (limit,),
                 )
             return [{"shortcode": s, "viewed_at": v} for s, v in cur.fetchall()]
@@ -2025,7 +2123,7 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                "SELECT * FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0) ORDER BY analyzed_at DESC LIMIT ?", (limit,)
+                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?", (limit,)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
         except Exception as e:
@@ -2060,7 +2158,7 @@ class Database:
             cur = self._conn.cursor()
             cur.execute(
                 f"SELECT {self.LIGHT_COLUMNS} FROM analyses "
-                "WHERE (is_hidden IS NULL OR is_hidden = 0) "
+                f"WHERE {self._visible_sql()} "
                 f"{order_clause} LIMIT ? OFFSET ?",
                 (limit, offset)
             )
@@ -2071,14 +2169,17 @@ class Database:
 
     def get_posts_since(self, updated_after: str, limit=1000):
         """Return posts updated after the given ISO timestamp (delta sync).
-        Includes soft-deleted posts so the app knows to hide them."""
+        Includes soft-deleted posts so the app knows to hide them, but never
+        sensitive-folder posts unless --show-sensitive (core/sensitive.py)."""
         if not self.is_connected():
             return []
+        sensitive_filter = "" if show_sensitive() else f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) "
         try:
             cur = self._conn.cursor()
             cur.execute(
                 f"SELECT {self.LIGHT_COLUMNS} FROM analyses "
                 "WHERE updated_at > ? "
+                f"{sensitive_filter}"
                 "ORDER BY updated_at ASC LIMIT ?",
                 (updated_after, limit)
             )
@@ -2108,7 +2209,7 @@ class Database:
             return 0
         try:
             cur = self._conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0)")
+            cur.execute(f"SELECT COUNT(*) FROM analyses WHERE {self._visible_sql()}")
             return cur.fetchone()[0]
         except Exception as e:
             print(f"[WARNING]  Error getting total count: {e}")
@@ -2124,8 +2225,8 @@ class Database:
             cur = self._conn.cursor()
             like_pattern = f'%"{category}"%'
             cur.execute(
-                "SELECT * FROM analyses WHERE (category = ? OR category LIKE ?) "
-                "AND (is_hidden IS NULL OR is_hidden = 0) ORDER BY analyzed_at DESC LIMIT ?",
+                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE (category = ? OR category LIKE ?) "
+                f"AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
                 (category, like_pattern, limit)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -2151,7 +2252,7 @@ class Database:
             conditions = " OR ".join(["LOWER(tags) LIKE ?" for _ in tags])
             params = [f"%{t.lower()}%" for t in tags] + [limit]
             cur.execute(
-                f"SELECT * FROM analyses WHERE ({conditions}) AND (is_hidden IS NULL OR is_hidden = 0) ORDER BY analyzed_at DESC LIMIT ?",
+                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE ({conditions}) AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
                 params
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -2173,17 +2274,20 @@ class Database:
         try:
             cur = self._conn.cursor()
 
-            cur.execute("SELECT COUNT(*) FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0)")
+            cur.execute(f"SELECT COUNT(*) FROM analyses WHERE {self._visible_sql()}")
             total = cur.fetchone()[0]
 
-            cur.execute("SELECT COUNT(*) FROM collections")
+            if show_sensitive():
+                cur.execute("SELECT COUNT(*) FROM collections")
+            else:
+                cur.execute(f"SELECT COUNT(*) FROM collections WHERE lower(trim(name)) NOT IN ({_SENSITIVE_NAMES_SQL})")
             total_collections = cur.fetchone()[0]
 
             # category is stored as a JSON array (or a legacy plain string) —
             # tally each label a post carries rather than grouping on the raw
             # column value, since one post can now have multiple categories.
             cur.execute(
-                "SELECT category FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0)"
+                f"SELECT category FROM analyses WHERE {self._visible_sql()}"
             )
             category_counts = {}
             for r in cur.fetchall():
@@ -2231,7 +2335,7 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                "SELECT * FROM analyses WHERE (is_hidden IS NULL OR is_hidden = 0) ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
+                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
                 (limit, offset)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -3113,8 +3217,10 @@ class Database:
             return None
 
     def upsert_collection(self, collection_id, name, icon, post_ids, created_at=None, updated_at=None):
-        """Insert or fully replace a collection. Returns the saved dict."""
-        if not self.is_connected():
+        """Insert or fully replace a collection. Returns the saved dict, or
+        None for an Instagram folder that's never stored (core/sensitive.py's
+        EXCLUDED_IMPORT_FOLDERS)."""
+        if not self.is_connected() or is_excluded_folder(name):
             return None
         try:
             now = datetime.utcnow().isoformat()
@@ -3794,12 +3900,17 @@ class Database:
         generation request was built from (deduped). Called synchronously
         from POST /study-guide, before the background pipeline thread even
         starts — so it reflects what was requested, not what a particular
-        final/full/merge/chunk guide happened to include. Best-effort."""
+        final/full/merge/chunk guide happened to include. Sensitive-folder
+        posts (core/sensitive.py) are skipped. Best-effort."""
         if not self.is_connected() or not shortcodes:
             return False
         try:
             now = datetime.utcnow().isoformat()
-            rows = [(sc, collection_id, now, client_env) for sc in dict.fromkeys(shortcodes)]
+            sensitive = self.get_sensitive_shortcodes()
+            rows = [
+                (sc, collection_id, now, client_env)
+                for sc in dict.fromkeys(shortcodes) if sc not in sensitive
+            ]
             self._conn.executemany(
                 "INSERT INTO reels_study_guide (shortcode, collection_id, created_at, client_env) VALUES (?, ?, ?, ?)",
                 rows,
@@ -3842,7 +3953,8 @@ class Database:
             query = (
                 "SELECT r.shortcode, r.collection_id, r.created_at, c.last_opened_at "
                 "FROM reels_study_guide r JOIN study_guide_collections c ON c.id = r.collection_id "
-                "WHERE r.client_env = 'prod'"
+                "WHERE r.client_env = 'prod' "
+                f"AND r.shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL})"
             )
             params = []
             if since:
