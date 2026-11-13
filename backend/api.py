@@ -1983,10 +1983,35 @@ async def status():
 _FORWARDING_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded", "cf-connecting-ip")
 
 
+def _host_is_ip_or_localhost(host_header: str) -> bool:
+    """The Host header's hostname is an IP literal or localhost. Blocks DNS
+    rebinding, where an attacker's domain is re-pointed at this machine and
+    the browser still sends the attacker's hostname."""
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        host = host[1:host.find("]")] if "]" in host else host
+    elif host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    if host == "localhost":
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
 def _is_local_network_request(request: Request) -> bool:
     """True only for a direct (unproxied) request from a loopback or private
-    (LAN) address."""
+    (LAN) address, made by a native client rather than a web page. Browsers
+    always send Origin on cross-origin requests, so refusing it stops a page
+    on the same network from reading the token through the open CORS policy;
+    the Host check stops DNS rebinding."""
     if any(h in request.headers for h in _FORWARDING_HEADERS):
+        return False
+    if "origin" in request.headers:
+        return False
+    if not _host_is_ip_or_localhost(request.headers.get("host", "")):
         return False
     host = request.client.host if request.client else ""
     try:
