@@ -7,12 +7,14 @@ defined in one place. A token.txt in any other format (e.g. the old
 8-character tokens) is treated as invalid and replaced on the next start.
 """
 
+import os
 import secrets
 import string
 from pathlib import Path
 
 TOKEN_LENGTH = 32
-TOKEN_FILE = Path(__file__).resolve().parent.parent / "token.txt"
+# SERENDIPID_TOKEN_FILE lets Docker keep the token on a persistent volume.
+TOKEN_FILE = Path(os.getenv("SERENDIPID_TOKEN_FILE", "").strip() or Path(__file__).resolve().parent.parent / "token.txt")
 _ALPHABET = string.ascii_letters + string.digits
 
 

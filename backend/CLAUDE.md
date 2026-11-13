@@ -25,9 +25,9 @@ python start.py --prefer anthropic  # try this AI provider first for this run (o
 ```bash
 cp .env.example .env    # fill in at least one AI provider key
 ./start-docker.sh        # dev: docker compose build && up -d
-./start-docker-prod.sh   # prod: --no-cache build, waits on /health
+./start-docker-prod.sh   # prod: --no-cache build, waits on /ping
 docker compose logs -f serendipid-api
-curl http://localhost:5050/health
+curl http://localhost:5050/ping
 ```
 
 ### Tests

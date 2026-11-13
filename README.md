@@ -67,7 +67,7 @@ The access token is how every client authenticates. To see it:
 .venv/bin/python utils/manage_token.py show
 ```
 
-Check that the backend is up with `curl http://localhost:5050/health`. Interactive API docs are at `http://localhost:5050/docs`.
+Check that the backend is up with `curl http://localhost:5050/ping`. Interactive API docs are at `http://localhost:5050/docs`.
 
 To run it with Docker instead, see [Docker](#docker) below.
 

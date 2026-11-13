@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# SuperBrain Docker Setup Script
-# One-click script to build and start the SuperBrain backend
+# Serendipid Docker Setup Script
+# One-click script to build and start the Serendipid backend
 
 set -e
 
-echo "🐳 SuperBrain Docker Setup"
+echo "🐳 Serendipid Docker Setup"
 echo "=========================="
 
 # Check if Docker is installed
@@ -42,13 +42,13 @@ fi
 echo "🔨 Building Docker image..."
 $DOCKER_COMPOSE build
 
-echo "🚀 Starting SuperBrain..."
+echo "🚀 Starting Serendipid..."
 $DOCKER_COMPOSE up -d
 
 echo ""
-echo "✅ SuperBrain is now running!"
-echo "📖 API: http://localhost:5000"
-echo "📚 Docs: http://localhost:5000/docs"
+echo "✅ Serendipid is now running!"
+echo "📖 API: http://localhost:5050"
+echo "📚 Docs: http://localhost:5050/docs"
 echo ""
 echo "Useful commands:"
 echo "  $DOCKER_COMPOSE logs -f    # View logs"

@@ -1,127 +1,84 @@
-# ────────────────────────────────────────────────────────────────────────────────
-# SuperBrain Production Docker Compose Configuration
-# ────────────────────────────────────────────────────────────────────────────────
+# Serendipid backend. Usage:
+#   cp .env.example .env   # add at least one AI provider key
+#   docker compose up -d --build
+#   docker compose exec serendipid-api python utils/manage_token.py show   # the API token
+#
+# All state lives in named volumes, so rebuilding or recreating the container
+# keeps your database, media, token and config.
 
 services:
-
-  # ──── Main SuperBrain API Service ────
-  superbrain-api:
-    image: superbrain:latest
+  serendipid-api:
+    image: serendipid:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: superbrain-api
-    
-    # ──── Network & Ports ────
+    container_name: serendipid-api
+
     ports:
       - "${API_PORT:-5050}:5050"
-    networks:
-      - superbrain-network
-    
-    # ──── Environment Variables ────
+
     environment:
       PYTHONUNBUFFERED: 1
-      PYTHONDONTWRITEBYTECODE: 1
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      HOST: 0.0.0.0
-      PORT: 5050
-      WORKERS: ${WORKERS:-4}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      
-      # Database
-      DATABASE_PATH: /app/data/superbrain.db
-      # 1 = serve sensitive-folder posts (Docker's equivalent of --show-sensitive)
-      SUPERBRAIN_SHOW_SENSITIVE: ${SUPERBRAIN_SHOW_SENSITIVE:-0}
-      DATABASE_TIMEOUT: 30
-      
-      # API Keys (load from .env file)
-      GROQ_API_KEY: ${GROQ_API_KEY}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      
-      # Instagram credentials
-      INSTAGRAM_USERNAME: ${INSTAGRAM_USERNAME}
-      INSTAGRAM_PASSWORD: ${INSTAGRAM_PASSWORD}
-      
-      # AI Configuration
-      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+
+      # Persistent state, all on the serendipid-data volume
+      DATABASE_PATH: /app/data/serendipid.db
+      MEDIA_DIR: /app/data/media
+      SERENDIPID_TOKEN_FILE: /app/data/token.txt
+
+      # Docker's equivalents of start.py's --show-sensitive / --prefer flags
+      SERENDIPID_SHOW_SENSITIVE: ${SERENDIPID_SHOW_SENSITIVE:-0}
+      SERENDIPID_PREFERRED_PROVIDER: ${SERENDIPID_PREFERRED_PROVIDER:-}
+
+      # Comma-separated origins allowed to call the API from a browser.
+      # Unset = any origin (no credentials). The web app calls the backend
+      # server-side, so it doesn't need an entry here.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+
+      # AI providers (set the ones you have in .env)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_TEXT_MODEL: ${OPENAI_TEXT_MODEL:-}
+      OPENAI_CHAT_API_KEY: ${OPENAI_CHAT_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_TEXT_MODEL: ${ANTHROPIC_TEXT_MODEL:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANALYSIS_MODE: ${ANALYSIS_MODE:-immediate}
+
+      # Optional Instagram login (a secondary account is recommended)
+      INSTAGRAM_USERNAME: ${INSTAGRAM_USERNAME:-}
+      INSTAGRAM_PASSWORD: ${INSTAGRAM_PASSWORD:-}
+
+      # The image has no local Whisper, so transcription uses Groq's API
       WHISPER_USE_CLOUD: ${WHISPER_USE_CLOUD:-true}
-      
-      # Performance
-      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
-      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-60}
-      ANALYSIS_TIMEOUT: ${ANALYSIS_TIMEOUT:-120}
-    
-    # ──── Volumes ────
+
     volumes:
-      # Database persistence
-      - superbrain-db:/app/data
-      # Configuration persistence
-      - superbrain-config:/app/config
-      # Temporary files
-      - superbrain-temp:/app/temp
-      # Uploads
-      - superbrain-uploads:/app/static/uploads
-      # Extracted ZIP Thumbnails
-      - superbrain-thumbnails:/app/static/thumbnails
-      # Logs
-      - superbrain-logs:/app/logs
-    
-    # ──── Restart Policy ────
+      - serendipid-data:/app/data            # database, media, token
+      - serendipid-config:/app/config        # user_config.json, keys saved from the UI, router state
+      - serendipid-thumbnails:/app/static/thumbnails
+      - serendipid-uploads:/app/uploads      # Instagram export files uploaded from the web app
+      - serendipid-temp:/app/temp
+      - serendipid-logs:/app/logs
+
     restart: unless-stopped
-    
-    # ──── Health Check ────
+
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5050/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5050/ping"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    
-    # ──── Resource Limits (optional, enable for production) ────
-    # uncomment to enable
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2'
-    #       memory: 2G
-    #     reservations:
-    #       cpus: '1'
-    #       memory: 1G
-    
-    # ──── Security Options ────
+
     security_opt:
       - no-new-privileges:true
-    read_only: false
     cap_drop:
       - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-
-# ────────────────────────────────────────────────────────────────────────────────
-# Networks
-# ────────────────────────────────────────────────────────────────────────────────
-
-networks:
-  superbrain-network:
-    driver: bridge
-
-# ────────────────────────────────────────────────────────────────────────────────
-# Volumes for data persistence
-# ────────────────────────────────────────────────────────────────────────────────
 
 volumes:
-  superbrain-db:
-    driver: local
-  superbrain-config:
-    driver: local
-  superbrain-temp:
-    driver: local
-  superbrain-uploads:
-    driver: local
-  superbrain-thumbnails:
-    driver: local
-  superbrain-logs:
-    driver: local
+  serendipid-data:
+  serendipid-config:
+  serendipid-thumbnails:
+  serendipid-uploads:
+  serendipid-temp:
+  serendipid-logs:
