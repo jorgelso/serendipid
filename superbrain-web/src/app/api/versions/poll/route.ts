@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchQueueStatus, SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport, invalidateCache } from "@/lib/cache";
 import { toDisplayPost } from "@/lib/posts";
 
@@ -50,12 +49,11 @@ export async function GET(request: NextRequest) {
     }
 
     invalidateCache();
-    const config = getConfig();
     const { posts } = await getExport();
     const finishedSet = new Set(finishedShortcodes);
     const finished = posts
       .filter((p) => finishedSet.has(p.shortcode))
-      .map((p) => toDisplayPost(p, config.apiUrl));
+      .map((p) => toDisplayPost(p));
 
     return NextResponse.json({ finished, stillPendingShortcodes });
   } catch (err) {

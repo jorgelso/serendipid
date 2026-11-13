@@ -1,6 +1,5 @@
 import { fetchCategories, fetchChangelog, fetchEmbeddings, fetchExport } from "./apiClient";
 import { computeThemes } from "./clustering";
-import { getConfig } from "./config";
 import { computeIdeas } from "./ideas";
 import { computeVectorSpaceLayout } from "./vectorSpace";
 import type {
@@ -195,7 +194,7 @@ export async function getVectorSpace(forceRefresh = false): Promise<VectorSpaceP
   const payload = await getExport(forceRefresh);
   const { themes } = await getThemes(false);
   const embeddings = await getEmbeddings(false);
-  const points = computeVectorSpaceLayout(payload.posts, themes, embeddings, getConfig().apiUrl);
+  const points = computeVectorSpaceLayout(payload.posts, themes, embeddings);
   cache.vectorSpace = points;
   cache.vectorSpaceComputedAt = new Date().toISOString();
   return points;

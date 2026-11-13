@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SuperBrainApiError } from "@/lib/apiClient";
 import { getExport } from "@/lib/cache";
-import { getConfig } from "@/lib/config";
 import { resolveThumbnailUrl } from "@/lib/posts";
 
 // Post.thumbnail can be a data: URI with the image inlined as base64 (some
@@ -61,11 +60,11 @@ export async function GET(
       });
     }
 
-    const resolved = resolveThumbnailUrl(thumbnail, getConfig().apiUrl);
+    const resolved = resolveThumbnailUrl(thumbnail);
     if (!resolved) {
       return NextResponse.json({ error: "No thumbnail for this post." }, { status: 404 });
     }
-    return NextResponse.redirect(resolved);
+    return NextResponse.redirect(new URL(resolved, request.url));
   } catch (err) {
     if (err instanceof SuperBrainApiError) {
       return NextResponse.json({ error: err.message }, { status: err.status ?? 502 });

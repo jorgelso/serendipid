@@ -921,3 +921,43 @@ export async function removePostFromSubcollection(
   );
   return res.data;
 }
+
+// Streams a file from one of the backend's authenticated file routes
+// (/media/..., /static/...) back to the browser, adding the API key
+// server-side. Range and conditional headers are forwarded both ways so
+// video seeking and browser caching keep working through the proxy.
+const FORWARDED_REQUEST_HEADERS = ["range", "if-none-match", "if-modified-since", "if-range"];
+const FORWARDED_RESPONSE_HEADERS = [
+  "content-type",
+  "content-length",
+  "content-range",
+  "accept-ranges",
+  "etag",
+  "last-modified",
+  "cache-control",
+];
+
+export async function proxyBackendFile(
+  mount: "media" | "static",
+  segments: string[],
+  incoming: Headers
+): Promise<Response> {
+  if (segments.length === 0 || segments.some((s) => s === "" || s === "." || s === ".." || s.includes("\\"))) {
+    return new Response("Not found", { status: 404 });
+  }
+  const config = getConfig();
+  const headers: Record<string, string> = { "X-API-Key": config.apiKey };
+  for (const name of FORWARDED_REQUEST_HEADERS) {
+    const value = incoming.get(name);
+    if (value) headers[name] = value;
+  }
+  const path = segments.map(encodeURIComponent).join("/");
+  const upstream = await fetch(`${config.apiUrl}/${mount}/${path}`, { headers, cache: "no-store" });
+  const out = new Headers({ "X-Content-Type-Options": "nosniff" });
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
+    const value = upstream.headers.get(name);
+    if (value) out.set(name, value);
+  }
+  if (!out.has("cache-control")) out.set("cache-control", "private, max-age=86400");
+  return new Response(upstream.body, { status: upstream.status, headers: out });
+}

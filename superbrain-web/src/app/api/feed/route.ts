@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { filterPosts, toDisplayPost } from "@/lib/posts";
 
@@ -36,7 +35,6 @@ export async function GET(request: NextRequest) {
   const reviewed = reviewedParam === "yes" || reviewedParam === "no" ? reviewedParam : undefined;
 
   try {
-    const config = getConfig();
     const { posts, collections } = await getExport();
 
     const filtered = filterPosts(posts, collections, {
@@ -52,7 +50,7 @@ export async function GET(request: NextRequest) {
       reviewed,
     });
     const total = filtered.length;
-    const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p, config.apiUrl));
+    const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p));
 
     return NextResponse.json({ posts: page, total, offset, limit });
   } catch (err) {

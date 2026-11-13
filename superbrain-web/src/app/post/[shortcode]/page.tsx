@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getEmbeddings, getExport } from "@/lib/cache";
 import { toDisplayPost } from "@/lib/posts";
 import { findRelatedPosts } from "@/lib/clustering";
@@ -15,7 +14,6 @@ interface PageData {
 }
 
 async function loadPostPage(shortcode: string): Promise<PageData | null> {
-  const config = getConfig();
   const { posts } = await getExport();
   const rawPost = posts.find((p) => p.shortcode === shortcode);
   if (!rawPost) return null;
@@ -25,11 +23,11 @@ async function loadPostPage(shortcode: string): Promise<PageData | null> {
   const related = relatedScored
     .map((r) => {
       const raw = byShortcode.get(r.shortcode);
-      return raw ? { ...toDisplayPost(raw, config.apiUrl), similarity: r.similarity } : null;
+      return raw ? { ...toDisplayPost(raw), similarity: r.similarity } : null;
     })
     .filter((p): p is ClientPost & { similarity: number } => Boolean(p));
 
-  return { post: toDisplayPost(rawPost, config.apiUrl), related };
+  return { post: toDisplayPost(rawPost), related };
 }
 
 export default async function PostPage(props: PageProps<"/post/[shortcode]">) {

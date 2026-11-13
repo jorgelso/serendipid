@@ -296,8 +296,7 @@ const MIN_POINTS_FOR_UMAP = 4;
 export function computeVectorSpaceLayout(
   posts: Post[],
   themes: Theme[],
-  embeddings: Map<string, Float32Array>,
-  apiBaseUrl: string
+  embeddings: Map<string, Float32Array>
 ): VectorSpacePoint[] {
   const postsByShortcode = new Map(posts.map((p) => [p.shortcode, p]));
   const themeAssignments = buildThemeAssignments(themes);
@@ -349,7 +348,7 @@ export function computeVectorSpaceLayout(
   return shortcodes.map((shortcode, i) => {
     const post = postsByShortcode.get(shortcode)!;
     const assignment = themeAssignments.get(shortcode);
-    const mediaUrls = resolveMediaUrls(post.media_urls, apiBaseUrl);
+    const mediaUrls = resolveMediaUrls(post.media_urls);
     const videoUrl = classifyMedia(mediaUrls).videos[0] ?? null;
 
     const vector = vectorByShortcode.get(shortcode);

@@ -1,5 +1,4 @@
 import { fetchSemanticSearch, SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { mergeSearchHitsWithPosts } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
@@ -7,12 +6,11 @@ import SearchBar from "@/components/SearchBar";
 import SearchResultsWithStudyGuide from "@/components/SearchResultsWithStudyGuide";
 
 async function loadResults(q: string): Promise<(ClientPost & { similarity: number })[]> {
-  const config = getConfig();
   const [searchResponse, exportPayload] = await Promise.all([
     fetchSemanticSearch(q, 24, 0),
     getExport(),
   ]);
-  return mergeSearchHitsWithPosts(searchResponse.data, exportPayload.posts, config.apiUrl);
+  return mergeSearchHitsWithPosts(searchResponse.data, exportPayload.posts);
 }
 
 export default async function SearchPage(props: PageProps<"/search">) {

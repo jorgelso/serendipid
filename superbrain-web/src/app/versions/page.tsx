@@ -1,5 +1,4 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getCategories, getChangelog, getExport } from "@/lib/cache";
 import { languageOptions, sortPostsByRecency, toDisplayPost, unionWithCanonicalCategories, versionSummaries } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
@@ -18,7 +17,6 @@ interface VersionsData {
 }
 
 async function loadVersionsData(): Promise<VersionsData> {
-  const config = getConfig();
   const [{ posts }, changelog, { canonical }] = await Promise.all([
     getExport(),
     getChangelog(),
@@ -45,7 +43,7 @@ async function loadVersionsData(): Promise<VersionsData> {
   return {
     summaries,
     initialVersion,
-    initialPosts: versionPosts.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p, config.apiUrl)),
+    initialPosts: versionPosts.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p)),
     initialTotal: versionPosts.length,
     categories,
     languages,

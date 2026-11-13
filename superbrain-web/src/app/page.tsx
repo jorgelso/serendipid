@@ -1,6 +1,5 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
 import { getCacheTimestamps, getExport } from "@/lib/cache";
-import { getConfig } from "@/lib/config";
 import { sortPostsByRecency, toDisplayPost } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
 import InfiniteFeed from "@/components/InfiniteFeed";
@@ -15,11 +14,10 @@ interface Feed {
 }
 
 async function loadInitialFeed(): Promise<Feed> {
-  const config = getConfig();
   const { posts } = await getExport();
   const sorted = sortPostsByRecency(posts);
   return {
-    posts: sorted.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p, config.apiUrl)),
+    posts: sorted.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p)),
     total: sorted.length,
     fetchedAt: getCacheTimestamps().exportFetchedAt,
   };

@@ -731,23 +731,20 @@ def setup_token_and_db():
     h1("Step 7 of 7 — Access Token & Database")
 
     # Token
-    if TOKEN_FILE.exists():
-        token = TOKEN_FILE.read_text(encoding='utf-8', errors='ignore').strip()
-        if token and len(token) == 8 and token.isalnum():
-            ok(f"Access Token already exists: {BOLD}{token}{RESET}")
-            if not ask_yn("Generate a new Access Token?", default=False):
-                return
-        elif token:
-            warn("Existing token uses old format. A new 8-character Access Token will be generated.")
-    else:
-        token = None
+    from core.access_token import TOKEN_LENGTH, generate_token, read_token, write_token
+    token = read_token()
+    if token:
+        ok(f"Access Token already exists: {BOLD}{token}{RESET}")
+        if not ask_yn("Generate a new Access Token?", default=False):
+            return
+    elif TOKEN_FILE.exists():
+        warn(f"Existing token uses an old format. A new {TOKEN_LENGTH}-character Access Token will be generated.")
 
-    alphabet = string.ascii_uppercase + string.digits
-    new_token = ''.join(secrets.choice(alphabet) for _ in range(8))
-    TOKEN_FILE.write_text(encoding='utf-8', errors='replace', data=new_token)
+    new_token = generate_token()
+    write_token(new_token)
     ok(f"Access Token saved: {BOLD}{GREEN}{new_token}{RESET}")
     nl()
-    print(f"  {YELLOW}Copy this token into the mobile app → Settings → Access Token.{RESET}")
+    print(f"  {YELLOW}Use this token as SUPERBRAIN_API_KEY in the web app and in the mobile app / extension settings.{RESET}")
 
     # DB is auto-created on first backend start; just let the user know
     nl()

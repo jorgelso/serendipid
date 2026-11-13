@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { filterVersionPosts, toDisplayPost } from "@/lib/posts";
 
@@ -26,12 +25,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const config = getConfig();
     const { posts } = await getExport();
 
     const filtered = filterVersionPosts(posts, version, { category, language, sort });
     const total = filtered.length;
-    const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p, config.apiUrl));
+    const page = filtered.slice(offset, offset + limit).map((p) => toDisplayPost(p));
 
     return NextResponse.json({ posts: page, total, offset, limit, version });
   } catch (err) {

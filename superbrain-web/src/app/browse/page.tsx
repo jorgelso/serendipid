@@ -1,5 +1,4 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getCategories, getExport } from "@/lib/cache";
 import { filterPosts, languageOptions, toDisplayPost, unionWithCanonicalCategories } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
@@ -31,7 +30,6 @@ async function loadBrowseData(
   dir: "asc" | "desc",
   importance: number[]
 ): Promise<BrowseData> {
-  const config = getConfig();
   const [{ posts, collections }, { canonical }] = await Promise.all([getExport(), getCategories()]);
 
   const baseOptions = {
@@ -63,7 +61,7 @@ async function loadBrowseData(
   }
 
   return {
-    posts: filtered.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p, config.apiUrl)),
+    posts: filtered.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p)),
     total: filtered.length,
     categories: unionWithCanonicalCategories(posts, canonical),
     languages: languageOptions(posts),

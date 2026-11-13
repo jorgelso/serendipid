@@ -22,6 +22,7 @@ import zipfile
 import io
 from datetime import datetime
 import logging
+import ipaddress
 import secrets
 import string
 import threading
@@ -78,17 +79,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def generate_api_token(length=8):
-    """Generate an 8-character alphanumeric Access Token."""
-    alphabet = string.ascii_uppercase + string.digits
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
+from core.access_token import (
+    generate_token as generate_api_token,
+    is_valid_token as is_valid_api_token_format,
+    read_token,
+    write_token,
+    mask as mask_token,
+    TOKEN_FILE,
+)
 
-
-def is_valid_api_token_format(token: str) -> bool:
-    """Validate token format: exactly 8 alphanumeric chars."""
-    return len(token) == 8 and token.isalnum()
-
-TOKEN_FILE = Path(__file__).parent / "token.txt"
 
 # The port this API process itself listens on when run directly
 # (`python api.py`, the uvicorn.run() call at the bottom of this file) — also
@@ -131,35 +130,30 @@ ANALYSIS_MODE = os.getenv("ANALYSIS_MODE", "immediate").strip().lower()
 RESCAN_SUBPROCESS_TIMEOUT = int(os.getenv("RESCAN_SUBPROCESS_TIMEOUT", "1200"))
 
 def load_or_create_api_token():
-    """Load existing API token or create one if missing."""
+    """Load the API token from token.txt, or create one if it's missing or
+    in an outdated format. The token itself is never logged; run
+    utils/manage_token.py to view it."""
+    token = read_token()
+    if token:
+        logger.info("API token loaded from token.txt (%s)", mask_token(token))
+        return token
     if TOKEN_FILE.exists():
-        content = TOKEN_FILE.read_text(encoding="utf-8", errors="ignore").strip()
-        if content and is_valid_api_token_format(content):
-            logger.info("=" * 80)
-            logger.info(f"🔐 API Token: {content}")
-            logger.info("=" * 80)
-            return content
-
-        if content:
-            logger.warning("Existing token format is legacy/invalid. Regenerating 8-character Access Token.")
-
+        logger.warning("token.txt is not a valid %d-character token; generating a new one. "
+                       "Update every client with the new token (utils/manage_token.py shows it).", 32)
     token = generate_api_token()
-    TOKEN_FILE.write_text(token)
-
-    logger.info("=" * 80)
-    logger.info(f"🔐 API Token (NEW): {token}")
-    logger.info("=" * 80)
+    write_token(token)
+    logger.info("New API token written to token.txt (%s). View it with utils/manage_token.py.", mask_token(token))
     return token
 
 API_TOKEN = load_or_create_api_token()
 
 async def verify_token(request: Request, x_api_key: str = Header(None, description="Access Token for authentication")):
     """
-    Verify authentication using Access Token.
-    Can be passed in X-API-Key header or token query parameter.
+    Verify authentication using the access token in the X-API-Key header.
+    (Query-string tokens are not accepted: URLs end up in logs and history.)
     """
-    actual_token = x_api_key or request.query_params.get("token")
-    if actual_token != API_TOKEN:
+    actual_token = x_api_key or ""
+    if not secrets.compare_digest(actual_token.encode(), API_TOKEN.encode()):
         logger.warning("Invalid Access Token attempt from IP: %s", request.client.host if hasattr(request, 'client') and request.client else 'unknown')
         raise HTTPException(
             status_code=401,
@@ -226,14 +220,31 @@ _THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
 from core.media_store import MEDIA_DIR
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
-from fastapi.staticfiles import StaticFiles
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
-# Permanently-relocated post media (video/audio/thumbnail) — see
-# core/media_store.py. Same unauthenticated-static-file pattern as /static
-# above; not gated by the API token like the JSON endpoints are. Fine for a
-# server bound to localhost, but worth knowing if this ever gets tunneled
-# (e.g. ngrok) somewhere reachable by more than just you.
-app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+def _serve_file_under(root: Path, file_path: str) -> FileResponse:
+    """FileResponse for root/file_path, refusing anything that resolves
+    outside root. FileResponse handles Range requests (video seeking) and
+    ETag/Last-Modified."""
+    root_resolved = root.resolve()
+    target = (root_resolved / file_path).resolve()
+    if not target.is_relative_to(root_resolved) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(target, headers={"Cache-Control": "private, max-age=86400"})
+
+
+# Generated thumbnails and permanently-relocated post media (see
+# core/media_store.py). Both require the access token like every other data
+# route; the web app proxies them (superbrain-web/src/app/api/media,
+# .../backend-static) so browsers never need the token or direct access to
+# this server.
+@app.get("/static/{file_path:path}", include_in_schema=False)
+async def serve_static(file_path: str, token: str = Depends(verify_token)):
+    return _serve_file_under(_STATIC_DIR, file_path)
+
+
+@app.get("/media/{file_path:path}", include_in_schema=False)
+async def serve_media(file_path: str, token: str = Depends(verify_token)):
+    return _serve_file_under(MEDIA_DIR, file_path)
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -1966,18 +1977,39 @@ async def status():
     }
 
 
+# Headers a reverse proxy or tunnel (ngrok, Cloudflare, nginx) adds. A
+# request carrying any of them came from somewhere else even if the direct
+# peer is localhost, so /connect-info refuses it.
+_FORWARDING_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded", "cf-connecting-ip")
+
+
+def _is_local_network_request(request: Request) -> bool:
+    """True only for a direct (unproxied) request from a loopback or private
+    (LAN) address."""
+    if any(h in request.headers for h in _FORWARDING_HEADERS):
+        return False
+    host = request.client.host if request.client else ""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
 @app.get("/connect-info")
 async def connect_info(request: Request):
     """
-    Returns connection details for QR code scanning.
-    No auth required — used by the mobile app to auto-fill settings.
-    The URL is built from the request so it matches whatever address the client used.
+    Connection details (URL + access token) for QR-code pairing of the mobile
+    app. No auth, so it only answers direct requests from the local network
+    (loopback/private addresses, no proxy or tunnel headers); everything else
+    gets 403 and must be configured with the token by hand.
     """
-    # Build the base URL from the incoming request
-    scheme = request.headers.get('x-forwarded-proto', request.url.scheme)
-    host = request.headers.get('x-forwarded-host', request.headers.get('host', 'localhost:5050'))
-    base_url = f"{scheme}://{host}"
+    if not _is_local_network_request(request):
+        raise HTTPException(status_code=403, detail="Pairing is only available from the local network.")
 
+    base_url = f"{request.url.scheme}://{request.headers.get('host', f'localhost:{API_SELF_PORT}')}"
     return {
         "url": base_url,
         "token": API_TOKEN,

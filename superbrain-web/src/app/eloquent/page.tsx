@@ -1,5 +1,4 @@
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { filterPosts, toDisplayPost } from "@/lib/posts";
 import type { ClientPost } from "@/types/domain";
@@ -17,7 +16,6 @@ interface EloquentData {
 type Reviewed = "" | "yes" | "no";
 
 async function loadEloquentData(tutorial: "" | "yes" | "no", reviewed: Reviewed): Promise<EloquentData> {
-  const config = getConfig();
   const { posts } = await getExport();
 
   const filtered = filterPosts(posts, [], {
@@ -28,7 +26,7 @@ async function loadEloquentData(tutorial: "" | "yes" | "no", reviewed: Reviewed)
   });
 
   return {
-    posts: filtered.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p, config.apiUrl)),
+    posts: filtered.slice(0, PAGE_SIZE).map((p) => toDisplayPost(p)),
     total: filtered.length,
   };
 }

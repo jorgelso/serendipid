@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { toDisplayPost } from "@/lib/posts";
 
@@ -21,10 +20,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const config = getConfig();
     const { posts } = await getExport();
     const wanted = new Set(shortcodes);
-    const results = posts.filter((p) => wanted.has(p.shortcode)).map((p) => toDisplayPost(p, config.apiUrl));
+    const results = posts.filter((p) => wanted.has(p.shortcode)).map((p) => toDisplayPost(p));
     return NextResponse.json({ posts: results });
   } catch (err) {
     if (err instanceof SuperBrainApiError) {

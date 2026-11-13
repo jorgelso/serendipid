@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { fetchEloquenceOverrides, SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { toDisplayPost } from "@/lib/posts";
 import type { ClientPost, EloquenceOverride } from "@/types/domain";
@@ -11,11 +10,10 @@ interface OverridesData {
 }
 
 async function loadOverridesData(): Promise<OverridesData> {
-  const config = getConfig();
   const [{ overrides }, { posts }] = await Promise.all([fetchEloquenceOverrides(), getExport()]);
   return {
     overrides,
-    postsByShortcode: new Map(posts.map((p) => [p.shortcode, toDisplayPost(p, config.apiUrl)])),
+    postsByShortcode: new Map(posts.map((p) => [p.shortcode, toDisplayPost(p)])),
   };
 }
 

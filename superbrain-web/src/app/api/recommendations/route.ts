@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { toDisplayPost } from "@/lib/posts";
 import { getRecommendations } from "@/lib/recommendations";
@@ -23,7 +22,6 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(searchParams.get("limit") ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
 
   try {
-    const config = getConfig();
     const result = await getRecommendations(strategy, limit);
     const { posts } = await getExport();
     const byShortcode = new Map(posts.map((p) => [p.shortcode, p]));
@@ -31,7 +29,7 @@ export async function GET(request: NextRequest) {
     const hydrated = result.items
       .map((item) => byShortcode.get(item.shortcode))
       .filter((p): p is Post => Boolean(p))
-      .map((p) => toDisplayPost(p, config.apiUrl));
+      .map((p) => toDisplayPost(p));
 
     const response: RecommendationsResponse = {
       success: true,

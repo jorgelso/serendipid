@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchSemanticSearch, SuperBrainApiError } from "@/lib/apiClient";
-import { getConfig } from "@/lib/config";
 import { getExport } from "@/lib/cache";
 import { mergeSearchHitsWithPosts } from "@/lib/posts";
 
@@ -26,12 +25,11 @@ export async function GET(request: NextRequest) {
   const minSimilarity = clamp(Number(searchParams.get("min_similarity") ?? 0), 0, 1);
 
   try {
-    const config = getConfig();
     const [searchResponse, exportPayload] = await Promise.all([
       fetchSemanticSearch(q, limit, minSimilarity),
       getExport(),
     ]);
-    const results = mergeSearchHitsWithPosts(searchResponse.data, exportPayload.posts, config.apiUrl);
+    const results = mergeSearchHitsWithPosts(searchResponse.data, exportPayload.posts);
     return NextResponse.json({ query: q, count: results.length, results });
   } catch (err) {
     return errorResponse(err);

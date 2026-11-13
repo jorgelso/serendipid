@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import NavDropdown from "./NavDropdown";
 import SerendipidMark from "./icons/SerendipidMark";
 
@@ -39,6 +39,14 @@ function isActive(pathname: string, href: string) {
 
 export default function NavBar() {
   const pathname = usePathname();
+  const router = useRouter();
+  if (pathname === "/login") return null;
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    router.replace("/login");
+    router.refresh();
+  }
 
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur-md">
@@ -84,6 +92,13 @@ export default function NavBar() {
           >
             {ADMIN_LINK.label}
           </Link>
+          <button
+            type="button"
+            onClick={signOut}
+            className="px-4 py-2 rounded-full text-sm font-bold text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors"
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </header>

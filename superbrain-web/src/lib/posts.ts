@@ -1,19 +1,17 @@
 import type { ChangelogResponse, ClientPost, Collection, Post, SearchSemanticHit } from "@/types/domain";
 
 /** Thumbnails may be a full external URL, a data: URI, or a relative
- * /static/... path needing the backend's base URL prefixed (backend/api.py's
- * /static mount has no auth dependency, so the resolved URL works directly
- * in a plain <img> tag). */
-export function resolveThumbnailUrl(
-  thumbnail: string | null | undefined,
-  apiBaseUrl: string
-): string | null {
+ * /static/... path on the backend. Backend files require the API key, so a
+ * relative path is rewritten to this app's own proxy route
+ * (src/app/api/backend-static/[...path]/route.ts), which checks the session
+ * and adds the key server-side. */
+export function resolveThumbnailUrl(thumbnail: string | null | undefined): string | null {
   if (!thumbnail) return null;
   if (thumbnail.startsWith("http://") || thumbnail.startsWith("https://") || thumbnail.startsWith("data:image/")) {
     return thumbnail;
   }
   if (thumbnail.startsWith("/static/")) {
-    return `${apiBaseUrl}${thumbnail}`;
+    return `/api/backend-static/${thumbnail.slice("/static/".length)}`;
   }
   return null;
 }
@@ -28,23 +26,23 @@ export function toClientPost(post: Post): ClientPost {
   return rest;
 }
 
-/** media_urls come back as relative paths ("/media/{shortcode}/video.mp4")
- * — the /media mount has no auth dependency (same as /static), so prefixing
- * with the backend's base URL is all a browser needs to fetch/play them
- * directly. */
-export function resolveMediaUrls(mediaUrls: string[], apiBaseUrl: string): string[] {
-  return mediaUrls.map((u) => (u.startsWith("/media/") ? `${apiBaseUrl}${u}` : u));
+/** media_urls come back as relative paths ("/media/{shortcode}/video.mp4").
+ * The backend's /media route requires the API key, so they are rewritten to
+ * this app's proxy route (src/app/api/media/[...path]/route.ts). The browser
+ * never talks to the backend directly. */
+export function resolveMediaUrls(mediaUrls: string[]): string[] {
+  return mediaUrls.map((u) => (u.startsWith("/media/") ? `/api/media/${u.slice("/media/".length)}` : u));
 }
 
-/** Strips any embedding and resolves the thumbnail + media URLs to absolute
- * URLs in one step — the shape every post should be in by the time it
- * reaches a client component. */
-export function toDisplayPost(post: Post, apiBaseUrl: string): ClientPost {
+/** Strips any embedding and resolves the thumbnail + media URLs to this
+ * app's proxy routes in one step: the shape every post should be in by the
+ * time it reaches a client component. */
+export function toDisplayPost(post: Post): ClientPost {
   const client = toClientPost(post);
   return {
     ...client,
-    thumbnail: resolveThumbnailUrl(client.thumbnail, apiBaseUrl),
-    media_urls: resolveMediaUrls(client.media_urls, apiBaseUrl),
+    thumbnail: resolveThumbnailUrl(client.thumbnail),
+    media_urls: resolveMediaUrls(client.media_urls),
   };
 }
 
@@ -354,8 +352,7 @@ export function groupShortcodesByCategory(
  * fill those in from the fuller cached export record by shortcode. */
 export function mergeSearchHitsWithPosts(
   hits: SearchSemanticHit[],
-  posts: Post[],
-  apiBaseUrl: string
+  posts: Post[]
 ): (ClientPost & { similarity: number })[] {
   const byShortcode = new Map(posts.map((p) => [p.shortcode, p]));
 
@@ -407,8 +404,8 @@ export function mergeSearchHitsWithPosts(
       summary: hit.summary ?? base.summary,
       tags: hit.tags ?? base.tags,
       category: hit.category ?? base.category,
-      thumbnail: resolveThumbnailUrl(hit.thumbnail ?? base.thumbnail, apiBaseUrl),
-      media_urls: resolveMediaUrls(base.media_urls, apiBaseUrl),
+      thumbnail: resolveThumbnailUrl(hit.thumbnail ?? base.thumbnail),
+      media_urls: resolveMediaUrls(base.media_urls),
       similarity: hit.similarity,
     };
   });
