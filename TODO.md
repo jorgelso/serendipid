@@ -53,6 +53,5 @@ The iOS app has not kept up with the backend.
 
 ## Project
 
-- [ ] Continuous integration: lint and type-check the web app, compile and test the backend, build the Docker image.
-- [ ] Publish a prebuilt Docker image (including an arm64 build for Raspberry Pi).
+- [ ] Build the iOS app in CI (needs a macOS runner).
 - [ ] Multi-user support is out of scope for now; the app assumes one owner per backend.

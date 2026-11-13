@@ -54,7 +54,7 @@ OpenAI and Anthropic are only tried when their keys are set. Without them, analy
 ### 1. Backend
 
 ```bash
-git clone https://github.com/jorgelso/second-brain.git serendipid
+git clone https://github.com/jorgelso/serendipid.git
 cd serendipid/backend
 python3 start.py
 ```
@@ -156,7 +156,7 @@ A Raspberry Pi 4 or 5 with 4 GB of RAM or more works well as an always-on server
 2. **Install the backend.**
 
    ```bash
-   git clone https://github.com/jorgelso/second-brain.git ~/serendipid
+   git clone https://github.com/jorgelso/serendipid.git ~/serendipid
    cd ~/serendipid/backend
    python3 start.py
    ```
@@ -222,7 +222,15 @@ If you open the backend's port to the internet, anyone who learns the token has 
 
 ## Contributing
 
-Issues and pull requests are welcome. Fork the repository, create a branch, and open a pull request against `main`. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:` and so on).
+Issues and pull requests are welcome.
+
+1. Create a branch (or fork the repository if you don't have write access) and open a pull request against `main`. Direct pushes to `main` are blocked.
+2. CI runs on every pull request: the backend is compiled and tested, the web app is linted, type-checked and built, and the backend Docker image is built. All three checks must pass.
+3. The maintainer reviews and approves the pull request before it can be merged. New commits pushed after an approval need a fresh review.
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:` and so on).
+
+Every push to `main` that touches the backend publishes a Docker image to `ghcr.io/jorgelso/serendipid` (amd64 and arm64), so a server can pull it instead of building locally.
 
 ## Credits and license
 
