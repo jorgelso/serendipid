@@ -17,15 +17,15 @@ re-parsing the flat-list shape from scratch.
 
 Usage:
     cd backend
-    .venv/bin/python scripts/backfill_date_saved.py saved_posts.json --dry-run
-    .venv/bin/python scripts/backfill_date_saved.py saved_posts.json
-    .venv/bin/python scripts/backfill_date_saved.py saved_posts.json --force
+    .venv/bin/python scripts/migrations/backfill_date_saved.py saved_posts.json --dry-run
+    .venv/bin/python scripts/migrations/backfill_date_saved.py saved_posts.json
+    .venv/bin/python scripts/migrations/backfill_date_saved.py saved_posts.json --force
 """
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.database import get_db
 from import_saved_instagram import extract_post_timestamps
@@ -38,7 +38,7 @@ def main() -> None:
     positional = [a for a in args if not a.startswith("--")]
 
     if not positional:
-        print("Usage: python scripts/backfill_date_saved.py <saved_posts.json> [--force] [--dry-run]")
+        print("Usage: python scripts/migrations/backfill_date_saved.py <saved_posts.json> [--force] [--dry-run]")
         sys.exit(1)
 
     all_posts_path = Path(positional[0])

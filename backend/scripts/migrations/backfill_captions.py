@@ -15,15 +15,15 @@ non-empty caption already are skipped by default.
 
 Usage:
     cd backend
-    .venv/bin/python scripts/backfill_captions.py            # only posts missing a caption
-    .venv/bin/python scripts/backfill_captions.py --force     # re-parse every Instagram post
+    .venv/bin/python scripts/migrations/backfill_captions.py            # only posts missing a caption
+    .venv/bin/python scripts/migrations/backfill_captions.py --force     # re-parse every Instagram post
 """
 
 import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.database import get_db
 from core.media_store import MEDIA_DIR

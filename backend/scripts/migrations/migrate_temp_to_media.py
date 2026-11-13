@@ -11,19 +11,19 @@ skipped and reported, never guessed.
 
 Usage:
     cd backend
-    .venv/bin/python scripts/migrate_temp_to_media.py
+    .venv/bin/python scripts/migrations/migrate_temp_to_media.py
 """
 
 import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.database import get_db
 from core.media_store import relocate_to_media_store
 
-TEMP_DIR = Path(__file__).resolve().parent.parent / "temp"
+TEMP_DIR = Path(__file__).resolve().parents[2] / "temp"
 
 _IG_URL_RE = re.compile(
     r"https?://(?:www\.)?instagram\.com/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)",
