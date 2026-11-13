@@ -27,8 +27,8 @@ from urllib.parse import urlparse, urljoin
 # Ensure backend root is in sys.path (needed when run as a subprocess)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.categories import CATEGORY_PROMPT
-from core.languages import LANGUAGE_PROMPT
+from core.categories import category_prompt
+from core.languages import language_prompt
 
 # ---------------------------------------------------------------------------
 #  Prompt template
@@ -763,8 +763,8 @@ def analyze_webpage(url: str) -> dict:
         url=url,
         page_title=page_title or "Unknown",
         content=content[:8000],
-        category_prompt=CATEGORY_PROMPT,
-        language_prompt=LANGUAGE_PROMPT,
+        category_prompt=category_prompt(),
+        language_prompt=language_prompt(),
     )
 
     print("  🤖 Analyzing page content with AI...")

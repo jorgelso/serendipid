@@ -15,18 +15,16 @@ prompt steers the model toward picking one unless the content is truly mixed.
 
 import re
 
-LANGUAGES = [
-    "english",
-    "german",
-    "italian",
-    "spanish",
-    "other",
-    "no dialogue / visual only",
-]
+from core import app_config
 
-_LANGUAGE_BY_LOWER = {l.lower(): l for l in LANGUAGES}
 
-LANGUAGE_PROMPT = f"""[Identify the language(s) actually spoken or shown on-screen in the content
+def language_names() -> list:
+    """The configured language labels (see core/app_config.py)."""
+    return app_config.languages()
+
+
+def language_prompt() -> str:
+    return f"""[Identify the language(s) actually spoken or shown on-screen in the content
 itself — from the audio transcription's detected language and any on-screen
 text found in the visual analysis. Do NOT use the original post caption's
 language as evidence — captions are frequently written in a different
@@ -35,7 +33,7 @@ Japanese caption on an English-language video). List just one language
 unless the content is genuinely bilingual (e.g. speech in one language with
 on-screen captions in another) — comma-separated if so. Choose only from this
 list (use these exact labels):
-{', '.join(LANGUAGES)}
+{', '.join(language_names())}
 Use "no dialogue / visual only" for silent or music-only content with no
 speech and no readable on-screen text. Use "other" only for a language
 outside this list — do not guess if the evidence is too thin to tell.]"""
@@ -47,10 +45,12 @@ def parse_languages(raw: str) -> list:
     label can't false-positive inside an unrelated word."""
     if not raw:
         return []
+    names = language_names()
+    by_lower = {l.lower(): l for l in names}
     lower = raw.lower()
     found = []  # (position, canonical_label)
-    for label in sorted(LANGUAGES, key=len, reverse=True):
-        canonical = _LANGUAGE_BY_LOWER[label.lower()]
+    for label in sorted(names, key=len, reverse=True):
+        canonical = by_lower[label.lower()]
         if canonical in (c for _, c in found):
             continue
         m = re.search(r'\b' + re.escape(label.lower()) + r'\b', lower)

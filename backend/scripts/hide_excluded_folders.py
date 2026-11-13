@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 One-time cleanup for Instagram folders that are never stored
-(core/sensitive.py's EXCLUDED_IMPORT_FOLDERS, e.g. "Enviar a amigos"),
+(excluded_import_folders in the config, see core/app_config.py),
 for posts imported before that rule existed.
 
 For each excluded collection row:

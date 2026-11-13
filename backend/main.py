@@ -45,8 +45,6 @@ _load_env_file()
 # Import local modules
 from core.link_checker import validate_link
 from core.database import get_db
-from core.categories import CATEGORY_PROMPT
-from core.languages import LANGUAGE_PROMPT
 from core.importance import parse_importance, parse_importance_reason, apply_trusted_creator_boost, build_importance_prompt
 from core.media_store import relocate_to_media_store
 from core.summary_parser import (

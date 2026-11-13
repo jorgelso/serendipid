@@ -179,6 +179,9 @@ export interface InstagramExportPreview {
   // uploaded at preview time — how many of total_unique_posts already have
   // a known real save date in it.
   posts_with_known_date?: number;
+  // The backend config's priority_folder (core/app_config.py) — preselected
+  // in the priority-folder dropdown when the export contains it.
+  default_priority_folder?: string | null;
 }
 
 export interface ExportPayload {

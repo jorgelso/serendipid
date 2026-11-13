@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 
-from core.sensitive import SENSITIVE_COLLECTION_NAMES, is_excluded_folder, show_sensitive
+from core.sensitive import sensitive_collection_names, is_excluded_folder, show_sensitive
 
 # Database file path can be overridden for Docker deployments
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.parent / 'superbrain.db')))
@@ -23,13 +23,23 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.pa
 # as a subquery — membership lives in collections.post_ids (a JSON array), so
 # this is computed live from that table on every query rather than stored on
 # the analyses row, and a folder import picks it up with no extra write.
-_SENSITIVE_NAMES_SQL = ", ".join("'" + n.replace("'", "''") + "'" for n in sorted(SENSITIVE_COLLECTION_NAMES))
-SENSITIVE_SHORTCODES_SQL = (
-    "SELECT j.value FROM collections c, "
-    "json_each(CASE WHEN json_valid(c.post_ids) THEN c.post_ids ELSE '[]' END) j "
-    f"WHERE lower(trim(c.name)) IN ({_SENSITIVE_NAMES_SQL})"
-)
-IS_SENSITIVE_COLUMN = f"(shortcode IN ({SENSITIVE_SHORTCODES_SQL})) AS is_sensitive"
+# Built per call from the configured list (core/app_config.py) so a config
+# import takes effect without a restart. Names are inlined as escaped SQL
+# string literals; SQLite accepts an empty IN () list.
+def _sensitive_names_sql() -> str:
+    return ", ".join("'" + n.replace("'", "''") + "'" for n in sorted(sensitive_collection_names()))
+
+
+def _sensitive_shortcodes_sql() -> str:
+    return (
+        "SELECT j.value FROM collections c, "
+        "json_each(CASE WHEN json_valid(c.post_ids) THEN c.post_ids ELSE '[]' END) j "
+        f"WHERE lower(trim(c.name)) IN ({_sensitive_names_sql()})"
+    )
+
+
+def _is_sensitive_column() -> str:
+    return f"(shortcode IN ({_sensitive_shortcodes_sql()})) AS is_sensitive"
 
 # Bump this whenever a change to the analysis pipeline is significant enough
 # that previously-saved posts are worth a human re-look (e.g. a prompt
@@ -1188,7 +1198,7 @@ class Database:
         "post_date, likes, thumbnail, title, summary, tags, music, category, "
         "language, is_hidden, analysis_version, media_files, importance, "
         "enjoyment_rating, perceived_importance_rating, caption, date_saved, "
-        + IS_SENSITIVE_COLUMN
+        + _is_sensitive_column()
     )
 
     def _visible_sql(self):
@@ -1198,7 +1208,7 @@ class Database:
         core/sensitive.py). Every client-facing read path filters on this."""
         clause = "(is_hidden IS NULL OR is_hidden = 0)"
         if not show_sensitive():
-            clause += f" AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL})"
+            clause += f" AND shortcode NOT IN ({_sensitive_shortcodes_sql()})"
         return f"({clause})"
 
     def get_sensitive_shortcodes(self) -> set:
@@ -1208,7 +1218,7 @@ class Database:
         if not self.is_connected():
             return set()
         try:
-            return {r[0] for r in self._conn.execute(SENSITIVE_SHORTCODES_SQL).fetchall()}
+            return {r[0] for r in self._conn.execute(_sensitive_shortcodes_sql()).fetchall()}
         except Exception as e:
             print(f"[WARNING]  Error fetching sensitive shortcodes: {e}")
             return set()
@@ -1980,7 +1990,7 @@ class Database:
         try:
             self._conn.execute(
                 "INSERT INTO post_views (shortcode, viewed_at, client_env) "
-                f"SELECT ?, ?, ? WHERE ? NOT IN ({SENSITIVE_SHORTCODES_SQL})",
+                f"SELECT ?, ?, ? WHERE ? NOT IN ({_sensitive_shortcodes_sql()})",
                 (shortcode, datetime.utcnow().isoformat(), client_env, shortcode),
             )
             self._conn.commit()
@@ -2002,14 +2012,14 @@ class Database:
                 cur = self._conn.execute(
                     "SELECT shortcode, viewed_at FROM post_views "
                     "WHERE viewed_at >= ? AND client_env = 'prod' "
-                    f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) ORDER BY viewed_at DESC LIMIT ?",
+                    f"AND shortcode NOT IN ({_sensitive_shortcodes_sql()}) ORDER BY viewed_at DESC LIMIT ?",
                     (since, limit),
                 )
             else:
                 cur = self._conn.execute(
                     "SELECT shortcode, viewed_at FROM post_views "
                     "WHERE client_env = 'prod' "
-                    f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) ORDER BY viewed_at DESC LIMIT ?",
+                    f"AND shortcode NOT IN ({_sensitive_shortcodes_sql()}) ORDER BY viewed_at DESC LIMIT ?",
                     (limit,),
                 )
             return [{"shortcode": s, "viewed_at": v} for s, v in cur.fetchall()]
@@ -2123,7 +2133,7 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?", (limit,)
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?", (limit,)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
         except Exception as e:
@@ -2173,7 +2183,7 @@ class Database:
         sensitive-folder posts unless --show-sensitive (core/sensitive.py)."""
         if not self.is_connected():
             return []
-        sensitive_filter = "" if show_sensitive() else f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) "
+        sensitive_filter = "" if show_sensitive() else f"AND shortcode NOT IN ({_sensitive_shortcodes_sql()}) "
         try:
             cur = self._conn.cursor()
             cur.execute(
@@ -2225,7 +2235,7 @@ class Database:
             cur = self._conn.cursor()
             like_pattern = f'%"{category}"%'
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE (category = ? OR category LIKE ?) "
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE (category = ? OR category LIKE ?) "
                 f"AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
                 (category, like_pattern, limit)
             )
@@ -2252,7 +2262,7 @@ class Database:
             conditions = " OR ".join(["LOWER(tags) LIKE ?" for _ in tags])
             params = [f"%{t.lower()}%" for t in tags] + [limit]
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE ({conditions}) AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE ({conditions}) AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
                 params
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -2280,7 +2290,7 @@ class Database:
             if show_sensitive():
                 cur.execute("SELECT COUNT(*) FROM collections")
             else:
-                cur.execute(f"SELECT COUNT(*) FROM collections WHERE lower(trim(name)) NOT IN ({_SENSITIVE_NAMES_SQL})")
+                cur.execute(f"SELECT COUNT(*) FROM collections WHERE lower(trim(name)) NOT IN ({_sensitive_names_sql()})")
             total_collections = cur.fetchone()[0]
 
             # category is stored as a JSON array (or a legacy plain string) —
@@ -2335,7 +2345,7 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
                 (limit, offset)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -3278,30 +3288,16 @@ class Database:
     # ------------------------------------------------------------------
 
     # Instagram usernames whose posts get auto-added to the "Trusted Authors"
-    # board the moment they're saved/re-saved — a deliberate, explicit
-    # exception to "the import scripts never read or write these tables"
-    # (see Boards vs collections in CLAUDE.md), asked for by the user rather
-    # than something boards normally do on their own. Applied from
-    # save_analysis() below, which every pipeline (immediate main.py,
-    # ANALYSIS_MODE=batch, the rescan pipeline, and bulk Instagram-export
-    # imports via scripts/import_saved_instagram.py's POST /analyze calls)
-    # writes through — so this is the one place it needs to live. Keyed
-    # lowercase; extend as the user confirms more trusted authors. Separate
-    # from core/importance.py's TRUSTED_CREATORS (importance-score floor) —
-    # same "explicit code-level allowlist" shape, different purpose, so kept
-    # as two independent lists rather than conflated.
+    # board the moment they're saved/re-saved — the one exception to "the
+    # import scripts never read or write these tables" (see Boards vs
+    # collections in backend/CLAUDE.md). Applied from save_analysis() below,
+    # which every pipeline writes through, so this is the one place it needs
+    # to live. The list is trusted_authors in config/user_config.json
+    # (core/app_config.py) — separate from trusted_creators (importance-score
+    # floor), different purpose.
     TRUSTED_AUTHORS_BOARD_ID = "trusted_authors"
     TRUSTED_AUTHORS_BOARD_NAME = "Trusted Authors"
     TRUSTED_AUTHORS_BOARD_ICON = "⭐"
-    TRUSTED_AUTHOR_USERNAMES = {
-        "linaseiche",
-        "erinmerylstudy",
-        "kylascan",
-        "zowi.fit.feliz",
-        "emmieedit",
-        "yourinvestmenthq",
-        "olamolam8",
-    }
 
     def _sync_trusted_authors_board(self, username, shortcode):
         """If `username` is a trusted author, make sure `shortcode` is on the
@@ -3312,7 +3308,9 @@ class Database:
         if not username:
             return
         try:
-            if username.strip().lower() not in self.TRUSTED_AUTHOR_USERNAMES:
+            from core import app_config
+
+            if username.strip().casefold() not in app_config.trusted_authors():
                 return
             if self.get_board(self.TRUSTED_AUTHORS_BOARD_ID) is None:
                 self.create_board(
@@ -3954,7 +3952,7 @@ class Database:
                 "SELECT r.shortcode, r.collection_id, r.created_at, c.last_opened_at "
                 "FROM reels_study_guide r JOIN study_guide_collections c ON c.id = r.collection_id "
                 "WHERE r.client_env = 'prod' "
-                f"AND r.shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL})"
+                f"AND r.shortcode NOT IN ({_sensitive_shortcodes_sql()})"
             )
             params = []
             if since:

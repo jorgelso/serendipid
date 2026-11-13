@@ -3,7 +3,7 @@
 Bulk-import an Instagram "Download Your Information" JSON export into a local
 SuperBrain backend, same as import_saved_instagram.py, but processes reels in
 collection-priority order: everything in the --priority-folder collection
-(default "Important") is analyzed first, then every other collection in its
+(default: priority_folder from the config, see core/app_config.py) is analyzed first, then every other collection in its
 original relative order from the export file.
 
 Reuses all parsing/state/API/collection-assignment logic from
@@ -22,7 +22,7 @@ collection is scheduled first.
 
 Usage:
     python import_saved_instagram_by_collection.py <export.json-or-dir> --dry-run
-    python import_saved_instagram_by_collection.py <export.json-or-dir> --priority-folder Important
+    python import_saved_instagram_by_collection.py <export.json-or-dir> --priority-folder "My Folder"
     python import_saved_instagram_by_collection.py <export.json-or-dir>
 """
 
@@ -33,7 +33,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from import_saved_instagram import (
     ApiError,
@@ -59,13 +59,14 @@ from import_saved_instagram import (
     shortcode_for,
 )
 from core.sensitive import is_excluded_folder  # import_saved_instagram put backend/ on sys.path
+from core import app_config  # noqa: E402
 
-DEFAULT_PRIORITY_FOLDER = "Important"
+DEFAULT_PRIORITY_FOLDER = app_config.priority_folder()
 
 
 def reorder_by_collection_priority(
     records: List[Tuple[str, str, str, List[str]]],
-    priority_folder: str = DEFAULT_PRIORITY_FOLDER,
+    priority_folder: Optional[str] = DEFAULT_PRIORITY_FOLDER,
 ) -> List[Tuple[str, str, str, List[str]]]:
     """Stable-partition (folder, url, caption, hashtags) records so every
     record whose folder case-insensitively matches priority_folder (after
@@ -77,6 +78,8 @@ def reorder_by_collection_priority(
     first-seen url ordering with priority_folder's URLs first, even for a
     URL that also belongs to another (later) collection.
     """
+    if not priority_folder:
+        return list(records)
     priority_key = priority_folder.strip().lower()
     priority_records = [r for r in records if r[0].strip().lower() == priority_key]
     other_records = [r for r in records if r[0].strip().lower() != priority_key]
@@ -115,7 +118,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--priority-folder",
         default=DEFAULT_PRIORITY_FOLDER,
-        help=f"Collection to schedule first, case-insensitive (default: {DEFAULT_PRIORITY_FOLDER})",
+        help=f"Collection to schedule first, case-insensitive (default: {DEFAULT_PRIORITY_FOLDER or 'none'}, from the config)",
     )
     p.add_argument(
         "--reverse-collections", dest="reverse_collections",
@@ -173,10 +176,10 @@ def main() -> None:
         for f in folders:
             folder_counts[f] = folder_counts.get(f, 0) + 1
 
-    priority_key = args.priority_folder.strip().lower()
+    priority_key = (args.priority_folder or "").strip().lower()
     print(f"Parsed {len(url_to_folders)} unique Instagram URL(s) across {len(folder_counts)} folder(s), in priority order:")
     for folder in _ordered_folder_names(records):
-        marker = "  <- priority" if folder.strip().lower() == priority_key else ""
+        marker = "  <- priority" if priority_key and folder.strip().lower() == priority_key else ""
         print(f"  {folder:<30} {folder_counts.get(folder, 0)}{marker}")
 
     if args.dry_run:
@@ -344,7 +347,7 @@ def main() -> None:
                 continue
             counts = per_folder[folder]
             total_f = sum(counts.values())
-            marker = "  <- priority" if folder.strip().lower() == priority_key else ""
+            marker = "  <- priority" if priority_key and folder.strip().lower() == priority_key else ""
             print(
                 f"  {folder:<30} {total_f:>5} total   "
                 f"success={counts['success']}  pending={counts['pending']}  skipped={counts['permanently_skipped']}{marker}"

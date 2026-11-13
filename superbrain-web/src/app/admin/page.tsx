@@ -8,7 +8,6 @@ import StuckReels from "@/components/StuckReels";
 import type { ImportJob, InstagramExportPreview } from "@/types/domain";
 
 const POLL_INTERVAL_MS = 3000;
-const DEFAULT_PRIORITY_FOLDER = "Important";
 
 function formatStarted(iso: string): string {
   const d = new Date(iso);
@@ -23,7 +22,7 @@ export default function AdminPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const [mode, setMode] = useState<"regular" | "by_collection">("regular");
-  const [priorityFolder, setPriorityFolder] = useState(DEFAULT_PRIORITY_FOLDER);
+  const [priorityFolder, setPriorityFolder] = useState("");
   // Off by default — real save dates now come from the all-posts file
   // regardless of analysis order, so this is just a processing-order
   // preference. See scripts/import_saved_instagram.py's
@@ -128,8 +127,9 @@ export default function AdminPage() {
       const data: InstagramExportPreview & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not parse that file.");
       setPreview(data);
-      const hasDefault = data.categories.some((c) => c.name === DEFAULT_PRIORITY_FOLDER);
-      setPriorityFolder(hasDefault ? DEFAULT_PRIORITY_FOLDER : (data.categories[0]?.name ?? ""));
+      const preferred = data.default_priority_folder?.trim().toLowerCase();
+      const match = preferred ? data.categories.find((c) => c.name.trim().toLowerCase() === preferred) : undefined;
+      setPriorityFolder(match?.name ?? data.categories[0]?.name ?? "");
     } catch (err) {
       setPreviewError(err instanceof Error ? err.message : "Could not parse that file.");
     } finally {

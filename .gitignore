@@ -21,6 +21,8 @@ backend/token.txt
 backend/config/ngrok_token.txt
 backend/config/test_credentials.txt
 backend/config/localtunnel.log
+backend/config/user_config.json
+backend/config/*.tmp
 backend/.setup_done
 backend/err.json
 backend/error_log_utf8.txt

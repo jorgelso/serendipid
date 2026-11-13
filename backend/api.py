@@ -60,7 +60,9 @@ _load_env_file()
 from core.database import get_db
 from core.link_checker import validate_link
 from core.model_router import get_router
-from core.categories import CATEGORIES
+from core.categories import category_names
+from core.languages import language_names
+from core import app_config
 from core.importance import score_and_stamp_importance
 from core.rescan_plan import is_importance_only_gap
 from core import rag
@@ -1331,11 +1333,12 @@ async def get_all_categories(token: str = Depends(verify_token)):
         return {
             "success": True,
             "categories": categories,
-            # The full canonical taxonomy (core/categories.py), independent of
-            # which categories currently have posts — lets clients offer every
-            # valid label (e.g. in a category-editing dropdown) instead of
-            # only ones already in use.
-            "canonical": CATEGORIES,
+            # The full configured taxonomy (core/app_config.py), independent
+            # of which categories currently have posts — lets clients offer
+            # every valid label (e.g. in a category-editing dropdown) instead
+            # of only ones already in use.
+            "canonical": category_names(),
+            "languages": language_names(),
             "total": sum(c['count'] for c in categories)
         }
 
@@ -3802,7 +3805,7 @@ async def preview_instagram_export(req: InstagramExportPreviewRequest, token: st
     try:
         _validate_instagram_export_shapes(req.export_data, req.all_posts_data)
         preview = await asyncio.to_thread(_instagram_export_preview, req.export_data, req.all_posts_data)
-        return {"success": True, **preview}
+        return {"success": True, **preview, "default_priority_folder": app_config.priority_folder()}
     except HTTPException:
         raise
     except Exception as e:
@@ -4096,6 +4099,52 @@ class InstagramCredentials(BaseModel):
 def get_config_path(filename: str) -> Path:
     """Get path to config directory files."""
     return Path(__file__).parent / "config" / filename
+
+class ConfigImportRequest(BaseModel):
+    config: dict
+    # False: merge the given keys over the current user config.
+    # True: the given keys become the whole user config (omitted keys fall
+    # back to config/default_config.json).
+    replace: bool = False
+
+
+@app.get("/config")
+async def get_config(token: str = Depends(verify_token)):
+    """The effective configuration (defaults + config/user_config.json):
+    categories, languages, trusted authors/creators, excluded and sensitive
+    folders, priority folder. Same shape POST /config/import accepts, so it
+    doubles as the export."""
+    return app_config.export_config()
+
+
+@app.get("/config/export")
+async def export_config_file(token: str = Depends(verify_token)):
+    """Download the effective configuration as a JSON file."""
+    payload = json.dumps(app_config.export_config(), indent=2, ensure_ascii=False)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="superbrain-config.json"'},
+    )
+
+
+@app.get("/config/default")
+async def get_default_config(token: str = Depends(verify_token)):
+    """The shipped defaults (config/default_config.json), for "reset to
+    default" or as a starting template."""
+    return app_config.default_config()
+
+
+@app.post("/config/import")
+async def import_config(req: ConfigImportRequest, token: str = Depends(verify_token)):
+    """Validate and save a configuration to config/user_config.json, then
+    apply it immediately. Existing posts keep the categories/languages they
+    were analyzed with; re-analyze them to reclassify under a new taxonomy."""
+    try:
+        return {"success": True, "config": {"version": app_config.CONFIG_VERSION, **app_config.import_config(req.config, replace=req.replace)}}
+    except app_config.ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.get("/settings/ai-providers")
 async def get_ai_providers(token: str = Depends(verify_token)):

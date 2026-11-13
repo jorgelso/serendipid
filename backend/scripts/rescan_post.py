@@ -57,8 +57,8 @@ from core.importance import (
     score_and_stamp_importance,
 )
 from core.summary_parser import parse_summary, apply_music_override
-from core.categories import CATEGORY_PROMPT
-from core.languages import LANGUAGE_PROMPT
+from core.categories import category_prompt
+from core.languages import language_prompt
 from core.media_store import MEDIA_DIR, relocate_to_media_store
 from instagram.instagram_downloader import (
     download_instagram_content, extract_audio_from_video, RetryableDownloadError,
@@ -211,10 +211,10 @@ Apply the classification from above: for CONSISTENT or UNCLEAR, use the caption 
 [Music/song name if found, or "No background music" or "Voiceover only"]
 
 📂 CATEGORY:
-{CATEGORY_PROMPT}
+{category_prompt()}
 
 🌐 LANGUAGE:
-{LANGUAGE_PROMPT}
+{language_prompt()}
 
 Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
 
