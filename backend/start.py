@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║               SuperBrain — First-Time Setup & Launcher           ║
+║               Serendipid — First-Time Setup & Launcher           ║
 ║         Run this once to configure everything, then again        ║
 ║                    any time to start the server.                 ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -34,7 +34,7 @@ from pathlib import Path
 BASE_DIR    = Path(__file__).parent.resolve()
 VENV_DIR    = BASE_DIR / ".venv"
 API_KEYS    = BASE_DIR / "config" / ".api_keys"
-TOKEN_FILE  = BASE_DIR / "token.txt"
+from core.access_token import TOKEN_FILE  # noqa: E402
 SETUP_DONE  = BASE_DIR / ".setup_done"
 
 IS_WINDOWS  = platform.system() == "Windows"
@@ -61,25 +61,8 @@ def link(url: str, text: str | None = None) -> str:
     return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 def banner():
-    art = f"""{CYAN}{BOLD}
-  ███████╗██╗   ██╗██████╗ ███████╗██████╗
-  ██╔════╝██║   ██║██╔══██╗██╔════╝██╔══██╗
-  ███████╗██║   ██║██████╔╝█████╗  ██████╔╝
-  ╚════██║██║   ██║██╔═══╝ ██╔══╝  ██╔══██╗
-  ███████║╚██████╔╝██║     ███████╗██║  ██║
-  ╚══════╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝
-
-  ██████╗ ██████╗  █████╗ ██╗███╗   ██╗
-  ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║
-  ██████╔╝██████╔╝███████║██║██╔██╗ ██║
-  ██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║
-  ██████╔╝██║  ██║██║  ██║██║██║ ╚████║
-  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
-{RESET}"""
-    credit = (f"    {DIM}made with {RESET}{MAG}❤{RESET}{DIM}  by "
-              f"{link('https://github.com/sidinsearch', f'{BOLD}sidinsearch{RESET}{DIM}')}"
-              f"{RESET}\n")
-    print(art + credit)
+    print(f"\n  {BOLD}{CYAN}Serendipid{RESET}  {DIM}"
+          f"{link('https://github.com/jorgelso', 'github.com/jorgelso')}{RESET}\n")
 
 def h1(msg):  print(f"\n{BOLD}{CYAN}{'━'*64}{RESET}\n{BOLD}  {msg}{RESET}\n{BOLD}{CYAN}{'━'*64}{RESET}")
 def h2(msg):  print(f"\n{BOLD}{BLUE}  ▶  {msg}{RESET}")
@@ -340,7 +323,7 @@ def setup_api_keys():
     h1("Step 3 of 7 — AI Provider Keys")
 
     print(f"""
-  SuperBrain uses AI providers to analyse your saved content.
+  Serendipid uses AI providers to analyse your saved content.
   You need {BOLD}at least one{RESET} key — the router tries them in order and
   falls back automatically.
 
@@ -372,7 +355,7 @@ def setup_api_keys():
     openr    = _check_and_report("OpenRouter",  openr,  _validate_openrouter)
 
     if not any([gemini, groq_k, openr]):
-        warn("No AI keys entered. SuperBrain will still work but can only use")
+        warn("No AI keys entered. Serendipid will still work but can only use")
         warn("local Ollama models (configured in the next step).")
 
     # Instagram credentials
@@ -384,7 +367,7 @@ def setup_api_keys():
   The session is cached after first login so you won't be asked again.
 
   {DIM}Without credentials:{RESET}
-    SuperBrain can still save and analyse {BOLD}YouTube videos{RESET} and {BOLD}Websites{RESET}
+    Serendipid can still save and analyse {BOLD}YouTube videos{RESET} and {BOLD}Websites{RESET}
     without any Instagram account. However, Instagram posts will be limited:
     • Only {BOLD}public posts{RESET} that are accessible without login may work.
     • You {BOLD}cannot process multiple Instagram posts back-to-back{RESET} —
@@ -400,7 +383,7 @@ def setup_api_keys():
     # Write .api_keys
     API_KEYS.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# SuperBrain API Keys — DO NOT COMMIT THIS FILE\n",
+        "# Serendipid API Keys — DO NOT COMMIT THIS FILE\n",
         f"GEMINI_API_KEY={gemini}\n",
         f"GROQ_API_KEY={groq_k}\n",
         f"OPENROUTER_API_KEY={openr}\n",
@@ -430,7 +413,7 @@ def setup_ollama():
 
     print(f"""
   Ollama runs AI models {BOLD}locally on your machine{RESET} — no internet or API
-  key required. SuperBrain uses it as a last-resort fallback if all
+  key required. Serendipid uses it as a last-resort fallback if all
   cloud providers fail or run out of quota.
 
   Recommended model: {BOLD}{OLLAMA_MODEL}{RESET}  (~3 GB download, needs ~8 GB RAM)
@@ -573,7 +556,7 @@ def setup_whisper():
 
     print(f"""
   OpenAI Whisper transcribes audio and video {BOLD}entirely on your machine{RESET}.
-  SuperBrain uses it to extract speech from Instagram Reels, YouTube
+  Serendipid uses it to extract speech from Instagram Reels, YouTube
   videos, and any other saved media — no API key needed.
 
   Whisper requires {BOLD}ffmpeg{RESET} to be installed on your system.
@@ -694,7 +677,7 @@ def setup_remote_access():
     h1("Step 6 of 7 — Remote Access (ngrok / localtunnel)")
 
     print(f"""
-  The SuperBrain backend runs locally. Your phone needs to reach it over the internet.
+  The Serendipid backend runs locally. Your phone needs to reach it over the internet.
   We recommend {BOLD}ngrok{RESET} for a secure tunnel.
   If ngrok is not configured or fails, {BOLD}localtunnel{RESET} will be used as a fallback.
 
@@ -731,27 +714,24 @@ def setup_token_and_db():
     h1("Step 7 of 7 — Access Token & Database")
 
     # Token
-    if TOKEN_FILE.exists():
-        token = TOKEN_FILE.read_text(encoding='utf-8', errors='ignore').strip()
-        if token and len(token) == 8 and token.isalnum():
-            ok(f"Access Token already exists: {BOLD}{token}{RESET}")
-            if not ask_yn("Generate a new Access Token?", default=False):
-                return
-        elif token:
-            warn("Existing token uses old format. A new 8-character Access Token will be generated.")
-    else:
-        token = None
+    from core.access_token import TOKEN_LENGTH, generate_token, read_token, write_token
+    token = read_token()
+    if token:
+        ok(f"Access Token already exists: {BOLD}{token}{RESET}")
+        if not ask_yn("Generate a new Access Token?", default=False):
+            return
+    elif TOKEN_FILE.exists():
+        warn(f"Existing token uses an old format. A new {TOKEN_LENGTH}-character Access Token will be generated.")
 
-    alphabet = string.ascii_uppercase + string.digits
-    new_token = ''.join(secrets.choice(alphabet) for _ in range(8))
-    TOKEN_FILE.write_text(encoding='utf-8', errors='replace', data=new_token)
+    new_token = generate_token()
+    write_token(new_token)
     ok(f"Access Token saved: {BOLD}{GREEN}{new_token}{RESET}")
     nl()
-    print(f"  {YELLOW}Copy this token into the mobile app → Settings → Access Token.{RESET}")
+    print(f"  {YELLOW}Use this token as SERENDIPID_API_KEY in the web app and in the mobile app / extension settings.{RESET}")
 
     # DB is auto-created on first backend start; just let the user know
     nl()
-    info("The SQLite database (superbrain.db) will be created automatically")
+    info("The SQLite database (serendipid.db) will be created automatically")
     info("the first time the backend starts.")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1104,7 +1084,7 @@ def _display_connect_qr(url: str, token: str):
         
         # Center the title within the inner frame
         inner_width = padded_cols + 4
-        title = "Scan with SuperBrain App"
+        title = "Scan with Serendipid App"
         # If the width is too small, truncate it just in case, though QR is usually wider
         if len(title) > inner_width - 2:
             title = title[:inner_width - 2]
@@ -1177,7 +1157,7 @@ def _display_connect_qr(url: str, token: str):
 
 
 def launch_backend():
-    h1("Launching SuperBrain Backend")
+    h1("Launching Serendipid Backend")
 
     # Ensure upload endpoints won't crash FastAPI at import time.
     ensure_runtime_dependencies()
@@ -1191,7 +1171,7 @@ def launch_backend():
             warn(f"Port {PORT} is already in use (PID unknown).")
 
         nl()
-        print(f"  This is usually a previous SuperBrain server that wasn't stopped.")
+        print(f"  This is usually a previous Serendipid server that wasn't stopped.")
         print(f"  Options:")
         print(f"    {BOLD}1{RESET}  Kill the existing process and start fresh  {DIM}(recommended){RESET}")
         print(f"    {BOLD}2{RESET}  Exit — I'll stop it manually then re-run start.py")
@@ -1337,14 +1317,13 @@ def launch_backend():
       3. Done — auto-connected!
 
     {BOLD}Option B — Manual setup:{RESET}
-      1. Build / install the SuperBrain APK on your Android device.
-      2. Open the app  →  tap the ⚙ settings icon.
-      3. Set {BOLD}Server URL{RESET} to:
+      1. Open the app  →  Settings.
+      2. Set {BOLD}Server URL{RESET} to:
            · Same WiFi  →  http://{local_ip}:{PORT}
 {tunnel_hint}
            · Port fwd   →  http://<your-public-ip>:{PORT}
-      4. Set {BOLD}Access Token{RESET} to: {BOLD}{MAGENTA}{token}{RESET}
-      5. Tap {BOLD}Save{RESET}  →  Connected!
+      3. Set {BOLD}Access Token{RESET} to: {BOLD}{MAGENTA}{token}{RESET}
+      4. Tap {BOLD}Save{RESET}  →  Connected!
 
   {YELLOW}Data Management:{RESET}
     • {BOLD}Export:{RESET}   In app Settings  →  Data Import/Export  →  choose format (JSON/ZIP)
@@ -1366,7 +1345,7 @@ def launch_backend():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def launch_backend_status():
-    h1("SuperBrain Status")
+    h1("Serendipid Status")
     
     token = "UNKNOWN"
     if TOKEN_FILE.exists():
@@ -1388,7 +1367,7 @@ def launch_backend_status():
     if url == "NOT_FOUND":
         warn("Could not find a running ngrok URL. Is the server running?")
         nl()
-        print("  Wait 5 seconds, or run 'superbrain-server' to start the server.")
+        print("  Wait 5 seconds, or run 'python start.py' to start the server.")
         return
 
     _display_connect_qr(url, token)
@@ -1410,13 +1389,13 @@ def main():
     banner()
 
     # Exported before uvicorn starts so both it and its --reload child see it
-    # (core/sensitive.py reads SUPERBRAIN_SHOW_SENSITIVE).
+    # (core/sensitive.py reads SERENDIPID_SHOW_SENSITIVE).
     if "--show-sensitive" in sys.argv:
-        os.environ["SUPERBRAIN_SHOW_SENSITIVE"] = "1"
+        os.environ["SERENDIPID_SHOW_SENSITIVE"] = "1"
         print("  --show-sensitive: sensitive-folder posts will be visible to clients")
 
     # Same reasoning: exported so uvicorn and every main.py subprocess see it
-    # (core/model_router.py reads SUPERBRAIN_PREFERRED_PROVIDER).
+    # (core/model_router.py reads SERENDIPID_PREFERRED_PROVIDER).
     from core.model_router import preferred_provider_from_argv
     try:
         prefer = preferred_provider_from_argv(sys.argv)
@@ -1433,10 +1412,10 @@ def main():
 
     ngrok_mode = "--ngrok" in sys.argv
     if ngrok_mode:
-        h1("SuperBrain Ngrok Configuration")
+        h1("Serendipid Ngrok Configuration")
         setup_remote_access()
         nl()
-        ok("Ngrok configuration finished. Run 'superbrain-server' to start the backend.")
+        ok("Ngrok configuration finished. Run 'python start.py' to start the backend.")
         return
 
     reset_mode = "--reset" in sys.argv
@@ -1449,7 +1428,7 @@ def main():
         return
 
     print(f"""
-  Welcome to SuperBrain!  This wizard will guide you through:
+  Welcome to Serendipid!  This wizard will guide you through:
 
     1 · Create Python virtual environment
     2 · Install all required packages

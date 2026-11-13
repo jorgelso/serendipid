@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SQLite Database Manager for SuperBrain
+SQLite Database Manager for Serendipid
 Handles caching and retrieval of Instagram analysis results
 Self-hosted, zero-config, file-based database
 """
@@ -14,22 +14,32 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 
-from core.sensitive import SENSITIVE_COLLECTION_NAMES, is_excluded_folder, show_sensitive
+from core.sensitive import sensitive_collection_names, is_excluded_folder, show_sensitive
 
 # Database file path can be overridden for Docker deployments
-DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.parent / 'superbrain.db')))
+DB_PATH = Path(os.getenv("DATABASE_PATH", str(Path(__file__).resolve().parent.parent / 'serendipid.db')))
 
 # Shortcodes of every post in a sensitive Instagram folder (core/sensitive.py),
 # as a subquery — membership lives in collections.post_ids (a JSON array), so
 # this is computed live from that table on every query rather than stored on
 # the analyses row, and a folder import picks it up with no extra write.
-_SENSITIVE_NAMES_SQL = ", ".join("'" + n.replace("'", "''") + "'" for n in sorted(SENSITIVE_COLLECTION_NAMES))
-SENSITIVE_SHORTCODES_SQL = (
-    "SELECT j.value FROM collections c, "
-    "json_each(CASE WHEN json_valid(c.post_ids) THEN c.post_ids ELSE '[]' END) j "
-    f"WHERE lower(trim(c.name)) IN ({_SENSITIVE_NAMES_SQL})"
-)
-IS_SENSITIVE_COLUMN = f"(shortcode IN ({SENSITIVE_SHORTCODES_SQL})) AS is_sensitive"
+# Built per call from the configured list (core/app_config.py) so a config
+# import takes effect without a restart. Names are inlined as escaped SQL
+# string literals; SQLite accepts an empty IN () list.
+def _sensitive_names_sql() -> str:
+    return ", ".join("'" + n.replace("'", "''") + "'" for n in sorted(sensitive_collection_names()))
+
+
+def _sensitive_shortcodes_sql() -> str:
+    return (
+        "SELECT j.value FROM collections c, "
+        "json_each(CASE WHEN json_valid(c.post_ids) THEN c.post_ids ELSE '[]' END) j "
+        f"WHERE lower(trim(c.name)) IN ({_sensitive_names_sql()})"
+    )
+
+
+def _is_sensitive_column() -> str:
+    return f"(shortcode IN ({_sensitive_shortcodes_sql()})) AS is_sensitive"
 
 # Bump this whenever a change to the analysis pipeline is significant enough
 # that previously-saved posts are worth a human re-look (e.g. a prompt
@@ -374,7 +384,7 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
-        # Migration: should_revisit — a manual per-post flag (superbrain-web's
+        # Migration: should_revisit — a manual per-post flag (serendipid-web's
         # /boards pages) distinct from every AI-scored signal above. Overrides
         # the "already seen" (post_views-derived) white thumbnail overlay with
         # a pink one + label, so a post the user has viewed but wants to come
@@ -429,7 +439,7 @@ class Database:
         # instaloader into media/<shortcode>/info.txt), stored verbatim for
         # display under the AI summary. Empty for posts with no caption, non-
         # Instagram posts, or saved before this was tracked (backfilled via
-        # scripts/backfill_captions.py from each post's info.txt).
+        # scripts/migrations/backfill_captions.py from each post's info.txt).
         try:
             self._conn.execute("ALTER TABLE analyses ADD COLUMN caption TEXT DEFAULT ''")
             self._conn.commit()
@@ -444,7 +454,7 @@ class Database:
         # timestamp. Superseded by date_saved below, a real date sourced
         # from saved_posts.json (Instagram's flat "every saved post" export,
         # which does have a real per-post timestamp) — see
-        # scripts/backfill_date_saved.py and backend/CLAUDE.md's "Instagram
+        # scripts/migrations/backfill_date_saved.py and backend/CLAUDE.md's "Instagram
         # export import" section for the full story.
         try:
             self._conn.execute("ALTER TABLE analyses ADD COLUMN saved_order INTEGER DEFAULT NULL")
@@ -461,7 +471,7 @@ class Database:
         # wildly varying amount (a day to several months), which is the
         # signature of "whenever I happened to see and save this," not a
         # second copy of the same publish fact. Backfilled once for
-        # existing rows via scripts/backfill_date_saved.py; set for future
+        # existing rows via scripts/migrations/backfill_date_saved.py; set for future
         # imports by import_saved_instagram.py passing it straight into
         # POST /analyze (see AnalyzeRequest.date_saved), same pipeline path
         # as caption/hashtags. NULL for posts saved individually (not via
@@ -475,9 +485,9 @@ class Database:
             pass
 
         # import_jobs — tracks a background run of scripts/import_saved_instagram.py
-        # (or its _by_collection sibling) kicked off from superbrain-web's
+        # (or its _by_collection sibling) kicked off from serendipid-web's
         # /import page. Deliberately a separate table/prefix from
-        # /import & /import/file (which restore a SuperBrain-format /export
+        # /import & /import/file (which restore a Serendipid-format /export
         # backup, a completely different operation) — see api.py's
         # /instagram-export/* routes. A run can take hours (rate-limited,
         # one URL at a time), so it's spawned in a background thread and
@@ -605,7 +615,7 @@ class Database:
         self._conn.commit()
 
         # eloquence_overrides — append-only audit log of human corrections
-        # made from superbrain-web's /eloquent page ("Select" -> "Mark as not
+        # made from serendipid-web's /eloquent page ("Select" -> "Mark as not
         # eloquent"): every time a post the AI judge scored eloquent gets
         # manually flipped to not-eloquent, the AI's original rationale is
         # kept here (not overwritten) specifically so these can be reviewed
@@ -661,7 +671,7 @@ class Database:
 
         # Seed the "iPhone" collection if missing — same permanent,
         # never-deletable-by-convention pattern as Watch Later above. Target
-        # for shares that came in through superbrain-ios's Share Extension
+        # for shares that came in through serendipid-ios's Share Extension
         # offline queue (PendingShareStore/PendingShareSyncer): a post shared
         # straight from Instagram was never actually saved to a real
         # Instagram collection first, so there's no folder to assign it to
@@ -681,7 +691,7 @@ class Database:
             self._conn.commit()
 
         # Boards — user-curated groupings of posts created by hand from
-        # superbrain-web's /boards page. Deliberately a separate table from
+        # serendipid-web's /boards page. Deliberately a separate table from
         # `collections` above, not an extension of it: `collections` mirrors
         # Instagram's own saved-post folders (one row per imported folder,
         # auto-populated by scripts/import_saved_instagram(_by_collection).py)
@@ -760,10 +770,10 @@ class Database:
         self._conn.commit()
 
         # post_views — one row per qualifying view (video >=60% watched, non-video
-        # open >=20s — see superbrain-web's useQualifyingView hook). Repeat views
+        # open >=20s — see serendipid-web's useQualifyingView hook). Repeat views
         # across separate opens are NOT deduped: each open logs its own row, and
         # recency-weighted summation in the web recommendation engine
-        # (superbrain-web/src/lib/recommendations.ts) is what turns "viewed many
+        # (serendipid-web/src/lib/recommendations.ts) is what turns "viewed many
         # times, recently" into a stronger signal than "viewed once" while still
         # letting old views decay away individually.
         self._conn.executescript("""
@@ -811,7 +821,7 @@ class Database:
 
         # search_queries — one row per semantic-search query or chat question
         # *instance*, so the web app can build a rolling "interest vector"
-        # (superbrain-web/src/lib/recommendations.ts) without re-embedding.
+        # (serendipid-web/src/lib/recommendations.ts) without re-embedding.
         # source distinguishes GET /search/semantic from chat. embedding_id
         # points at the shared vector in `embeddings` above — repeating the
         # same query text adds another row here (another usage instance, with
@@ -925,7 +935,7 @@ class Database:
         """)
         self._conn.commit()
 
-        # Study guides — persisted on-demand synthesis docs (superbrain-web's
+        # Study guides — persisted on-demand synthesis docs (serendipid-web's
         # /study-guides), generated from a user-picked set of posts (a
         # selection, search result, or theme/cluster) via one LLM call over
         # their stored content — see core/study_guide.py. v1 only: dedup of
@@ -1005,18 +1015,18 @@ class Database:
             "ALTER TABLE study_guide_collections ADD COLUMN error TEXT",
             "ALTER TABLE study_guide_collections ADD COLUMN expected_guide_count INTEGER",
             # Retired on arrival — a machine-readable "what kind of thing is
-            # this" tag, meant to drive superbrain-web's /study-guides
+            # this" tag, meant to drive serendipid-web's /study-guides
             # corkboard coloring, turned out to be pure redundancy with
             # source_label (every writer that would set this also stamps a
             # label with a recognizable prefix — "Board: ...", "Search: ...",
             # etc. — so it never carried information the label didn't;
-            # superbrain-web parses that prefix directly instead, see
+            # serendipid-web parses that prefix directly instead, see
             # src/lib/studyGuideSource.ts). Column kept, never populated or
             # read anywhere (this codebase's migrations are additive-only,
             # same treatment as analyses.saved_order above).
             "ALTER TABLE study_guide_collections ADD COLUMN source_type TEXT",
             # Stamped by POST /study-guide-collections/{id}/opened, fired
-            # from superbrain-web's /study-guides/[id] page every time it's
+            # from serendipid-web's /study-guides/[id] page every time it's
             # actually opened (not on generation) — see reels_study_guide
             # below for why this lives on the collection.
             "ALTER TABLE study_guide_collections ADD COLUMN last_opened_at TEXT",
@@ -1034,7 +1044,7 @@ class Database:
         # sibling guides would overweight exactly the requests that needed
         # chunking) it was used to generate. This is a deliberately weaker,
         # separate signal from post_views for the Home recommendation engine
-        # (superbrain-web/src/lib/recommendations.ts): choosing a reel as
+        # (serendipid-web/src/lib/recommendations.ts): choosing a reel as
         # study-guide source material means you cared about its *topic*
         # enough to synthesize it, even if you never actually watched it
         # again through this UI — it must never be logged as a post_views
@@ -1188,7 +1198,7 @@ class Database:
         "post_date, likes, thumbnail, title, summary, tags, music, category, "
         "language, is_hidden, analysis_version, media_files, importance, "
         "enjoyment_rating, perceived_importance_rating, caption, date_saved, "
-        + IS_SENSITIVE_COLUMN
+        + _is_sensitive_column()
     )
 
     def _visible_sql(self):
@@ -1198,7 +1208,7 @@ class Database:
         core/sensitive.py). Every client-facing read path filters on this."""
         clause = "(is_hidden IS NULL OR is_hidden = 0)"
         if not show_sensitive():
-            clause += f" AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL})"
+            clause += f" AND shortcode NOT IN ({_sensitive_shortcodes_sql()})"
         return f"({clause})"
 
     def get_sensitive_shortcodes(self) -> set:
@@ -1208,7 +1218,7 @@ class Database:
         if not self.is_connected():
             return set()
         try:
-            return {r[0] for r in self._conn.execute(SENSITIVE_SHORTCODES_SQL).fetchall()}
+            return {r[0] for r in self._conn.execute(_sensitive_shortcodes_sql()).fetchall()}
         except Exception as e:
             print(f"[WARNING]  Error fetching sensitive shortcodes: {e}")
             return set()
@@ -1496,7 +1506,7 @@ class Database:
 
     def update_caption(self, shortcode, caption) -> bool:
         """Set just the raw Instagram caption for an existing post — used by
-        scripts/backfill_captions.py so it doesn't need to re-run analysis."""
+        scripts/migrations/backfill_captions.py so it doesn't need to re-run analysis."""
         if not self.is_connected():
             return False
         try:
@@ -1512,7 +1522,7 @@ class Database:
 
     def update_date_saved(self, shortcode, date_saved) -> bool:
         """Set the real Instagram save date for an existing post — used by
-        scripts/backfill_date_saved.py. (Live imports set this at analysis
+        scripts/migrations/backfill_date_saved.py. (Live imports set this at analysis
         time instead, via save_analysis()'s date_saved param — see
         AnalyzeRequest.date_saved in api.py.)"""
         if not self.is_connected():
@@ -1530,7 +1540,7 @@ class Database:
 
     # ------------------------------------------------------------------
     # import_jobs — background runs of scripts/import_saved_instagram.py
-    # (or _by_collection.py) kicked off from superbrain-web's /import page.
+    # (or _by_collection.py) kicked off from serendipid-web's /import page.
     # See api.py's /instagram-export/* routes.
     # ------------------------------------------------------------------
 
@@ -1942,7 +1952,7 @@ class Database:
         (its first few floats at full precision) in SQL, never the full ~30 KB
         vectors, so it's safe to compute on every /export. Changes whenever a
         post gains, loses (deleted/hidden) or changes its embedding — how
-        GET /embeddings and superbrain-web decide whether their cached vectors
+        GET /embeddings and serendipid-web decide whether their cached vectors
         are stale.
         """
         if not self.is_connected():
@@ -1963,7 +1973,7 @@ class Database:
 
     # ------------------------------------------------------------------
     # Personalization signals — view/search history + embedding cache
-    # (backs superbrain-web's Home recommendation engine, src/lib/recommendations.ts)
+    # (backs serendipid-web's Home recommendation engine, src/lib/recommendations.ts)
     # ------------------------------------------------------------------
 
     def log_post_view(self, shortcode, client_env="prod") -> bool:
@@ -1980,7 +1990,7 @@ class Database:
         try:
             self._conn.execute(
                 "INSERT INTO post_views (shortcode, viewed_at, client_env) "
-                f"SELECT ?, ?, ? WHERE ? NOT IN ({SENSITIVE_SHORTCODES_SQL})",
+                f"SELECT ?, ?, ? WHERE ? NOT IN ({_sensitive_shortcodes_sql()})",
                 (shortcode, datetime.utcnow().isoformat(), client_env, shortcode),
             )
             self._conn.commit()
@@ -2002,14 +2012,14 @@ class Database:
                 cur = self._conn.execute(
                     "SELECT shortcode, viewed_at FROM post_views "
                     "WHERE viewed_at >= ? AND client_env = 'prod' "
-                    f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) ORDER BY viewed_at DESC LIMIT ?",
+                    f"AND shortcode NOT IN ({_sensitive_shortcodes_sql()}) ORDER BY viewed_at DESC LIMIT ?",
                     (since, limit),
                 )
             else:
                 cur = self._conn.execute(
                     "SELECT shortcode, viewed_at FROM post_views "
                     "WHERE client_env = 'prod' "
-                    f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) ORDER BY viewed_at DESC LIMIT ?",
+                    f"AND shortcode NOT IN ({_sensitive_shortcodes_sql()}) ORDER BY viewed_at DESC LIMIT ?",
                     (limit,),
                 )
             return [{"shortcode": s, "viewed_at": v} for s, v in cur.fetchall()]
@@ -2123,7 +2133,7 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?", (limit,)
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?", (limit,)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
         except Exception as e:
@@ -2136,7 +2146,7 @@ class Database:
         sort: "recent" (default, analyzed_at DESC), "importance" (importance
         DESC, unscored posts last, analyzed_at DESC as tie-breaker),
         "date_saved" (real Instagram save date, oldest first — see
-        scripts/backfill_date_saved.py; posts without a known date_saved
+        scripts/migrations/backfill_date_saved.py; posts without a known date_saved
         continue by analyzed_at ASC, forming one continuous oldest-to-newest
         timeline), or "post_date" (the content's own publish date, oldest
         first, same analyzed_at ASC fallback for posts with no post_date —
@@ -2173,7 +2183,7 @@ class Database:
         sensitive-folder posts unless --show-sensitive (core/sensitive.py)."""
         if not self.is_connected():
             return []
-        sensitive_filter = "" if show_sensitive() else f"AND shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL}) "
+        sensitive_filter = "" if show_sensitive() else f"AND shortcode NOT IN ({_sensitive_shortcodes_sql()}) "
         try:
             cur = self._conn.cursor()
             cur.execute(
@@ -2225,7 +2235,7 @@ class Database:
             cur = self._conn.cursor()
             like_pattern = f'%"{category}"%'
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE (category = ? OR category LIKE ?) "
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE (category = ? OR category LIKE ?) "
                 f"AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
                 (category, like_pattern, limit)
             )
@@ -2252,7 +2262,7 @@ class Database:
             conditions = " OR ".join(["LOWER(tags) LIKE ?" for _ in tags])
             params = [f"%{t.lower()}%" for t in tags] + [limit]
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE ({conditions}) AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE ({conditions}) AND {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ?",
                 params
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -2280,7 +2290,7 @@ class Database:
             if show_sensitive():
                 cur.execute("SELECT COUNT(*) FROM collections")
             else:
-                cur.execute(f"SELECT COUNT(*) FROM collections WHERE lower(trim(name)) NOT IN ({_SENSITIVE_NAMES_SQL})")
+                cur.execute(f"SELECT COUNT(*) FROM collections WHERE lower(trim(name)) NOT IN ({_sensitive_names_sql()})")
             total_collections = cur.fetchone()[0]
 
             # category is stored as a JSON array (or a legacy plain string) —
@@ -2335,7 +2345,7 @@ class Database:
         try:
             cur = self._conn.cursor()
             cur.execute(
-                f"SELECT *, {IS_SENSITIVE_COLUMN} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
+                f"SELECT *, {_is_sensitive_column()} FROM analyses WHERE {self._visible_sql()} ORDER BY analyzed_at DESC LIMIT ? OFFSET ?",
                 (limit, offset)
             )
             return [self._row_to_dict(r) for r in cur.fetchall()]
@@ -3278,30 +3288,16 @@ class Database:
     # ------------------------------------------------------------------
 
     # Instagram usernames whose posts get auto-added to the "Trusted Authors"
-    # board the moment they're saved/re-saved — a deliberate, explicit
-    # exception to "the import scripts never read or write these tables"
-    # (see Boards vs collections in CLAUDE.md), asked for by the user rather
-    # than something boards normally do on their own. Applied from
-    # save_analysis() below, which every pipeline (immediate main.py,
-    # ANALYSIS_MODE=batch, the rescan pipeline, and bulk Instagram-export
-    # imports via scripts/import_saved_instagram.py's POST /analyze calls)
-    # writes through — so this is the one place it needs to live. Keyed
-    # lowercase; extend as the user confirms more trusted authors. Separate
-    # from core/importance.py's TRUSTED_CREATORS (importance-score floor) —
-    # same "explicit code-level allowlist" shape, different purpose, so kept
-    # as two independent lists rather than conflated.
+    # board the moment they're saved/re-saved — the one exception to "the
+    # import scripts never read or write these tables" (see Boards vs
+    # collections in backend/CLAUDE.md). Applied from save_analysis() below,
+    # which every pipeline writes through, so this is the one place it needs
+    # to live. The list is trusted_authors in config/user_config.json
+    # (core/app_config.py) — separate from trusted_creators (importance-score
+    # floor), different purpose.
     TRUSTED_AUTHORS_BOARD_ID = "trusted_authors"
     TRUSTED_AUTHORS_BOARD_NAME = "Trusted Authors"
     TRUSTED_AUTHORS_BOARD_ICON = "⭐"
-    TRUSTED_AUTHOR_USERNAMES = {
-        "linaseiche",
-        "erinmerylstudy",
-        "kylascan",
-        "zowi.fit.feliz",
-        "emmieedit",
-        "yourinvestmenthq",
-        "olamolam8",
-    }
 
     def _sync_trusted_authors_board(self, username, shortcode):
         """If `username` is a trusted author, make sure `shortcode` is on the
@@ -3312,7 +3308,9 @@ class Database:
         if not username:
             return
         try:
-            if username.strip().lower() not in self.TRUSTED_AUTHOR_USERNAMES:
+            from core import app_config
+
+            if username.strip().casefold() not in app_config.trusted_authors():
                 return
             if self.get_board(self.TRUSTED_AUTHORS_BOARD_ID) is None:
                 self.create_board(
@@ -3889,7 +3887,7 @@ class Database:
             return False
 
     # ------------------------------------------------------------------
-    # Study guide reel signals — feed superbrain-web's Home recommendation
+    # Study guide reel signals — feed serendipid-web's Home recommendation
     # engine as a weaker, separate-from-post_views "I cared enough to
     # synthesize this" signal. See the reels_study_guide CREATE TABLE
     # comment above for why this is keyed to a collection, not a guide.
@@ -3924,7 +3922,7 @@ class Database:
     def mark_study_guide_collection_opened(self, collection_id) -> bool:
         """Stamp last_opened_at on a collection the moment one of its guides
         is actually opened (POST /study-guide-collections/{id}/opened,
-        fired from superbrain-web's /study-guides/[id] page) — a fresh
+        fired from serendipid-web's /study-guides/[id] page) — a fresh
         'opened' event nudges this collection's reels_study_guide-derived
         recommendation signal back up, the same way rewatching a post does
         for a real view. Returns True if the collection existed."""
@@ -3954,7 +3952,7 @@ class Database:
                 "SELECT r.shortcode, r.collection_id, r.created_at, c.last_opened_at "
                 "FROM reels_study_guide r JOIN study_guide_collections c ON c.id = r.collection_id "
                 "WHERE r.client_env = 'prod' "
-                f"AND r.shortcode NOT IN ({SENSITIVE_SHORTCODES_SQL})"
+                f"AND r.shortcode NOT IN ({_sensitive_shortcodes_sql()})"
             )
             params = []
             if since:

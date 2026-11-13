@@ -160,7 +160,7 @@ def setup_instaloader_session(username: str, password: str) -> bool:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
-    _banner("SuperBrain — Instagram Session Setup")
+    _banner("Serendipid — Instagram Session Setup")
     print()
 
     try:
@@ -200,7 +200,7 @@ def main() -> None:
     print(f"  instaloader session : {il_status}")
     print()
     if il_ok:
-        print("  SuperBrain will now use the authenticated instaloader session")
+        print("  Serendipid will now use the authenticated instaloader session")
         print("  for all Instagram downloads.")
         print()
         print("  Re-run this script if Instagram ever asks you to log in again.")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouTube Video Analyzer for SuperBrain
+YouTube Video Analyzer for Serendipid
 =======================================
 Uses Gemini's native YouTube URL understanding — no download, no audio
 transcription, no frame extraction. One API call → full structured analysis.
@@ -18,14 +18,15 @@ from urllib.parse import urlparse, parse_qs
 # Ensure backend root is on sys.path (needed when imported as a subprocess/module)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.categories import CATEGORY_PROMPT
-from core.languages import LANGUAGE_PROMPT
+from core.categories import category_prompt
+from core.languages import language_prompt
 
 API_KEYS_FILE = Path(__file__).resolve().parent.parent / "config" / ".api_keys"
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
-YOUTUBE_PROMPT = f"""Watch this YouTube video carefully and write a structured analysis report.
+def youtube_prompt() -> str:
+    return f"""Watch this YouTube video carefully and write a structured analysis report.
 
 Generate the report in this EXACT format (use these exact emoji headers):
 
@@ -52,10 +53,10 @@ identifiable background music, write "No background music". If it's voiceover
 only, write "Voiceover only".]
 
 📂 CATEGORY:
-{CATEGORY_PROMPT}
+{category_prompt()}
 
 🌐 LANGUAGE:
-{LANGUAGE_PROMPT}
+{language_prompt()}
 
 Be specific, accurate, and extractive — pull out real names, numbers, and facts from the video."""
 
@@ -280,7 +281,7 @@ def analyze_youtube(youtube_url: str) -> dict:
                         file_uri=youtube_url,
                         mime_type="video/youtube",
                     ),
-                    YOUTUBE_PROMPT,
+                    youtube_prompt(),
                 ],
                 config=gtypes.GenerateContentConfig(
                     max_output_tokens=1500,

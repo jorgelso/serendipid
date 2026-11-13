@@ -12,10 +12,22 @@ __pycache__
 .pytest_cache
 .mypy_cache
 
-# Local runtime data
-superbrain.db
-superbrain.db-shm
-superbrain.db-wal
+# Local runtime data (never baked into the image; Docker keeps its own on volumes)
+serendipid.db
+serendipid.db-shm
+serendipid.db-wal
+serendipid.db.bak-*
+backups/
+media/
+data/
+uploads/
+cache/
+static/thumbnails/
+saved_collections.json
+saved_posts.json
+scripts/import_state.json
+.instaloader_session
+.instagram_session.json
 token.txt
 .setup_done
 .env
@@ -24,6 +36,11 @@ token.txt
 # Secrets/config generated at runtime
 .api_keys
 config/.api_keys
+config/user_config.json
+config/model_rankings.json
+config/openrouter_free_models.json
+config/ngrok_enabled.txt
+config/whisper_model.txt
 config/ngrok_token.txt
 config/test_credentials.txt
 config/localtunnel.log

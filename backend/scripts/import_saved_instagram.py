@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Bulk-import an Instagram "Download Your Information" JSON export into a local
-SuperBrain backend, preserving Instagram folder/collection structure as
-SuperBrain collections.
+Serendipid backend, preserving Instagram folder/collection structure as
+Serendipid collections.
 
 Primary format: Meta's generic recursive "label_values" export shape
 (confirmed against a real saved_collections.json export) — see
@@ -16,7 +16,7 @@ which of these three actually matched your file.
 Two input files, two different jobs:
   - <export.json-or-dir> (positional, required): the "by collection" export
     (saved_collections.json-shaped) — decides WHAT gets analyzed and which
-    SuperBrain collection(s) it's assigned to. Only posts saved in a
+    Serendipid collection(s) it's assigned to. Only posts saved in a
     collection are ever analyzed by this script.
   - --all-posts-file (optional): a flat "every saved post, ungrouped" export
     (saved_posts.json-shaped) — used ONLY to look up each analyzed post's
@@ -646,7 +646,7 @@ def analyze_url(
 def resolve_api_key(cli_value: Optional[str]) -> str:
     if cli_value:
         return cli_value
-    env_value = os.environ.get("SUPERBRAIN_API_KEY")
+    env_value = os.environ.get("SERENDIPID_API_KEY")
     if env_value:
         return env_value
     token_file = BACKEND_DIR / "token.txt"
@@ -655,7 +655,7 @@ def resolve_api_key(cli_value: Optional[str]) -> str:
         if token:
             return token
     print(
-        "[ERROR] No API key found. Pass --api-key, set SUPERBRAIN_API_KEY, "
+        "[ERROR] No API key found. Pass --api-key, set SERENDIPID_API_KEY, "
         f"or make sure {token_file} exists (created automatically the first "
         "time the backend server starts)."
     )
@@ -686,8 +686,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--no-reverse-collections", dest="reverse_collections", action="store_false",
         help="Process collections in the raw export order, newest-saved-first (the default).",
     )
-    p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"SuperBrain backend URL (default: {DEFAULT_SERVER_URL})")
-    p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SUPERBRAIN_API_KEY)")
+    p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"Serendipid backend URL (default: {DEFAULT_SERVER_URL})")
+    p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SERENDIPID_API_KEY)")
     p.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE, help=f"Resumable state file (default: {DEFAULT_STATE_FILE})")
     p.add_argument("--delay-min", type=float, default=DEFAULT_DELAY_MIN, help=f"Minimum delay between /analyze calls, seconds (default: {DEFAULT_DELAY_MIN})")
     p.add_argument("--delay-max", type=float, default=DEFAULT_DELAY_MAX, help=f"Maximum delay between /analyze calls, seconds (default: {DEFAULT_DELAY_MAX})")

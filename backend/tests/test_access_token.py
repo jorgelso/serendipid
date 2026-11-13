@@ -21,7 +21,7 @@ client = TestClient(app)
 def test_generate_api_token_shape():
     token = generate_api_token()
     assert isinstance(token, str)
-    assert len(token) == 8
+    assert len(token) == 32
     assert token.isalnum()
 
 
@@ -38,6 +38,21 @@ def test_queue_status_rejects_invalid_api_key():
 def test_queue_status_accepts_valid_api_key():
     response = client.get('/queue-status', headers={'X-API-Key': API_TOKEN})
     assert response.status_code == 200
+
+
+def test_query_string_token_is_rejected():
+    response = client.get(f'/queue-status?token={API_TOKEN}')
+    assert response.status_code == 401
+
+
+def test_media_requires_auth():
+    response = client.get('/media/anything.jpg')
+    assert response.status_code == 401
+
+
+def test_connect_info_refuses_forwarded_requests():
+    response = client.get('/connect-info', headers={'X-Forwarded-For': '203.0.113.5'})
+    assert response.status_code == 403
 
 
 def test_connect_endpoint_is_deprecated():

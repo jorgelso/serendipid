@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SuperBrain - Instagram Content Analyzer
+Serendipid - Instagram Content Analyzer
 Main orchestrator that coordinates all analysis scripts
 With parallel processing for better performance
 """
@@ -45,8 +45,6 @@ _load_env_file()
 # Import local modules
 from core.link_checker import validate_link
 from core.database import get_db
-from core.categories import CATEGORY_PROMPT
-from core.languages import LANGUAGE_PROMPT
 from core.importance import parse_importance, parse_importance_reason, apply_trusted_creator_boost, build_importance_prompt
 from core.media_store import relocate_to_media_store
 from core.summary_parser import (
@@ -459,7 +457,7 @@ def run_webpage_analysis(url: str, shortcode: str, db):
 def main():
     """Main orchestrator"""
 
-    print_header("🧠 SUPERBRAIN - Content Analyzer")
+    print_header("🧠 SERENDIPID - Content Analyzer")
     
     # Step 1: Get URL (+ optional --caption / --hashtags / --date-saved passed
     # by the API or the bulk importer, so source-provided context can inform

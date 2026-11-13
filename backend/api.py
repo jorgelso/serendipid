@@ -1,5 +1,5 @@
 """
-SuperBrain Instagram Content Analysis API
+Serendipid Instagram Content Analysis API
 Version: 1.03
 FastAPI REST endpoints for analyzing Instagram content with MongoDB caching
 With request queuing, live progress logging, and API key authentication
@@ -22,6 +22,7 @@ import zipfile
 import io
 from datetime import datetime
 import logging
+import ipaddress
 import secrets
 import string
 import threading
@@ -60,7 +61,9 @@ _load_env_file()
 from core.database import get_db
 from core.link_checker import validate_link
 from core.model_router import get_router
-from core.categories import CATEGORIES
+from core.categories import category_names
+from core.languages import language_names
+from core import app_config
 from core.importance import score_and_stamp_importance
 from core.rescan_plan import is_importance_only_gap
 from core import rag
@@ -76,17 +79,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def generate_api_token(length=8):
-    """Generate an 8-character alphanumeric Access Token."""
-    alphabet = string.ascii_uppercase + string.digits
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
+from core.access_token import (
+    generate_token as generate_api_token,
+    is_valid_token as is_valid_api_token_format,
+    read_token,
+    write_token,
+    mask as mask_token,
+    TOKEN_FILE,
+)
 
-
-def is_valid_api_token_format(token: str) -> bool:
-    """Validate token format: exactly 8 alphanumeric chars."""
-    return len(token) == 8 and token.isalnum()
-
-TOKEN_FILE = Path(__file__).parent / "token.txt"
 
 # The port this API process itself listens on when run directly
 # (`python api.py`, the uvicorn.run() call at the bottom of this file) — also
@@ -106,7 +107,7 @@ API_SELF_PORT = 5050
 # import scripts, the mobile app) sees any change at all.
 #
 # Values: "retry_scheduled" (main.py exit 2) | "batch_submitted" (exit 3).
-ANALYSIS_OUTCOME_HEADER = "X-Superbrain-Outcome"
+ANALYSIS_OUTCOME_HEADER = "X-Serendipid-Outcome"
 
 # Ceiling on how long a single Instagram analysis subprocess (main.py) is allowed
 # to run before being force-killed. Default raised from the original 600s (10 min)
@@ -129,35 +130,30 @@ ANALYSIS_MODE = os.getenv("ANALYSIS_MODE", "immediate").strip().lower()
 RESCAN_SUBPROCESS_TIMEOUT = int(os.getenv("RESCAN_SUBPROCESS_TIMEOUT", "1200"))
 
 def load_or_create_api_token():
-    """Load existing API token or create one if missing."""
+    """Load the API token from token.txt, or create one if it's missing or
+    in an outdated format. The token itself is never logged; run
+    utils/manage_token.py to view it."""
+    token = read_token()
+    if token:
+        logger.info("API token loaded from token.txt (%s)", mask_token(token))
+        return token
     if TOKEN_FILE.exists():
-        content = TOKEN_FILE.read_text(encoding="utf-8", errors="ignore").strip()
-        if content and is_valid_api_token_format(content):
-            logger.info("=" * 80)
-            logger.info(f"🔐 API Token: {content}")
-            logger.info("=" * 80)
-            return content
-
-        if content:
-            logger.warning("Existing token format is legacy/invalid. Regenerating 8-character Access Token.")
-
+        logger.warning("token.txt is not a valid %d-character token; generating a new one. "
+                       "Update every client with the new token (utils/manage_token.py shows it).", 32)
     token = generate_api_token()
-    TOKEN_FILE.write_text(token)
-
-    logger.info("=" * 80)
-    logger.info(f"🔐 API Token (NEW): {token}")
-    logger.info("=" * 80)
+    write_token(token)
+    logger.info("New API token written to token.txt (%s). View it with utils/manage_token.py.", mask_token(token))
     return token
 
 API_TOKEN = load_or_create_api_token()
 
 async def verify_token(request: Request, x_api_key: str = Header(None, description="Access Token for authentication")):
     """
-    Verify authentication using Access Token.
-    Can be passed in X-API-Key header or token query parameter.
+    Verify authentication using the access token in the X-API-Key header.
+    (Query-string tokens are not accepted: URLs end up in logs and history.)
     """
-    actual_token = x_api_key or request.query_params.get("token")
-    if actual_token != API_TOKEN:
+    actual_token = x_api_key or ""
+    if not secrets.compare_digest(actual_token.encode(), API_TOKEN.encode()):
         logger.warning("Invalid Access Token attempt from IP: %s", request.client.host if hasattr(request, 'client') and request.client else 'unknown')
         raise HTTPException(
             status_code=401,
@@ -167,7 +163,7 @@ async def verify_token(request: Request, x_api_key: str = Header(None, descripti
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="SuperBrain",
+    title="Serendipid",
     description="AI-powered Instagram content analysis with caching",
     version="1.03"
 )
@@ -224,14 +220,31 @@ _THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
 from core.media_store import MEDIA_DIR
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
-from fastapi.staticfiles import StaticFiles
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
-# Permanently-relocated post media (video/audio/thumbnail) — see
-# core/media_store.py. Same unauthenticated-static-file pattern as /static
-# above; not gated by the API token like the JSON endpoints are. Fine for a
-# server bound to localhost, but worth knowing if this ever gets tunneled
-# (e.g. ngrok) somewhere reachable by more than just you.
-app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+def _serve_file_under(root: Path, file_path: str) -> FileResponse:
+    """FileResponse for root/file_path, refusing anything that resolves
+    outside root. FileResponse handles Range requests (video seeking) and
+    ETag/Last-Modified."""
+    root_resolved = root.resolve()
+    target = (root_resolved / file_path).resolve()
+    if not target.is_relative_to(root_resolved) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(target, headers={"Cache-Control": "private, max-age=86400"})
+
+
+# Generated thumbnails and permanently-relocated post media (see
+# core/media_store.py). Both require the access token like every other data
+# route; the web app proxies them (serendipid-web/src/app/api/media,
+# .../backend-static) so browsers never need the token or direct access to
+# this server.
+@app.get("/static/{file_path:path}", include_in_schema=False)
+async def serve_static(file_path: str, token: str = Depends(verify_token)):
+    return _serve_file_under(_STATIC_DIR, file_path)
+
+
+@app.get("/media/{file_path:path}", include_in_schema=False)
+async def serve_media(file_path: str, token: str = Depends(verify_token)):
+    return _serve_file_under(MEDIA_DIR, file_path)
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -506,7 +519,7 @@ async def root():
     return {
         "backendId": backend_id,
 
-        "name": "SuperBrain Instagram Analyzer API",
+        "name": "Serendipid Instagram Analyzer API",
         "version": "1.03",
         "status": "operational",
         "authentication": "Required - Use Access Token with X-API-Key header",
@@ -1210,7 +1223,7 @@ async def get_recent_analyses(
       analyzed_at as tie-breaker — see core/importance.py
     - sort=date_saved: real Instagram save date (oldest first), then
       analyzed_at for posts outside the backfill — see
-      scripts/backfill_date_saved.py
+      scripts/migrations/backfill_date_saved.py
     - sort=post_date: the content's own publish date (oldest first), same
       analyzed_at fallback — a distinct axis from date_saved ("when was
       this posted" vs. "when did I save it")
@@ -1331,11 +1344,12 @@ async def get_all_categories(token: str = Depends(verify_token)):
         return {
             "success": True,
             "categories": categories,
-            # The full canonical taxonomy (core/categories.py), independent of
-            # which categories currently have posts — lets clients offer every
-            # valid label (e.g. in a category-editing dropdown) instead of
-            # only ones already in use.
-            "canonical": CATEGORIES,
+            # The full configured taxonomy (core/app_config.py), independent
+            # of which categories currently have posts — lets clients offer
+            # every valid label (e.g. in a category-editing dropdown) instead
+            # of only ones already in use.
+            "canonical": category_names(),
+            "languages": language_names(),
             "total": sum(c['count'] for c in categories)
         }
 
@@ -1630,12 +1644,12 @@ class StudyGuideCreate(BaseModel):
     shortcodes: List[str]
     # What this was generated from, freeform but with a recognizable prefix
     # ("Board: ...", "Search: ...", "Theme/Idea/Cluster: ...", "3D space
-    # selection") stamped by every superbrain-web caller — the only
+    # selection") stamped by every serendipid-web caller — the only
     # source-of-truth for "what kind of thing" a collection is (a separate
     # machine-readable source_type field was tried and removed: every
     # caller that would set it also sets this label with a parseable
     # prefix, so it never carried information the label didn't).
-    # superbrain-web's /study-guides corkboard parses this prefix to
+    # serendipid-web's /study-guides corkboard parses this prefix to
     # color-code each pile (src/lib/studyGuideSource.ts).
     source_label: Optional[str] = None
     # Optional semantic sub-groups (e.g. a theme's micro-clusters, each a
@@ -1686,7 +1700,7 @@ async def create_study_guide(
     """
     Kick off an on-demand study-guide "collection" distilling a user-picked
     set of posts (a selection, search result, or theme/cluster from
-    superbrain-web) into one or more markdown docs — see core/study_guide.py
+    serendipid-web) into one or more markdown docs — see core/study_guide.py
     for the full pipeline.
 
     Returns IMMEDIATELY with the (initially empty) collection — the actual
@@ -1738,7 +1752,7 @@ async def create_study_guide(
         # Choosing a post as study-guide source material is a real but
         # WEAKER interest signal than actually watching it — record it
         # separately (reels_study_guide), never into post_views, so the Home
-        # recommendation engine (superbrain-web/src/lib/recommendations.ts)
+        # recommendation engine (serendipid-web/src/lib/recommendations.ts)
         # can keep real qualifying views ranked above it. Best-effort and
         # must never block generation from starting.
         db.record_study_guide_reels(collection["id"], shortcodes, client_env=resolve_client_env(x_client_env))
@@ -1842,7 +1856,7 @@ async def get_study_guide_pdf(study_guide_id: int, token: str = Depends(verify_t
 async def get_study_guide_thumbnail(study_guide_id: int, token: str = Depends(verify_token)):
     """
     Rasterize the first page of a saved study guide's PDF as a PNG — used by
-    superbrain-web's collection view for a thumbnail grid. Rendered once per
+    serendipid-web's collection view for a thumbnail grid. Rendered once per
     guide content and then served from the on-disk cache (see
     core/study_guide_pdf.py's get_cached_study_guide_thumbnail).
 
@@ -1922,7 +1936,7 @@ async def delete_study_guide_collection(collection_id: int, token: str = Depends
 @app.post("/study-guide-collections/{collection_id}/opened")
 async def mark_study_guide_collection_opened(collection_id: int, token: str = Depends(verify_token)):
     """
-    Stamp this collection's last_opened_at — fired by superbrain-web's
+    Stamp this collection's last_opened_at — fired by serendipid-web's
     /study-guides/[id] page every time a guide within it is actually
     opened. Feeds the Home recommendation engine's reels_study_guide signal
     (see GET /study-guide-reel-history) alongside how long ago the
@@ -1963,23 +1977,69 @@ async def status():
     }
 
 
+# Headers a reverse proxy or tunnel (ngrok, Cloudflare, nginx) adds. A
+# request carrying any of them came from somewhere else even if the direct
+# peer is localhost, so /connect-info refuses it.
+_FORWARDING_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded", "cf-connecting-ip")
+
+
+def _host_is_ip_or_localhost(host_header: str) -> bool:
+    """The Host header's hostname is an IP literal or localhost. Blocks DNS
+    rebinding, where an attacker's domain is re-pointed at this machine and
+    the browser still sends the attacker's hostname."""
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        host = host[1:host.find("]")] if "]" in host else host
+    elif host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    if host == "localhost":
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_local_network_request(request: Request) -> bool:
+    """True only for a direct (unproxied) request from a loopback or private
+    (LAN) address, made by a native client rather than a web page. Browsers
+    always send Origin on cross-origin requests, so refusing it stops a page
+    on the same network from reading the token through the open CORS policy;
+    the Host check stops DNS rebinding."""
+    if any(h in request.headers for h in _FORWARDING_HEADERS):
+        return False
+    if "origin" in request.headers:
+        return False
+    if not _host_is_ip_or_localhost(request.headers.get("host", "")):
+        return False
+    host = request.client.host if request.client else ""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
 @app.get("/connect-info")
 async def connect_info(request: Request):
     """
-    Returns connection details for QR code scanning.
-    No auth required — used by the mobile app to auto-fill settings.
-    The URL is built from the request so it matches whatever address the client used.
+    Connection details (URL + access token) for QR-code pairing of the mobile
+    app. No auth, so it only answers direct requests from the local network
+    (loopback/private addresses, no proxy or tunnel headers); everything else
+    gets 403 and must be configured with the token by hand.
     """
-    # Build the base URL from the incoming request
-    scheme = request.headers.get('x-forwarded-proto', request.url.scheme)
-    host = request.headers.get('x-forwarded-host', request.headers.get('host', 'localhost:5050'))
-    base_url = f"{scheme}://{host}"
+    if not _is_local_network_request(request):
+        raise HTTPException(status_code=403, detail="Pairing is only available from the local network.")
 
+    base_url = f"{request.url.scheme}://{request.headers.get('host', f'localhost:{API_SELF_PORT}')}"
     return {
         "url": base_url,
         "token": API_TOKEN,
         "version": "2.0.0",
-        "name": "SuperBrain"
+        "name": "Serendipid"
     }
 
 
@@ -2218,7 +2278,7 @@ async def delete_collection(collection_id: str, token: str = Depends(verify_toke
 
 # ─────────────────────────────────────────────────────────────────
 # Boards endpoints — user-curated collections created from
-# superbrain-web's /boards page. See core/database.py's schema comment
+# serendipid-web's /boards page. See core/database.py's schema comment
 # above `boards`/`board_subcollections` for how this differs from the
 # Instagram-import-driven Collections above.
 # ─────────────────────────────────────────────────────────────────
@@ -2488,7 +2548,7 @@ async def check_batches(token: str = Depends(verify_token)):
     embedding batches, and finalizes items whose scoring batches are done
     into the `analyses` table. This is the only way (besides the automatic
     startup check) that batch-pending items make progress — there is no
-    periodic polling. Called by the "Check batches" button in superbrain-web.
+    periodic polling. Called by the "Check batches" button in serendipid-web.
     """
     try:
         from core.batch_processor import check_and_advance_batches
@@ -2880,7 +2940,7 @@ async def update_post(shortcode: str, updates: dict, token: str = Depends(verify
 
 
 # ----------------------------------------------------------------------
-# Personalization signals — feed superbrain-web's Home recommendation
+# Personalization signals — feed serendipid-web's Home recommendation
 # engine (src/lib/recommendations.ts). Deliberately NOT folded into
 # /export: that payload is cached wholesale by every client, and a view
 # log firing on every post open would invalidate/blow away the expensive
@@ -2894,7 +2954,7 @@ async def log_post_view(
     x_client_env: Optional[str] = Header(default=None, description="'dev' from a local `next dev` session; omitted/anything else counts as real usage")
 ):
     """Log a qualifying view (video >=60% watched, or non-video open >=20s —
-    see superbrain-web's useQualifyingView hook for what qualifies). The
+    see serendipid-web's useQualifyingView hook for what qualifies). The
     frontend fires this fire-and-forget, so failures here should never
     surface to the user — return success:false rather than raising where
     reasonable."""
@@ -3477,7 +3537,7 @@ async def export_data(
     - include_embeddings=false drops each post's `embedding` (~30 KB of JSON
       text per post, 90%+ of the payload) and adds a top-level
       `embeddings_fingerprint` instead; fetch the vectors from GET /embeddings.
-      superbrain-web does this — a full-library export with embeddings grew
+      serendipid-web does this — a full-library export with embeddings grew
       past V8's max string length. Defaults to true so backups stay complete
       for /import.
     """
@@ -3577,14 +3637,14 @@ async def export_data(
             # Write everything to the zip sequentially to save RAM
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 # The export_payload now has updated 'thumbnail' fields pointing locally
-                zip_file.writestr("superbrain_export.json", json.dumps(export_payload, default=str))
+                zip_file.writestr("serendipid_export.json", json.dumps(export_payload, default=str))
                 for res in downloaded_images:
                     if res:
                         path_in_zip, content = res
                         zip_file.writestr(path_in_zip, content)
                         
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"superbrain_export_{timestamp}.zip"
+            filename = f"serendipid_export_{timestamp}.zip"
             
             background_tasks.add_task(os.remove, zip_path)
             return FileResponse(zip_path, media_type="application/zip", filename=filename)
@@ -3597,10 +3657,10 @@ async def export_data(
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Instagram export import (superbrain-web's /import page)
+# Instagram export import (serendipid-web's /import page)
 #
 # Deliberately a distinct URL prefix from /import & /import/file below —
-# those restore a SuperBrain-format /export backup (ImportData/
+# those restore a Serendipid-format /export backup (ImportData/
 # _process_import_data), a completely different operation from ingesting a
 # fresh Instagram "Download Your Information" export and running it through
 # the full analysis pipeline over minutes/hours. Reuses
@@ -3658,7 +3718,7 @@ def _validate_instagram_export_shapes(export_data, all_posts_data) -> None:
     and produce a no-op-looking run). Shared by both POST
     /instagram-export/preview and POST /instagram-export/jobs so neither
     route can be reached with an unvalidated file — including a direct API
-    call that bypasses superbrain-web's own (also real, not just
+    call that bypasses serendipid-web's own (also real, not just
     client-side) checks in its Next.js route handlers.
     """
     if not _ig_import.looks_like_collections_export(export_data):
@@ -3793,7 +3853,7 @@ async def preview_instagram_export(req: InstagramExportPreviewRequest, token: st
     """
     Parse an uploaded Instagram "Download Your Information" export and
     return per-category post counts, without starting an import — lets
-    superbrain-web's /import page show a sanity check (and populate the
+    serendipid-web's /import page show a sanity check (and populate the
     priority-folder dropdown for by-collection mode) before committing to a
     run that can take hours.
 
@@ -3802,7 +3862,7 @@ async def preview_instagram_export(req: InstagramExportPreviewRequest, token: st
     try:
         _validate_instagram_export_shapes(req.export_data, req.all_posts_data)
         preview = await asyncio.to_thread(_instagram_export_preview, req.export_data, req.all_posts_data)
-        return {"success": True, **preview}
+        return {"success": True, **preview, "default_priority_folder": app_config.priority_folder()}
     except HTTPException:
         raise
     except Exception as e:
@@ -3933,14 +3993,14 @@ async def import_data_file(
         if file.filename.endswith('.zip') or file.content_type == 'application/zip' or content.startswith(b'PK'):
             try:
                 with zipfile.ZipFile(io.BytesIO(content)) as z:
-                    # Look for superbrain_export.json or any json file
+                    # Look for serendipid_export.json or any json file
                     json_files = [name for name in z.namelist() if name.endswith('.json')]
                     
                     if not json_files:
                         raise HTTPException(status_code=400, detail="No JSON file found in the ZIP archive")
                     
-                    # Prefer superbrain_export.json if it exists
-                    target_file = "superbrain_export.json" if "superbrain_export.json" in json_files else json_files[0]
+                    # Prefer serendipid_export.json if it exists
+                    target_file = "serendipid_export.json" if "serendipid_export.json" in json_files else json_files[0]
                     
                     with z.open(target_file) as f:
                         data = json.load(f)
@@ -4096,6 +4156,52 @@ class InstagramCredentials(BaseModel):
 def get_config_path(filename: str) -> Path:
     """Get path to config directory files."""
     return Path(__file__).parent / "config" / filename
+
+class ConfigImportRequest(BaseModel):
+    config: dict
+    # False: merge the given keys over the current user config.
+    # True: the given keys become the whole user config (omitted keys fall
+    # back to core/default_config.json).
+    replace: bool = False
+
+
+@app.get("/config")
+async def get_config(token: str = Depends(verify_token)):
+    """The effective configuration (defaults + config/user_config.json):
+    categories, languages, trusted authors/creators, excluded and sensitive
+    folders, priority folder. Same shape POST /config/import accepts, so it
+    doubles as the export."""
+    return app_config.export_config()
+
+
+@app.get("/config/export")
+async def export_config_file(token: str = Depends(verify_token)):
+    """Download the effective configuration as a JSON file."""
+    payload = json.dumps(app_config.export_config(), indent=2, ensure_ascii=False)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="serendipid-config.json"'},
+    )
+
+
+@app.get("/config/default")
+async def get_default_config(token: str = Depends(verify_token)):
+    """The shipped defaults (core/default_config.json), for "reset to
+    default" or as a starting template."""
+    return app_config.default_config()
+
+
+@app.post("/config/import")
+async def import_config(req: ConfigImportRequest, token: str = Depends(verify_token)):
+    """Validate and save a configuration to config/user_config.json, then
+    apply it immediately. Existing posts keep the categories/languages they
+    were analyzed with; re-analyze them to reclassify under a new taxonomy."""
+    try:
+        return {"success": True, "config": {"version": app_config.CONFIG_VERSION, **app_config.import_config(req.config, replace=req.replace)}}
+    except app_config.ConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.get("/settings/ai-providers")
 async def get_ai_providers(token: str = Depends(verify_token)):
@@ -4360,7 +4466,7 @@ if __name__ == "__main__":
             print(f"⭐ --prefer: {prefer} models will be tried first")
     except ValueError as e:
         sys.exit(str(e))
-    print("🚀 Starting SuperBrain API...")
+    print("🚀 Starting Serendipid API...")
     print(f"📖 API Docs: http://localhost:{API_SELF_PORT}/docs")
     print(f"🔍 Interactive: http://localhost:{API_SELF_PORT}/redoc")
     uvicorn.run("api:app", host="0.0.0.0", port=API_SELF_PORT, reload=False)

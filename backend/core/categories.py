@@ -1,60 +1,34 @@
 #!/usr/bin/env python3
 """
-Canonical content categories for the SuperBrain analysis pipeline.
+Canonical content categories for the Serendipid analysis pipeline.
 
 A single post can genuinely belong to more than one category (a meme built
-around a philosophy quote is both "humor & memes" and "personal reflection &
-philosophy"). Every analyzer (Instagram, YouTube, web page) pulls its
-CATEGORY prompt text from CATEGORY_PROMPT and validates model output through
+around a philosophy quote is both humor and philosophy). Every analyzer (Instagram, YouTube, web page) pulls its
+CATEGORY prompt text from category_prompt() and validates model output through
 parse_categories() so results stay consistent across pipelines instead of
 each prompt drifting its own list over time.
+
+The list itself is user-configurable (see core/app_config.py).
 """
 
 import re
 
-CATEGORIES = [
-    "product",
-    "places",
-    "outdoors & adventure",
-    "fitness",
-    "food",
-    "book",
-    "film",
-    "tv shows",
-    "event",
-    "software & tech",
-    "learning & study techniques",
-    "language learning",
-    "psychology & mindset",
-    "personal reflection & philosophy",
-    "science & research",
-    "religion & spirituality",
-    "politics & society",
-    "art, design & photography",
-    "music",
-    "humor & memes",
-    "surveillance, psyops & government conspiracy",
-    "lifestyle & clean living",
-    "ai ethics & tech skepticism",
-    "environment & sustainability",
-    "fashion & style",
-    "beauty & skincare",
-    "money & finance",
-    "home & interior design",
-    "relationships & dating",
-    "pets & animals",
-    "career & productivity",
-    "other",
-]
+from core import app_config
 
-_CATEGORY_BY_LOWER = {c.lower(): c for c in CATEGORIES}
 
-CATEGORY_PROMPT = f"""[List 1-3 categories that genuinely fit this content, separated by commas.
+def category_names() -> list:
+    """The configured category labels (core/default_config.json, overridden
+    by config/user_config.json; see core/app_config.py)."""
+    return app_config.category_names()
+
+
+def category_prompt() -> str:
+    return f"""[List 1-3 categories that genuinely fit this content, separated by commas.
 A post can span more than one category — e.g. a meme built around a philosophy
-quote is both "humor & memes" and "personal reflection & philosophy". Do not
+quote can fit both a humor category and a philosophy category. Do not
 force a fit: only list a category if the content is actually about it. Choose
 only from this list (use these exact labels):
-{', '.join(CATEGORIES)}
+{', '.join(category_names())}
 Use "other" only when truly nothing above applies — it should be rare, never a
 default pick because nothing seemed like an exact match.]"""
 
@@ -79,10 +53,12 @@ def parse_categories(raw: str) -> list:
     """
     if not raw:
         return []
+    names = category_names()
+    by_lower = {c.lower(): c for c in names}
     lower = raw.lower()
     found = []  # (position, canonical_label)
-    for label in sorted(CATEGORIES, key=len, reverse=True):
-        canonical = _CATEGORY_BY_LOWER[label.lower()]
+    for label in sorted(names, key=len, reverse=True):
+        canonical = by_lower[label.lower()]
         if canonical in (c for _, c in found):
             continue
         m = re.search(r'\b' + re.escape(label.lower()) + r'\b', lower)
@@ -98,50 +74,16 @@ def parse_categories(raw: str) -> list:
 
 # Lightweight keyword fallback — only used when the model's CATEGORY field is
 # missing/unparseable (e.g. malformed output), never to override a real
-# multi-category answer the model already gave.
-_KEYWORD_CATEGORIES = {
-    "product": ["camera", "device", "gadget", "phone", "laptop", "unbox", "dji", "osmo", "action cam", "review"],
-    "places": ["travel", "destination", "village", "city", "itinerary", "landmark"],
-    "outdoors & adventure": ["hike", "hiking", "trek", "camping", "trail", "mountain", "backpacking", "climb"],
-    "fitness": ["workout", "exercise", "gym", "calisthenics", "training", "muscle", "cardio", "yoga"],
-    "food": ["recipe", "cooking", "ingredients", "restaurant", "cuisine", "dish", "bake"],
-    "book": ["book", "novel", "author", "literature", "chapter"],
-    "film": ["movie", "cinema", "actor", "director", "trailer"],
-    "tv shows": ["series", "episode", "season", "netflix", "tv show"],
-    "event": ["concert", "festival", "conference", "meetup"],
-    "software & tech": ["app", "software", "code", "programming", "api", "python", "javascript", "ai tool"],
-    "learning & study techniques": ["study", "memorization", "mnemonic", "study hack", "exam"],
-    "language learning": ["language learning", "vocabulary", "grammar", "translation"],
-    "psychology & mindset": ["mindset", "cognitive", "mental health", "psychology", "resilience"],
-    "personal reflection & philosophy": ["philosophy", "existential", "reflection", "life lesson"],
-    "science & research": ["study finds", "research", "researchers", "peer-reviewed", "scientists"],
-    "religion & spirituality": ["prayer", "bible", "faith", "god", "spiritual"],
-    "politics & society": ["government", "election", "policy", "protest", "society"],
-    "art, design & photography": ["photography", "camera settings", "design", "illustration", "painting"],
-    "music": ["song release", "album", "musician", "concert tour"],
-    "humor & memes": ["meme", "joke", "funny", "relatable"],
-    "surveillance, psyops & government conspiracy": ["surveillance", "psyop", "psyops", "cia", "deep state", "mass surveillance", "propaganda", "cover-up", "whistleblower"],
-    "lifestyle & clean living": ["detox", "microplastic", "toxin", "clean eating", "non-toxic", "pantry swap", "endocrine disruptor"],
-    "ai ethics & tech skepticism": ["ai risk", "artificial intelligence", "ai ethics", "against ai", "ai backlash", "big tech"],
-    "environment & sustainability": ["climate", "sustainability", "pollution", "eco-friendly", "environment", "carbon footprint", "renewable"],
-    "fashion & style": ["outfit", "ootd", "fashion", "style tips", "wardrobe", "streetwear", "thrift", "capsule wardrobe"],
-    "beauty & skincare": ["skincare", "makeup", "beauty routine", "grwm", "moisturizer", "serum", "cosmetics"],
-    "money & finance": ["budgeting", "investing", "side hustle", "personal finance", "stock market", "passive income", "net worth", "saving money"],
-    "home & interior design": ["home decor", "interior design", "home organization", "diy home", "apartment tour", "furniture", "room makeover"],
-    "relationships & dating": ["dating", "relationship advice", "breakup", "situationship", "boyfriend", "girlfriend", "marriage advice"],
-    "pets & animals": ["dog", "cat", "puppy", "kitten", "pet care", "animal rescue", "vet"],
-    "career & productivity": ["productivity", "career advice", "job interview", "resume", "time management", "work-life balance", "workplace"],
-}
-
-
+# multi-category answer the model already gave. Keywords come from each
+# category's "keywords" list in the config.
 def keyword_fallback_categories(text: str) -> list:
     """Score keyword hits against *text* and return categories with at least
     one match, ranked by hit count (used only when the model gave no usable
     CATEGORY field at all)."""
     low = text.lower()
     scored = []
-    for category, keywords in _KEYWORD_CATEGORIES.items():
-        score = sum(1 for kw in keywords if kw in low)
+    for category, keywords in app_config.category_keywords().items():
+        score = sum(1 for kw in keywords if kw.lower() in low)
         if score > 0:
             scored.append((score, category))
     scored.sort(key=lambda x: -x[0])

@@ -26,7 +26,7 @@ def get_database_stats():
     """Get comprehensive database statistics"""
 
     print("=" * 80)
-    print("📊 SUPERBRAIN DATABASE STATISTICS (SQLite)")
+    print("📊 SERENDIPID DATABASE STATISTICS (SQLite)")
     print("=" * 80)
     print()
 

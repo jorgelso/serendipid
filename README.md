@@ -1,638 +1,231 @@
-<div align="center">
+# Serendipid
 
-# 🧠 SuperBrain
+Serendipid is a self-hosted archive for the things you save online. It is built mainly for Instagram reels: you import your saved posts, and a backend running on your own machine downloads each one, transcribes it, looks at the frames, identifies the music, and writes a summary, tags, categories and an importance score. Everything ends up in a local SQLite database that you can browse, search by meaning, chat with, and turn into study guides.
 
-### Save anything. Understand everything. Forget nothing.
+YouTube videos and regular web pages are supported too, through the same pipeline.
 
-A self-hosted AI-powered second brain for Android — save Instagram posts, YouTube videos, and web pages directly from the share sheet, have them automatically analysed by AI, and rediscover them with intelligent search, collections, and smart notifications.
+There is no hosted service and no account to create. You run the backend, you bring your own AI provider keys, and your data stays on your disk.
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![React Native](https://img.shields.io/badge/React_Native-0.81-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
-[![Expo SDK 54](https://img.shields.io/badge/Expo-SDK_54-000020?logo=expo&logoColor=white)](https://expo.dev)
-[![npm package](https://img.shields.io/npm/v/superbrain-server?label=npm%20package)](https://www.npmjs.com/package/superbrain-server)
+## What it does
 
-<p align="center">
-  <a href="https://www.producthunt.com/products/superbrain-ai-powered-second-brain?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-superbrain" target="_blank" rel="noopener noreferrer">
-    <img 
-      alt="SuperBrain on Product Hunt"
-      src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1127472&theme=light"
-      height="40"
-    />
-  </a>
-</p>
+- **Analyzes every saved post**: visual analysis of video frames, audio transcription, on-screen text, background music identification, then a combined summary with title, tags, categories, language and a 1 to 5 importance score.
+- **Semantic search and chat**: posts are embedded, so you can search by meaning and ask questions answered from your own library.
+- **Browse and organize**: filter by category, language and Instagram collection; build your own boards; see your library as clusters of themes or as a 3D map.
+- **Study guides**: pick a board, a search result or a cluster and get a single distilled document (rendered as PDF) instead of rewatching dozens of reels.
+- **Imports from Instagram's data export**, with resumable bulk import, retry handling for posts Instagram refuses to serve, and manual upload as a last resort.
+- **Configurable taxonomy**: categories, languages and a few personal lists live in a JSON config file you can export and import (see [Configuration](docs/CONFIGURATION.md)).
 
-[![Download APK](https://img.shields.io/badge/Download%20APK-2ea44f?style=for-the-badge&logo=android&logoColor=white)](https://github.com/sidinsearch/superbrain/releases/latest/download/superbrain.apk)
-[![Report Bug](https://img.shields.io/badge/Report%20Bug-d73a4a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=bug)
-[![Request Feature](https://img.shields.io/badge/Request%20Feature-7057ff?style=for-the-badge&logo=github&logoColor=white)](https://github.com/sidinsearch/superbrain/issues/new?labels=enhancement)
+## How it fits together
 
-</div>
-
----
-
-## 📱 App Screenshots
-
-<div align="center">
-<table>
-  <tr>
-    <td><img src="superbrain-app/assets/mockups/1.png" width="220"/></td>
-    <td><img src="superbrain-app/assets/mockups/2.png" width="220"/></td>
-    <td><img src="superbrain-app/assets/mockups/3.png" width="220"/></td>
-  </tr>
-  <tr>
-    <td><img src="superbrain-app/assets/mockups/4.png" width="220"/></td>
-    <td><img src="superbrain-app/assets/mockups/5.png" width="220"/></td>
-    <td><img src="superbrain-app/assets/mockups/6.png" width="220"/></td>
-  </tr>
-  <tr>
-    <td><img src="superbrain-app/assets/mockups/7.png" width="220"/></td>
-    <td><img src="superbrain-app/assets/mockups/8.png" width="220"/></td>
-    <td><img src="superbrain-app/assets/mockups/9.png" width="220"/></td>
-  </tr>
-</table>
-</div>
-
----
-
-## Table of Contents
-
-- [The Problem](#the-problem)
-- [The Solution](#the-solution)
-- [Features](#features)
-- [Architecture](#architecture)
-- [AI Model Router](#ai-model-router)
-- [Getting Started](#getting-started)
-- [Packages](#packages)
-- [Instagram Credentials](#instagram-credentials)
-- [Installing the Android App](#installing-the-android-app)
-- [Release Process](#release-process)
-- [Hosting Options](#hosting-options)
-- [Notifications](#notifications)
-- [API Reference](#api-reference)
-- [Tech Stack](#tech-stack)
-- [Contributing](#contributing)
-- [License](#license)
-
----
-
-## The Problem
-
-We all save content constantly — Instagram posts, YouTube videos, Reddit threads, articles, recipes — but every platform buries it in its own silo:
-
-- **Instagram Saved** is a graveyard. No search, no categories, no reminders. You save hundreds of posts and never look at them again.
-- **YouTube Watch Later** piles up endlessly with no way to know what each video was about without rewatching it.
-- **Browser bookmarks** are a mess — unsorted folders full of dead links and forgotten context.
-- **Screenshots** fill your gallery with no searchable text.
-
-You spend time saving things you'll never find again. You forget **what** you saved, **why** you saved it, and **where** you saved it.
-
-## The Solution
-
-**SuperBrain** is a self-hosted Android app + Python backend that acts as your **personal AI-powered content archive**. Share any URL from any app — the backend analyses it with AI in seconds and gives you:
-
-- A clean **title** and **summary** so you instantly know what it's about
-- Auto-assigned **category** and **tags** for filtering at a glance
-- **Background music identification** from Instagram reels (via Shazam)
-- **Audio transcription** from videos (Groq Whisper API + local Whisper)
-- Smart **Watch Later reminders** that actually bring you back to your content
-
-Everything is stored in a local SQLite database **you own** — no cloud subscriptions, no data harvesting, no vendor lock-in.
-
----
-
-## Features
-
-### ✨ Content Analysis
-
-| Feature | Description |
+| Folder | What it is |
 |---|---|
-| **Universal share target** | Works with any app that shares URLs — Instagram, YouTube, Chrome, Reddit, etc. |
-| **Multi-provider AI** | Automatic fallback across Groq, Gemini, OpenRouter, and Ollama |
-| **Smart model router** | EMA-ranked, auto-healing, self-optimising — always picks the fastest available model |
-| **Music identification** | Shazam-powered background music detection from Instagram reels |
-| **Audio transcription** | Groq Whisper API (cloud) with local OpenAI Whisper as offline fallback |
-| **Native YouTube analysis** | Gemini watches the video directly — no download needed |
-| **Web scraping** | Multi-strategy extraction (newspaper4k, trafilatura, Wayback Machine) |
+| `backend/` | Python / FastAPI server. Runs the analysis pipeline and owns the SQLite database. Everything else talks to it over HTTP. |
+| `serendipid-web/` | Next.js web app for browsing, searching, chatting, study guides and running imports. Password protected. |
+| `serendipid-ios/` | Native iOS app with a share extension. Currently behind the backend (see [TODO](TODO.md)). |
+| `serendipid-extension/` | Chrome extension that imports Instagram saved posts and collections straight from the browser. |
+| `docs/` | Architecture, configuration and deployment notes. |
 
-### 📂 Organisation & Discovery
+The backend and the web app do not need to run on the same machine. The web app only needs to reach the backend's URL; browsers only ever talk to the web app.
 
-| Feature | Description |
+## AI providers
+
+The backend routes every model call through a fallback chain, so a rate limit or an outage on one provider moves on to the next. Faster providers are promoted over time. You only need keys for the providers you want to use.
+
+| Task | Order |
 |---|---|
-| **Custom collections** | Watch Later, Recipes, Work, or any category you create |
-| **Full-text search** | Search across titles, summaries, tags, and transcriptions |
-| **Smart filtering** | Filter by category, tags, or collection |
-| **Watch Later reminders** | Daily notifications with unique time slots per post (8 AM – 9:30 PM) |
-| **Urgent alerts** | Morning notifications for deadline-sensitive content (exams, hackathons) |
-| **Offline-first** | Queues saves locally and syncs automatically when reconnected |
-| **Retry recovery** | Failed analyses can be retried directly from the Library |
+| Text analysis | OpenAI → Anthropic → Groq → Gemini → OpenRouter (curated free models) → OpenRouter (discovered free models) → Ollama |
+| Vision | OpenAI → Anthropic → Gemini → Groq → OpenRouter → Ollama |
+| Transcription | Groq Whisper API → local Whisper |
+| YouTube | Gemini (native video URL understanding) |
 
----
+OpenAI and Anthropic are only tried when their keys are set. Without them, analysis runs on the free tiers of Groq, Gemini and OpenRouter, with local Ollama as a last resort.
 
-## Architecture
+**Some features require an OpenAI key.** Study guides, importance scoring, embeddings (and therefore semantic search, related posts and chat retrieval), eloquence scoring and `ANALYSIS_MODE=batch` currently call OpenAI directly with no fallback. Analysis itself works without it. Removing this requirement is on the [TODO list](TODO.md).
 
-```
-superbrain/
-├── backend/
-│   ├── start.py                  # Interactive setup wizard & server launcher
-│   ├── reset.py                  # Reset / clean utility (selective wipe)
-│   ├── api.py                    # FastAPI REST API (18 endpoints) + queue worker
-│   ├── main.py                   # Analysis orchestrator (parallel processing)
-│   ├── core/
-│   │   ├── model_router.py       # Multi-provider AI router with EMA ranking
-│   │   ├── database.py           # SQLite (WAL mode) — posts, queue, collections
-│   │   ├── link_checker.py       # URL validator (Instagram / YouTube / web)
-│   │   └── category_manager.py   # Category normalisation & deduplication
-│   ├── analyzers/
-│   │   ├── visual_analyze.py     # Vision analysis (frame extraction + AI)
-│   │   ├── audio_transcribe.py   # Groq Whisper → local Whisper fallback
-│   │   ├── music_identifier.py   # Shazamio multi-segment recognition
-│   │   ├── text_analyzer.py      # Caption / metadata AI analysis
-│   │   ├── caption.py            # Instagram caption extractor
-│   │   ├── youtube_analyzer.py   # Gemini native YouTube understanding
-│   │   └── webpage_analyzer.py   # Multi-strategy web scraper + AI summary
-│   ├── instagram/
-│   │   ├── instagram_downloader.py  # Instaloader engine (auth/anonymous)
-│   │   └── instagram_login.py      # One-time session setup with 2FA
-│   ├── utils/
-│   │   ├── db_stats.py           # Database statistics
-│   │   └── manage_token.py       # API token management
-│   ├── config/
-│   │   ├── .api_keys.example     # Template for API keys
-│   │   ├── openrouter_free_models.json
-│   │   └── model_rankings.json   # Persisted provider performance data
-│   ├── tests/
-│   └── requirements.txt
-│
-└── superbrain-app/               # React Native (Expo SDK 54)
-    ├── App.tsx                   # Navigation + notification handlers
-    ├── src/
-    │   ├── screens/
-    │   │   ├── HomeScreen.tsx          # Feed with search, filters, categories
-    │   │   ├── LibraryScreen.tsx       # Collections + failed analyses
-    │   │   ├── PostDetailScreen.tsx    # Full post view (edit, re-analyse, delete)
-    │   │   ├── CollectionDetailScreen.tsx
-    │   │   ├── SettingsScreen.tsx      # Server URL + token configuration
-    │   │   ├── ShareHandlerScreen.tsx  # Receives shared URLs from other apps
-    │   │   ├── FailedAnalysisScreen.tsx
-    │   │   └── SplashScreen.tsx
-    │   ├── services/
-    │   │   ├── api.ts                  # Axios client + offline queue & retry
-    │   │   ├── postsCache.ts           # AsyncStorage cache + pending mutations
-    │   │   ├── collections.ts          # Collection CRUD + offline sync
-    │   │   └── notificationService.ts  # Watch Later scheduling + channels
-    │   ├── components/
-    │   │   └── CustomToast.tsx
-    │   ├── types/index.ts
-    │   └── theme/colors.ts
-    └── android/                  # Native Android project (Gradle)
+## Requirements
 
-  └── superbrain-cli/               # npm wrapper for one-line backend install
-    ├── bin/superbrain.js         # Cross-platform launcher (downloads/runs backend)
-    ├── scripts/build.js          # Payload packager for npm release
-    └── payload/                  # Bundled backend template shipped to users
-```
+- Python 3.10 or newer, and `ffmpeg`
+- Node.js 20 or newer (for the web app)
+- At least one AI provider key: OpenAI, Anthropic, Groq, Gemini or OpenRouter. Groq and Gemini have free tiers; Groq is also used for transcription.
+- Optional: an Instagram account for downloading. A secondary account is strongly recommended over your main one, since Instagram rate-limits and can flag automated downloads.
 
----
+## Installation
 
-## AI Model Router
-
-Free AI APIs have rate limits, downtime, and variable speed. SuperBrain solves this with a **multi-provider model router** that automatically selects the fastest available model and falls back transparently on failure — you never have to think about which provider is working.
-
-### Priority Chain
-
-| Task | Fallback Order |
-|---|---|
-| **Text analysis** | Groq → Gemini → OpenRouter (hardcoded best) → Dynamic free OpenRouter → Ollama |
-| **Vision** | Gemini → Groq Vision → OpenRouter Vision → Ollama Vision |
-| **Transcription** | Groq Whisper API → Local OpenAI Whisper |
-| **YouTube** | Gemini (native URL understanding) |
-
-### How It Works
-
-- **Performance ranking** — tracks response times with an exponential moving average; faster models get promoted automatically
-- **Cooldown on failure** — generic errors trigger a 5‑minute cooldown; rate limits (HTTP 429) trigger a 30‑minute cooldown
-- **Dynamic discovery** — refreshes the OpenRouter free model list every 6 hours, scores models by context length, capabilities, recency, and provider trust
-- **Persistent rankings** — saved to `config/model_rankings.json` so performance data survives server restarts
-
-### Supported Providers
-
-| Provider | Key in `config/.api_keys` | Notes |
-|---|---|---|
-| **Groq** | `GROQ_API_KEY` | Fastest inference — free tier at [console.groq.com](https://console.groq.com) |
-| **Google Gemini** | `GEMINI_API_KEY` | Most generous free tier at [aistudio.google.com](https://aistudio.google.com) |
-| **OpenRouter** | `OPENROUTER_API_KEY` | Free model router at [openrouter.ai](https://openrouter.ai) |
-| **Ollama** | *(no key needed)* | Local inference — `start.py` guides setup · recommended model: `qwen3-vl:4b` |
-
-> **Tip:** You don't need all providers — the router falls back automatically. Start with at least **Gemini** (most generous free tier). Ollama serves as the fully offline last resort.
-
----
-
-## Getting Started
-
-### Backend Setup Prerequisites
-
-| Requirement | Install | Needed For |
-|---|---|---|
-| Python 3.10+ | [python.org](https://python.org) | npm + local Python setup |
-| ffmpeg | `sudo apt install ffmpeg` / `brew install ffmpeg` / `winget install Gyan.FFmpeg` | all backend methods |
-| Node.js 20+ | [nodejs.org](https://nodejs.org) | npm one-line setup |
-| Docker + Compose | [docs.docker.com/get-started](https://docs.docker.com/get-started/) | Docker setup |
-| ngrok (optional) | [ngrok.com](https://ngrok.com) | phone access from outside local network |
-
-### Method 1: npm One-Line Setup (Recommended)
-
-This is the easiest way to run backend on any PC without cloning this repository.
+### 1. Backend
 
 ```bash
-# Run directly (no global install)
-npx -y superbrain-server@latest
+git clone https://github.com/jorgelso/second-brain.git serendipid
+cd serendipid/backend
+python3 start.py
 ```
 
-Optional global install:
+`start.py` is a setup wizard. On the first run it creates a virtual environment, installs dependencies, asks for your AI provider keys, optionally sets up Ollama, local Whisper and remote access, and generates the API access token. Then it starts the server on port 5050. Later runs skip straight to starting the server; `python3 start.py --reset` runs the wizard again.
+
+The access token is how every client authenticates. To see it:
 
 ```bash
-npm install -g superbrain-server
-superbrain-server
+.venv/bin/python utils/manage_token.py show
 ```
 
-What this does on first run:
+Check that the backend is up with `curl http://localhost:5050/ping`. Interactive API docs are at `http://localhost:5050/docs`.
 
-1. Downloads backend package to `~/.superbrain-server`
-2. Creates virtual environment
-3. Installs dependencies
-4. Runs interactive setup wizard
-5. Starts API server and prints Access Token
+To run it with Docker instead, see [Docker](#docker) below.
 
-Useful commands:
+### 2. Web app
 
 ```bash
-superbrain-server               # Starts the backend engine
-superbrain-server status        # Show connection QR code & running server info
-superbrain-server update        # Update the backend components
-superbrain-server ngrok         # Configure Ngrok tunnel
-superbrain-server reset         # Open interactive reset menu
-superbrain-server reset --all   # Force complete data wipe
-```
-
-### Method 2: Docker Setup
-
-Use this when you want containerized, reproducible deployment.
-
-```bash
-cd superbrain/backend
-cp .env.example .env
-```
-
-Edit `.env` and set at least:
-
-- `GEMINI_API_KEY` (recommended)
-- `GROQ_API_KEY` (optional)
-- `OPENROUTER_API_KEY` (optional)
-
-Then run:
-
-```bash
-docker compose up -d --build
-docker compose logs -f superbrain-api
-```
-
-Health check:
-
-```bash
-curl http://localhost:5000/health
-```
-
-### Method 3: Local Python Setup (Normal)
-
-Use this when developing backend locally without Docker.
-
-Windows (PowerShell):
-
-```powershell
-cd superbrain\backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python start.py
-```
-
-Linux / macOS:
-
-```bash
-cd superbrain/backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python start.py
-```
-
-Direct API run (without setup wizard):
-
-```bash
-python api.py
-```
-
-### Connect Android App to Backend
-
-1. Start backend using any method above.
-2. Copy the Access Token shown by backend.
-3. In Android app Settings, set backend URL and Access Token.
-4. Verify `/health` endpoint returns OK.
-
-### Optional: Expose Backend for Phone Access
-
-If phone cannot reach your PC directly, expose port 5000:
-
-```bash
-ngrok http 5000
-```
-
-Use the generated HTTPS URL in app Settings.
-
-> **Tip:** `GOOGLE_API_KEY` is accepted as a compatibility alias, but `GEMINI_API_KEY` is the preferred key name.
-
----
-
-## Packages
-
-SuperBrain backend launcher is published in two registries:
-
-- npmjs: [superbrain-server](https://www.npmjs.com/package/superbrain-server)
-  - Stable install: `npx -y superbrain-server@latest`
-
-- GitHub Packages: `@sidinsearch/superbrain-server`
-  - One-time auth + install block (`read:packages` token required):
-  - Note: only needed for GitHub Packages. Not needed for npmjs (`superbrain-server`) installs.
-
-```bash
-npm config set @sidinsearch:registry https://npm.pkg.github.com
-npm config set //npm.pkg.github.com/:_authToken YOUR_GITHUB_TOKEN
-npx -y @sidinsearch/superbrain-server@latest
-
-```
-
-GitHub Packages docs: [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry)
-
-GitHub Packages is separate from the npmjs package page and may not appear in the repository Packages tab until it has been published and linked there.
-
----
-
-## Instagram Credentials
-
-SuperBrain uses [Instaloader](https://instaloader.github.io/) to download Instagram posts. It can operate in two modes:
-
-### Without credentials (anonymous mode)
-
-SuperBrain works **without any Instagram account** — but with limitations:
-
-| Limitation | Details |
-|---|---|
-| **Public posts only** | Only posts from public profiles that Instagram serves to unauthenticated users |
-| **Rate limiting** | Instagram aggressively rate-limits anonymous requests — you may need to wait several minutes between saves |
-| **Login-required blocks** | Some posts trigger a `LoginRequiredException` even if the profile is public — these get auto-queued for retry later |
-
-YouTube videos and web pages are **not affected** — they work fully without Instagram credentials.
-
-### With credentials (recommended)
-
-Adding Instagram credentials removes all the above restrictions:
-
-- ✅ **Reliable downloads** — authenticated sessions are not rate-limited for normal usage
-- ✅ **Access to all public posts** — no more login-required blocks
-- ✅ **Posts from followed private accounts** — if the authenticated account follows a private profile, those posts can be saved too
-- ✅ **Session caching** — you log in once and the session is reused automatically until Instagram invalidates it
-
-### How to set up
-
-**Option 1 — During setup wizard** (recommended)
-
-`start.py` prompts for Instagram credentials during first-run setup. Enter your username and password when asked — they're saved to `config/.api_keys` and a session file is created automatically.
-
-**Option 2 — Manual login**
-
-```bash
-cd superbrain/backend
-python instagram/instagram_login.py
-```
-
-This interactive script handles the full login flow including **two-factor authentication (2FA)**. It saves:
-- Credentials → `config/.api_keys` (gitignored)
-- Session → `.instaloader_session` (gitignored)
-
-### ⚠️ Security advice
-
-> **Use a secondary / burner Instagram account — not your main personal account.**
->
-> While credentials are stored locally and never transmitted anywhere other than Instagram's servers, using a disposable account protects your primary account from any risk of rate-limit flags or session issues.
-
-Credentials are stored in `config/.api_keys` which is **gitignored** — they will never be committed to version control. The cached session file (`.instaloader_session`) is also gitignored.
-
----
-
-## Installing the Android App
-
-### Option 1 — Download from Releases *(easiest)*
-
-The latest APK is always available on the **[Releases](https://github.com/sidinsearch/superbrain/releases)** page.
-
-1. Download `superbrain.apk` from the latest release
-2. On your Android device, enable **Install from unknown sources**
-3. Open the APK to install
-
-### Option 2 — EAS Cloud Build
-
-```bash
-npm install -g eas-cli
-eas login
-cd superbrain-app
-eas build --platform android --profile preview --non-interactive
-```
-
-EAS returns a download URL + QR code when done. No Android Studio required.
-
-### Option 3 — GitHub Actions
-
-The repo includes:
-
-- [build workflow](.github/workflows/build.yml): On push to `main`, it builds APK, uploads artifact, publishes the GitHub npm package, and updates the release with `superbrain.apk`
-- [release APK workflow](.github/workflows/release-apk.yml): Optional tag/release-driven APK pipeline for versioned tags
-
-Automatic release targets:
-
-1. Push to `main` updates release tag `latest` (stable).
-
-
-How to get the newest APK from Actions artifacts:
-
-1. Push your changes to `main`.
-2. Open **GitHub → Actions → Build APK (Gradle)**.
-3. Open the latest successful run.
-4. Download the artifact named like `superbrain-release-<run_number>`.
-5. Extract it and rename `superbrain.apk` if needed.
-6. Use it directly for testing/internal sharing.
-
-### Option 4 — Local Gradle Build
-
-```bash
-cd superbrain-app
+cd serendipid/serendipid-web
 npm install
-cd android
-./gradlew assembleRelease
-# Output: android/app/build/outputs/apk/release/app-release.apk
+cp .env.example .env.local
 ```
 
----
-
-## Release Process
-
-Use this push-based flow to keep GitHub release + APK + GitHub Packages aligned.
-
-1. Push changes to `main`.
-2. `.github/workflows/build.yml` runs automatically and does all of the following:
-  - Builds release APK.
-  - Uploads APK as an Actions artifact.
-  - Updates the branch release and attaches `superbrain.apk`.
-  - Publishes `@sidinsearch/superbrain-server` to GitHub Packages.
-3. Verify:
-  - APK download works from the release.
-  - Package appears under GitHub Packages for the repository.
-
-Recommended release notes install line:
+Edit `.env.local`:
 
 ```bash
-npx -y superbrain-server@latest
+SERENDIPID_API_URL=http://localhost:5050   # wherever the backend is reachable from this machine
+SERENDIPID_API_KEY=<the access token>
+WEB_PASSWORD=<a password for signing in>
 ```
 
-Verification checklist:
+Then build and start it:
 
-1. `latest` (main) release contains `superbrain.apk`.
-2. Repository **Packages** tab shows `@sidinsearch/superbrain-server`.
-3. Install checks:
-  - npmjs: `npx -y superbrain-server@latest`
-  - GitHub Packages: `npx -y @sidinsearch/superbrain-server@latest`
+```bash
+npm run build
+npm run start      # http://localhost:3000
+```
 
----
+Use `npm run dev` while developing. Sign-in sessions last three weeks; changing `WEB_PASSWORD` signs everyone out.
 
-## Hosting Options
+### 3. Your configuration (optional)
 
-The backend is lightweight and runs anywhere with Python 3.10+:
+Out of the box Serendipid uses a general-purpose list of categories and languages. To change them, or to set up trusted creators and hidden folders, create `backend/config/user_config.json`. The format, and how to export and import it, is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-| Platform | Cost | Notes |
-|---|---|---|
-| **Your PC / laptop** | Free | Use ngrok to expose · disable sleep / hibernate |
-| **Raspberry Pi** | ~$50 one-time | Low power, always-on home server |
-| **AWS EC2** | Free tier | `t2.micro` handles it fine |
-| **DigitalOcean** | $4/mo | Basic droplet |
-| **Hetzner** | €3.29/mo | Fast EU-based VPS |
-| **Google Cloud Run** | Pay-per-use | Serverless, scales to zero |
+## Importing from Instagram
 
-For cloud hosting, open port `5000` in your firewall and point the app directly at your server's public IP — no ngrok needed.
+Serendipid reads Instagram's own data export. You only need your saved posts, not a full copy of your account.
 
----
+1. In Instagram, open **Settings → Accounts Center → Your information and permissions → Export your information**, then **Create export**.
+2. Pick your Instagram profile and choose **Export to device**.
+3. Under **Customize information**, deselect everything except **Saved** (under *Your Instagram activity*). A full export is much larger and takes far longer for Instagram to prepare.
+4. Set **Date range** to **All time**. Any shorter range silently leaves out older saves.
+5. Set **Format** to **JSON**. Media quality does not matter.
+6. Start the export. Instagram emails you when it is ready, which can take from minutes to a couple of days.
 
-## Notifications
+The download contains two files under `your_instagram_activity/saved/`:
 
-SuperBrain uses Android notification channels to keep you engaged with your saved content without being noisy.
+- `saved_collections.json`: your saved posts grouped by collection. **This is the file that drives the import.** Only posts that are in at least one collection are analyzed, so put the posts you care about into collections on Instagram first.
+- `saved_posts.json`: every saved post with the date you saved it. Optional; when provided, it is used to record real save dates.
 
-### Watch Later
+Upload both on the web app's **Admin** page. It previews how many posts each collection contains, lets you choose a collection to process first, and runs the import in the background. You can also run it from the command line:
 
-Adding a post to the **Watch Later** collection triggers:
+```bash
+cd backend
+.venv/bin/python scripts/import_saved_instagram.py path/to/saved_collections.json --all-posts-file path/to/saved_posts.json
+```
 
-| Notification | When | Details |
-|---|---|---|
-| **Instant confirmation** | Immediately | High-priority heads-up banner |
-| **Daily reminder** | Once per day, unique time slot per post | Spread between 8:00 AM – 9:30 PM |
-| **Urgent morning alert** | 9:00 AM | Only for deadline-sensitive content (exams, hackathons, applications) |
+Imports are resumable: running the same files again skips everything already analyzed, so you can stop and restart at any time.
 
-Each reminder includes a **Mark as Watched** action button — tap it to remove from Watch Later and cancel all future reminders for that post.
+### Keeping it up to date automatically
 
-### Other Collections
+Instagram can repeat the export on a schedule. Instead of **Export to device**, choose **Export to external service** and connect Google Drive or Dropbox, then set the frequency to **Weekly**. Each week a fresh export lands in that folder. Importing the newest files analyzes only the posts you saved since the last run.
 
-Saving to any non-Watch Later collection fires an instant **"Saved to SuperBrain"** notification confirming the save.
+## Docker
 
----
+The backend ships with a Dockerfile and a compose file. Docker keeps the database, media, token and config on named volumes, so rebuilding the container does not lose anything.
 
-## API Reference
+```bash
+cd backend
+cp .env.example .env          # add your AI provider keys
+docker compose up -d --build
+docker compose exec serendipid-api python utils/manage_token.py show
+```
 
-All endpoints require the `X-API-Key` header with the Access Token.
+The image does not include local Whisper or Ollama; transcription uses Groq's API, so set `GROQ_API_KEY`. Settings that `start.py` takes as flags are environment variables in Docker (`SERENDIPID_SHOW_SENSITIVE`, `SERENDIPID_PREFERRED_PROVIDER`); all of them are listed in `backend/.env.example`.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/analyze` | Submit a URL for analysis (queued if busy) |
-| `GET` | `/cache/{shortcode}` | Retrieve cached analysis by shortcode |
-| `GET` | `/recent` | List recent analyses |
-| `GET` | `/search` | Full-text search across posts |
-| `GET` | `/category/{category}` | Filter posts by category |
-| `GET` | `/stats` | Database statistics |
-| `GET` | `/caption` | Extract Instagram caption from URL |
-| `GET` | `/collections` | List all collections |
-| `POST` | `/collections` | Create a new collection |
-| `PUT` | `/collections/{id}/posts` | Update posts in a collection |
-| `DELETE` | `/collections/{id}` | Delete a collection |
-| `PUT` | `/post/{shortcode}` | Update post fields (category, title, summary) |
-| `DELETE` | `/post/{shortcode}` | Delete a post (cancels active analysis if running) |
-| `GET` | `/queue-status` | Current processing and queue state |
-| `GET` | `/queue/retry` | Items scheduled for automatic retry |
-| `POST` | `/queue/retry/flush` | Force-promote retry items to active queue |
-| `GET` | `/ping` | Connectivity check |
-| `GET` | `/health` | Health check with system info |
+## Hosting on a Raspberry Pi
 
-> Interactive API docs are available at `http://localhost:5000/docs` (Swagger UI) and `/redoc`.
+A Raspberry Pi 4 or 5 with 4 GB of RAM or more works well as an always-on server. Analysis is mostly network calls to AI providers, so the Pi's CPU is rarely the bottleneck; skip local Whisper and Ollama on it and use the cloud providers.
 
----
+1. **Install the OS.** Flash 64-bit Raspberry Pi OS Lite with Raspberry Pi Imager, enable SSH in the imager's settings, and boot. Then:
 
-## Tech Stack
+   ```bash
+   sudo apt update && sudo apt full-upgrade -y
+   sudo apt install -y git python3-venv python3-dev ffmpeg
+   ```
 
-| Layer | Technology |
-|---|---|
-| **Mobile** | React Native 0.81 · Expo SDK 54 · TypeScript |
-| **Backend** | Python 3 · FastAPI · Uvicorn |
-| **Database** | SQLite with WAL mode |
-| **AI Routing** | Custom multi-provider router (Groq · Gemini · OpenRouter · Ollama) |
-| **Vision** | OpenCV frame extraction → AI vision models |
-| **Transcription** | Groq Whisper API → OpenAI Whisper (local fallback) |
-| **Music ID** | Shazamio (multi-segment recognition) |
-| **Instagram** | Instaloader + Instagrapi |
-| **Web Scraping** | newspaper4k · trafilatura · Wayback Machine · BeautifulSoup |
-| **Notifications** | Expo Notifications · Android notification channels |
-| **CI/CD** | GitHub Actions (Gradle APK build) · EAS Build |
+2. **Install the backend.**
 
----
+   ```bash
+   git clone https://github.com/jorgelso/second-brain.git ~/serendipid
+   cd ~/serendipid/backend
+   python3 start.py
+   ```
+
+   Answer "no" to the Ollama and local Whisper steps. When the server starts, stop it with Ctrl+C; the next step runs it as a service.
+
+3. **Run it as a service** so it starts on boot and restarts after crashes. Create `/etc/systemd/system/serendipid.service`, replacing `pi` with your username:
+
+   ```ini
+   [Unit]
+   Description=Serendipid backend
+   After=network-online.target
+   Wants=network-online.target
+
+   [Service]
+   User=pi
+   WorkingDirectory=/home/pi/serendipid/backend
+   ExecStart=/home/pi/serendipid/backend/.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port 5050
+   Restart=on-failure
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now serendipid
+   journalctl -u serendipid -f        # logs
+   ```
+
+4. **Run the web app.** Either on the Pi itself (install Node.js 20+, then follow the web app steps above and add a second unit with `ExecStart=/usr/bin/npm run start` and `WorkingDirectory=/home/pi/serendipid/serendipid-web`), or on any other host such as Vercel, pointing `SERENDIPID_API_URL` at the Pi.
+
+5. **Reach it from outside your home.** The simplest private option is [Tailscale](https://tailscale.com): install it on the Pi and on your devices and use the Pi's Tailscale address, with no ports opened on your router. If you expose the web app publicly, put it behind HTTPS (for example with Caddy or a Cloudflare Tunnel); the backend itself does not need to be public, since only the web app talks to it.
+
+6. **Update** with the included script, which pulls the latest code, refreshes dependencies and restarts the service:
+
+   ```bash
+   ~/serendipid/backend/deploy.sh
+   # also rebuild and restart the web app if it runs on the Pi:
+   SERENDIPID_WEB_SERVICE=serendipid-web ~/serendipid/backend/deploy.sh
+   ```
+
+Docker also works on the Pi (`docker compose up -d --build` in `backend/`), if you prefer it to a virtual environment.
+
+## Security model
+
+Serendipid is a single-user app designed for a home network or a private network such as Tailscale.
+
+- Every backend endpoint that reads or changes data, including media files, requires the access token in the `X-API-Key` header.
+- The web app is behind a password and holds the token server-side; browsers never see it and never contact the backend directly.
+- `GET /connect-info`, which hands out the token for QR-code pairing of the mobile app, only answers direct requests from the local network.
+- `ALLOWED_ORIGINS` restricts which browser origins may call the backend directly; it defaults to any origin without credentials.
+
+If you open the backend's port to the internet, anyone who learns the token has full access to your library and your saved provider keys. Prefer a private network or exposing only the web app.
+
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the pieces fit, the analysis pipeline, and the data model
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): the config file, environment variables and API keys
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): running the backend and web app on separate hosts, Docker details, backups
+- [docs/CHANGELOG.md](docs/CHANGELOG.md)
+- [TODO.md](TODO.md): known gaps and planned work
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
+Issues and pull requests are welcome. Fork the repository, create a branch, and open a pull request against `main`. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `docs:` and so on).
 
-1. **Fork** the repository
-2. **Create** a feature branch — `git checkout -b feature/my-feature`
-3. **Commit** your changes — `git commit -m "feat: add my feature"`
-4. **Push** to the branch — `git push origin feature/my-feature`
-5. **Open** a Pull Request
+## Credits and license
 
-For major changes, please [open an issue](https://github.com/sidinsearch/superbrain/issues) first to discuss what you'd like to implement.
+Serendipid started as a fork of [SuperBrain](https://github.com/sidinsearch/superbrain) by Siddharth Shinde and has since been substantially extended and rewritten by Jorge Salcedo, beginning in August 2026: the web app, the iOS app, semantic search and chat, study guides, boards, importance and eloquence scoring, the Instagram export importer, the configuration system, and most of the analysis pipeline.
 
----
-
-## License
-
-This project is licensed under the **[GNU Affero General Public License v3.0](LICENSE)** (AGPL-3.0).
-
-| Use Case | Allowed? |
-|---|---|
-| Personal & non-commercial use | ✅ Free, no restrictions |
-| Forking & modifications | ✅ Must release under AGPL-3.0 with source code |
-| Running as a network service (SaaS) | ✅ Must publish your modified source code |
-| Commercial / proprietary use | ❌ Requires a separate commercial license |
-
-
----
-
-<p align="center">
-  Made with ❤️ by <a href="https://github.com/sidinsearch">sidinsearch</a>
-  &nbsp;·&nbsp;
-  Copyright &copy; 2026 <a href="https://github.com/sidinsearch">sidinsearch</a>
-  &nbsp;·&nbsp;
-  <a href="LICENSE">AGPL-3.0 License</a>
-</p>
-
-
+Licensed under the [GNU Affero General Public License v3.0](LICENSE), the same license as the original project. If you run a modified version as a network service, the AGPL requires you to make your source code available to its users.

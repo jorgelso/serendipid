@@ -1,4 +1,4 @@
-# SuperBrain API Keys
+# Serendipid API Keys
 # Copy this file to .api_keys (same directory) and fill in your keys.
 # .api_keys is gitignored — never commit your actual keys.
 #
@@ -10,8 +10,9 @@
 #   Anthropic   → https://console.anthropic.com/settings/keys (paid)
 #
 # You don't need all of these — the router falls back automatically.
-# If OPENAI_API_KEY is set, GPT-4.1 is tried first (paid, but the model
-# quality/setup tradeoff was a deliberate choice for this deployment).
+# If OPENAI_API_KEY is set, OpenAI (OPENAI_TEXT_MODEL, default gpt-4.1) is
+# tried first. Study guides, importance scoring, embeddings (semantic search,
+# chat retrieval), eloquence scoring and ANALYSIS_MODE=batch require it.
 # If ANTHROPIC_API_KEY is set, Claude (ANTHROPIC_TEXT_MODEL, default
 # claude-sonnet-5-5) is tried second, right after OpenAI.
 # Local Ollama is always available as the last resort (no key needed).

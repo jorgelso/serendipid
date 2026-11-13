@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# SuperBrain Docker Stop Script
+# Serendipid Docker Stop Script
 
-echo "🛑 Stopping SuperBrain..."
+echo "🛑 Stopping Serendipid..."
 
 # Use docker compose if available, otherwise docker-compose
 if command -v docker compose &> /dev/null; then
@@ -13,4 +13,4 @@ fi
 
 $DOCKER_COMPOSE down
 
-echo "✅ SuperBrain stopped."
+echo "✅ Serendipid stopped."

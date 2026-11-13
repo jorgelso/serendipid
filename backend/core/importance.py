@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Importance scoring for the SuperBrain analysis pipeline.
+Importance scoring for the Serendipid analysis pipeline.
 
 Lets reels/posts be sorted by how worth-revisiting they actually are, rather
 than just by recency or category — a meme is not automatically low value and
@@ -190,14 +190,12 @@ def parse_importance_reason(raw: str):
     return reason or None
 
 
-# Usernames whose posts the user has manually confirmed are consistently
-# worth revisiting, independent of how any single post scores in isolation —
-# the per-post rubric above has no memory of past posts from the same
-# creator, so this is a deliberate, explicit override rather than something
-# asked of the LLM. Keyed lowercase; extend as the user confirms more.
-TRUSTED_CREATORS = {
-    "erinmerylstudy": "psychology / personal-development / learning creator the user follows and consistently finds useful",
-}
+# Usernames whose posts are consistently worth revisiting, independent of how
+# any single post scores in isolation — the per-post rubric above has no
+# memory of past posts from the same creator, so this is a deliberate,
+# explicit override rather than something asked of the LLM. Configured as
+# trusted_creators ({username: reason}) in config/user_config.json
+# (core/app_config.py).
 
 
 def apply_trusted_creator_boost(importance, username: str, reason: str = None):
@@ -214,11 +212,14 @@ def apply_trusted_creator_boost(importance, username: str, reason: str = None):
     """
     if importance is None or not username:
         return importance, reason
+    from core import app_config
+
+    trusted = app_config.trusted_creators()
     key = username.strip().lower()
-    if key in TRUSTED_CREATORS:
+    if key in trusted:
         boosted = max(importance, 4)
         if boosted != importance:
-            note = f"Floored to {boosted}/5 — trusted creator ({TRUSTED_CREATORS[key]})."
+            note = f"Floored to {boosted}/5 — trusted creator ({trusted[key]})."
             reason = f"{reason} {note}".strip() if reason else note
         return boosted, reason
     return importance, reason

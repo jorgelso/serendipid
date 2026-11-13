@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Category Manager for SuperBrain
+Category Manager for Serendipid
 Interactive tool to list, edit, and delete categories
 """
 

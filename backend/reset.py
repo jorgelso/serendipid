@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║               SuperBrain — Reset / Clean Utility                 ║
+║               Serendipid — Reset / Clean Utility                 ║
 ║     Selectively wipe configuration, data, and environment.       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
@@ -24,7 +24,7 @@ LOCALTUNNEL_ENABLED = BASE_DIR / "config" / "localtunnel_enabled.txt"
 LOCALTUNNEL_LOG     = BASE_DIR / "config" / "localtunnel.log"
 TOKEN_FILE = BASE_DIR / "token.txt"
 SETUP_DONE = BASE_DIR / ".setup_done"
-DB_FILE    = BASE_DIR / "superbrain.db"
+DB_FILE    = BASE_DIR / "serendipid.db"
 TEMP_DIR   = BASE_DIR / "temp"
 INSTA_SESS = BASE_DIR / "config" / "instagram_session.json"
 
@@ -42,25 +42,8 @@ def link(url: str, text: str | None = None) -> str:
     return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 def banner():
-    art = f"""{CYAN}{BOLD}
-  ███████╗██╗   ██╗██████╗ ███████╗██████╗
-  ██╔════╝██║   ██║██╔══██╗██╔════╝██╔══██╗
-  ███████╗██║   ██║██████╔╝█████╗  ██████╔╝
-  ╚════██║██║   ██║██╔═══╝ ██╔══╝  ██╔══██╗
-  ███████║╚██████╔╝██║     ███████╗██║  ██║
-  ╚══════╝ ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝
-
-  ██████╗ ██████╗  █████╗ ██╗███╗   ██╗
-  ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║
-  ██████╔╝██████╔╝███████║██║██╔██╗ ██║
-  ██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║
-  ██████╔╝██║  ██║██║  ██║██║██║ ╚████║
-  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
-{RESET}"""
-    credit = (f"    {DIM}made with {RESET}{MAG}❤{RESET}{DIM}  by "
-              f"{link('https://github.com/sidinsearch', f'{BOLD}sidinsearch{RESET}{DIM}')}"
-              f"{RESET}\n")
-    print(art + credit)
+    print(f"\n  {BOLD}{CYAN}Serendipid{RESET}  {DIM}"
+          f"{link('https://github.com/jorgelso', 'github.com/jorgelso')}{RESET}\n")
 
 def h1(msg):   print(f"\n{BOLD}{CYAN}{'━'*64}{RESET}\n{BOLD}  {msg}{RESET}\n{BOLD}{CYAN}{'━'*64}{RESET}")
 def ok(msg):   print(f"  {GREEN}✓{RESET}  {msg}")
@@ -136,7 +119,7 @@ def reset_database():
     if confirm != "DELETE":
         info("Skipped.")
         return
-    for pat in ["superbrain.db", "superbrain.db-shm", "superbrain.db-wal"]:
+    for pat in ["serendipid.db", "serendipid.db-shm", "serendipid.db-wal"]:
         _remove_file(BASE_DIR / pat, pat)
     ok("Database wiped. A fresh one will be created on next server start.")
 
@@ -181,14 +164,14 @@ def export_database():
     from datetime import datetime
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_name = f"superbrain_backup_{timestamp}.db"
+    backup_name = f"serendipid_backup_{timestamp}.db"
     backup_path = BASE_DIR / backup_name
     
     try:
         shutil.copy2(DB_FILE, backup_path)
         ok(f"Database backed up to: {BOLD}{backup_name}{RESET}")
         info(f"Size: {backup_path.stat().st_size / (1024*1024):.1f} MB")
-        info(f"Restore by copying this file back to: {BOLD}superbrain.db{RESET}")
+        info(f"Restore by copying this file back to: {BOLD}serendipid.db{RESET}")
     except Exception as e:
         err(f"Backup failed: {e}")
 
@@ -199,7 +182,7 @@ def full_reset():
     print(f"    {RED}·{RESET}  API keys  (config/.api_keys)")
     print(f"    {RED}·{RESET}  localtunnel state/log  (config/localtunnel_*)")
     print(f"    {RED}·{RESET}  Access Token  (token.txt)")
-    print(f"    {RED}·{RESET}  Database  (superbrain.db)")
+    print(f"    {RED}·{RESET}  Database  (serendipid.db)")
     print(f"    {RED}·{RESET}  Temporary media files  (temp/)")
     print(f"    {RED}·{RESET}  Instagram session")
     print(f"    {RED}·{RESET}  Virtual environment  (.venv/)")
@@ -220,7 +203,7 @@ def full_reset():
     ]:
         _remove_file(path, label)
 
-    for pat in ["superbrain.db", "superbrain.db-shm", "superbrain.db-wal"]:
+    for pat in ["serendipid.db", "serendipid.db-shm", "serendipid.db-wal"]:
         _remove_file(BASE_DIR / pat, pat)
 
     _remove_file(INSTA_SESS, "Instagram session")
@@ -237,7 +220,7 @@ MENU_ITEMS = [
     ("1", "API Keys          (config/.api_keys)  — all keys + Instagram"),
     ("2", "localtunnel state  (config/localtunnel_enabled.txt + .log)"),
     ("3", "Access Token       (token.txt)"),
-    ("4", "Database           (superbrain.db)  ⚠ all posts & collections"),
+    ("4", "Database           (serendipid.db)  ⚠ all posts & collections"),
     ("5", "Temporary Files    (temp/)"),
     ("6", "Instagram Session  (force fresh login)"),
     ("7", "Virtual Environment (.venv/)  ⚠ must reinstall packages"),
@@ -259,7 +242,7 @@ ACTIONS = {
 }
 
 def menu():
-    h1("SuperBrain Reset Utility")
+    h1("Serendipid Reset Utility")
     nl()
     print(f"  {DIM}Select what you want to reset:{RESET}")
     nl()

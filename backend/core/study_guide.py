@@ -1,11 +1,11 @@
 """
-On-demand study-guide synthesis for the SuperBrain library.
+On-demand study-guide synthesis for the Serendipid library.
 
 Turns a user-picked set of posts (a manual selection, a search result, or an
-entire theme/cluster from superbrain-web's /space view) into one or more
+entire theme/cluster from serendipid-web's /space view) into one or more
 distilled markdown documents, persisted together as a "collection" (see
 core/database.py's study_guide_collections/study_guides tables) — see
-superbrain-web's /study-guides for the UI. Unlike importance/eloquence
+serendipid-web's /study-guides for the UI. Unlike importance/eloquence
 scoring, this never runs automatically over the whole library; it only runs
 when the user explicitly asks for a specific slice.
 
@@ -20,7 +20,7 @@ cost-conscious choice (the user did not want to pay for a new embedding pass
 alongside this), not an oversight. The planned v2 is real semantic dedup via
 extracted atomic claims + chunk-level embeddings, clustered the way
 core/rag.py's module docstring already flags as missing for chat retrieval
-too — see superbrain-web/src/lib/ideas.ts for that v1's matching disclaimer.
+too — see serendipid-web/src/lib/ideas.ts for that v1's matching disclaimer.
 Not implemented yet — do not assume it exists.
 
 Multi-call pipeline (generate_study_guide_pipeline, >MAX_STUDY_GUIDE_POSTS):
@@ -69,7 +69,7 @@ STUDY_GUIDE_REQUEST_TIMEOUT_S = 300
 # (memes, pure personal-branding clips) shouldn't dilute a study guide.
 # Unscored posts (importance IS NULL) are kept, not excluded — NULL means
 # "never scored", not "scored low". Duplicated (not shared) as a matching
-# constant in superbrain-web/src/lib/ideas.ts for the same rule applied to
+# constant in serendipid-web/src/lib/ideas.ts for the same rule applied to
 # tag-frequency counting — Python and the Next.js app can't share a constant
 # across that boundary; keep both in sync by hand if this changes.
 MIN_STUDY_GUIDE_IMPORTANCE = 3

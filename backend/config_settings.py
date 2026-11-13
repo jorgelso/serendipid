@@ -1,5 +1,5 @@
 """
-SuperBrain Production Configuration
+Serendipid Production Configuration
 Production-grade settings for deployment
 """
 
@@ -15,7 +15,7 @@ class Settings:
     # ──────────────────────────────────────────────────────────────────────────
     
     # API Configuration
-    API_TITLE: str = "SuperBrain API"
+    API_TITLE: str = "Serendipid API"
     API_VERSION: str = "1.0.0"
     API_DESCRIPTION: str = "AI-powered content analysis and archival system"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
@@ -30,8 +30,8 @@ class Settings:
     # Database Configuration
     # ──────────────────────────────────────────────────────────────────────────
     
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./superbrain.db")
-    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "superbrain.db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./serendipid.db")
+    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "serendipid.db")
     DATABASE_TIMEOUT: int = int(os.getenv("DATABASE_TIMEOUT", 30))
     
     # SQLite WAL mode for better concurrency

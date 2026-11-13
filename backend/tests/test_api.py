@@ -8,7 +8,7 @@ with open('token.txt', 'r') as f:
 
 # Test the /recent endpoint
 response = requests.get(
-    'http://localhost:5000/recent?limit=10',
+    'http://localhost:5050/recent?limit=10',
     headers={'X-API-Key': token}
 )
 

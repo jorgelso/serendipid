@@ -6,7 +6,7 @@ there's no live process left to resume once that job completes, so this
 module is what actually finishes the pipeline once OpenAI's batch results
 are ready. Called in-process from api.py: once on backend startup, and on
 demand via POST /batches/check (the "Check batches" button in
-superbrain-web). Deliberately no periodic polling — batch turnaround can be
+serendipid-web). Deliberately no periodic polling — batch turnaround can be
 minutes to 24h, and this app runs on a laptop that isn't always on.
 
 Deliberately does NOT import main.py — api.py never imports main.py (see

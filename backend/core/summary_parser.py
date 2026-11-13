@@ -14,8 +14,8 @@ resumption logic runs in-process in api.py.
 
 import re
 
-from core.categories import CATEGORY_PROMPT, parse_categories, keyword_fallback_categories
-from core.languages import LANGUAGE_PROMPT, parse_languages
+from core.categories import category_prompt, parse_categories, keyword_fallback_categories
+from core.languages import language_prompt, parse_languages
 
 
 def _extract_section(output: str, marker: str) -> str:
@@ -175,10 +175,10 @@ Apply the classification from above: for CONSISTENT or UNCLEAR, use the caption 
 [Music/song name if found, or "No background music" or "Voiceover only"]
 
 📂 CATEGORY:
-{CATEGORY_PROMPT}
+{category_prompt()}
 
 🌐 LANGUAGE:
-{LANGUAGE_PROMPT}
+{language_prompt()}
 
 Be specific and thorough — prioritize capturing concrete, actionable detail over brevity."""
 

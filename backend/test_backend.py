@@ -1,5 +1,5 @@
 """
-SuperBrain - Comprehensive Backend Test Suite
+Serendipid - Comprehensive Backend Test Suite
 Tests all API endpoints against the running backend.
 """
 import requests
@@ -8,7 +8,7 @@ import json
 import time
 
 # Config
-BASE_URL = "http://localhost:5000"
+BASE_URL = "http://localhost:5050"
 TOKEN = "4XVTLWWV"
 HEADERS = {"X-API-Key": TOKEN, "Content-Type": "application/json"}
 

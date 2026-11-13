@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ────────────────────────────────────────────────────────────────────────────────
-# SuperBrain Backend Production Startup Script
+# Serendipid Backend Production Startup Script
 # Ensures all configuration is validated and services are healthy
 # ────────────────────────────────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'  # No Color
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║         SuperBrain API - Production Startup                   ║${NC}"
+echo -e "${BLUE}║         Serendipid API - Production Startup                   ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 
 # ──── Check prerequisites ────
@@ -57,9 +57,9 @@ fi
 # ──── Check required API keys ────
 source .env
 
-if [ -z "$GROQ_API_KEY" ] && [ -z "$GEMINI_API_KEY" ] && [ -z "$GOOGLE_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ] && [ -z "$GEMINI_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
     echo -e "${YELLOW}⚠ Warning: No AI provider API keys configured${NC}"
-    echo -e "${YELLOW}  Set at least one of: GROQ_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY${NC}"
+    echo -e "${YELLOW}  Set at least one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY${NC}"
 fi
 
 # ──── Create necessary directories ────
@@ -78,7 +78,7 @@ ${COMPOSE_CMD} build --no-cache
 echo -e "${GREEN}✓ Docker image built successfully${NC}"
 
 # ──── Start services ────
-echo -e "\n${YELLOW}→ Starting SuperBrain API...${NC}"
+echo -e "\n${YELLOW}→ Starting Serendipid API...${NC}"
 
 ${COMPOSE_CMD} up -d
 
@@ -88,14 +88,14 @@ echo -e "${GREEN}✓ Containers started${NC}"
 echo -e "\n${YELLOW}→ Waiting for API to become healthy...${NC}"
 
 for i in {1..30}; do
-    if ${COMPOSE_CMD} exec -T superbrain-api curl -s http://localhost:5000/health > /dev/null 2>&1; then
+    if ${COMPOSE_CMD} exec -T serendipid-api curl -s http://localhost:5050/ping > /dev/null 2>&1; then
         echo -e "${GREEN}✓ API is healthy${NC}"
         break
     fi
     
     if [ $i -eq 30 ]; then
         echo -e "${RED}✗ API failed to start after 30 seconds${NC}"
-        ${COMPOSE_CMD} logs superbrain-api
+        ${COMPOSE_CMD} logs serendipid-api
         exit 1
     fi
     
@@ -112,12 +112,12 @@ echo -e "\n${GREEN}Services running:${NC}"
 ${COMPOSE_CMD} ps
 
 echo -e "\n${GREEN}API Information:${NC}"
-echo -e "  📡 Endpoint: http://localhost:${API_PORT:-5000}"
-echo -e "  📚 Documentation: http://localhost:${API_PORT:-5000}/docs"
-echo -e "  🏥 Health Check: http://localhost:${API_PORT:-5000}/health"
+echo -e "  📡 Endpoint: http://localhost:${API_PORT:-5050}"
+echo -e "  📚 Documentation: http://localhost:${API_PORT:-5050}/docs"
+echo -e "  🏥 Health Check: http://localhost:${API_PORT:-5050}/ping"
 
 echo -e "\n${GREEN}Useful commands:${NC}"
-echo -e "  View logs:     ${YELLOW}${COMPOSE_CMD} logs -f superbrain-api${NC}"
+echo -e "  View logs:     ${YELLOW}${COMPOSE_CMD} logs -f serendipid-api${NC}"
 echo -e "  Stop services: ${YELLOW}${COMPOSE_CMD} down${NC}"
 echo -e "  Restart:       ${YELLOW}${COMPOSE_CMD} restart${NC}"
 echo -e "  Status:        ${YELLOW}${COMPOSE_CMD} ps${NC}"
