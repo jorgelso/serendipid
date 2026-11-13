@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Universal Link Validator for SuperBrain
+Universal Link Validator for Serendipid
 ========================================
 Detects and validates Instagram, YouTube, and general web page URLs.
 

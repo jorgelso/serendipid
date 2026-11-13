@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Bulk-import an Instagram "Download Your Information" JSON export into a local
-SuperBrain backend, same as import_saved_instagram.py, but processes reels in
+Serendipid backend, same as import_saved_instagram.py, but processes reels in
 collection-priority order: everything in the --priority-folder collection
 (default: priority_folder from the config, see core/app_config.py) is analyzed first, then every other collection in its
 original relative order from the export file.
@@ -133,8 +133,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--no-reverse-collections", dest="reverse_collections", action="store_false",
         help="Process collections in the raw export order, newest-saved-first (the default).",
     )
-    p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"SuperBrain backend URL (default: {DEFAULT_SERVER_URL})")
-    p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SUPERBRAIN_API_KEY)")
+    p.add_argument("--server-url", default=DEFAULT_SERVER_URL, help=f"Serendipid backend URL (default: {DEFAULT_SERVER_URL})")
+    p.add_argument("--api-key", help="X-API-Key value (default: backend/token.txt, then $SERENDIPID_API_KEY)")
     p.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE, help=f"Resumable state file, shared with import_saved_instagram.py (default: {DEFAULT_STATE_FILE})")
     p.add_argument("--delay-min", type=float, default=DEFAULT_DELAY_MIN, help=f"Minimum delay between /analyze calls, seconds (default: {DEFAULT_DELAY_MIN})")
     p.add_argument("--delay-max", type=float, default=DEFAULT_DELAY_MAX, help=f"Maximum delay between /analyze calls, seconds (default: {DEFAULT_DELAY_MAX})")

@@ -4,25 +4,26 @@ posts are classified, imported, and shown.
 
 Two JSON files, merged key by key:
 
-- config/default_config.json — committed, generic defaults.
-- config/user_config.json    — gitignored, this install's overrides. Any
+- core/default_config.json: committed, generic defaults (kept out of
+  config/ so a Docker volume mounted there never shadows a newer default).
+- config/user_config.json   : gitignored, this install's overrides. Any
   top-level key present here replaces the default for that key entirely
   (lists are not merged item by item). Path can be overridden with
-  SUPERBRAIN_CONFIG.
+  SERENDIPID_CONFIG.
 
 Keys:
   categories              [{"name": str, "keywords": [str, ...]}, ...]
                           keywords feed the fallback classifier used only
                           when the model returns no usable CATEGORY field.
   languages               [str, ...]
-  trusted_authors         [username, ...] — posts auto-added to the
+  trusted_authors         [username, ...]: posts auto-added to the
                           "Trusted Authors" board on save.
-  trusted_creators        {username: reason} — importance score floored at 4.
-  excluded_import_folders [folder, ...] — never imported or stored.
-  sensitive_folders       [folder, ...] — imported, but hidden from clients
+  trusted_creators        {username: reason}: importance score floored at 4.
+  excluded_import_folders [folder, ...]: never imported or stored.
+  sensitive_folders       [folder, ...]: imported, but hidden from clients
                           unless the server runs with --show-sensitive, and
                           never used as a recommendation signal.
-  priority_folder         str | null — default folder imported first in
+  priority_folder         str | null: default folder imported first in
                           by-collection imports.
 
 "other" (categories) and "other" / "no dialogue / visual only" (languages)
@@ -41,8 +42,8 @@ import threading
 from pathlib import Path
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
-DEFAULT_CONFIG_PATH = CONFIG_DIR / "default_config.json"
-CONFIG_PATH_ENV = "SUPERBRAIN_CONFIG"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "default_config.json"
+CONFIG_PATH_ENV = "SERENDIPID_CONFIG"
 
 CONFIG_VERSION = 1
 
@@ -152,7 +153,7 @@ def _load() -> dict:
     cfg = validate(_read_json(DEFAULT_CONFIG_PATH))
     missing = set(KEYS) - set(cfg)
     if missing:
-        raise ConfigError(f"default_config.json is missing key(s): {', '.join(sorted(missing))}")
+        raise ConfigError(f"core/default_config.json is missing key(s): {', '.join(sorted(missing))}")
     path = user_config_path()
     if path.exists():
         try:

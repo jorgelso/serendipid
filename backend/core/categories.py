@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Canonical content categories for the SuperBrain analysis pipeline.
+Canonical content categories for the Serendipid analysis pipeline.
 
 A single post can genuinely belong to more than one category (a meme built
 around a philosophy quote is both humor and philosophy). Every analyzer (Instagram, YouTube, web page) pulls its
@@ -17,8 +17,8 @@ from core import app_config
 
 
 def category_names() -> list:
-    """The configured category labels (config/default_config.json, overridden
-    by config/user_config.json — see core/app_config.py)."""
+    """The configured category labels (core/default_config.json, overridden
+    by config/user_config.json; see core/app_config.py)."""
     return app_config.category_names()
 
 

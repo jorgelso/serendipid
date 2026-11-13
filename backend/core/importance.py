@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Importance scoring for the SuperBrain analysis pipeline.
+Importance scoring for the Serendipid analysis pipeline.
 
 Lets reels/posts be sorted by how worth-revisiting they actually are, rather
 than just by recency or category — a meme is not automatically low value and

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Show, export, import, or validate the SuperBrain configuration
+Show, export, import, or validate the Serendipid configuration
 (categories, languages, trusted authors/creators, excluded and sensitive
 folders, priority folder). See core/app_config.py for the file format.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Content language detection for the SuperBrain analysis pipeline.
+Content language detection for the Serendipid analysis pipeline.
 
 Separate axis from category — "language learning" (category) is about a post
 teaching a language; this field is about what language the post's own content

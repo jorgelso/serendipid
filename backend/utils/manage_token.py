@@ -1,12 +1,12 @@
 """
-View or regenerate the SuperBrain API access token (token.txt).
+View or regenerate the Serendipid API access token (token.txt).
 
     python utils/manage_token.py          # interactive menu
     python utils/manage_token.py show     # print the current token
     python utils/manage_token.py rotate   # generate a new one
 
 Restart the server after rotating, and update every client (web app
-SUPERBRAIN_API_KEY, mobile app settings, browser extension).
+SERENDIPID_API_KEY, mobile app settings, browser extension).
 """
 import sys
 from pathlib import Path

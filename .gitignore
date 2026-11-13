@@ -23,6 +23,12 @@ backend/config/test_credentials.txt
 backend/config/localtunnel.log
 backend/config/user_config.json
 backend/config/*.tmp
+
+# Runtime state written by the backend and start.py
+backend/config/model_rankings.json
+backend/config/openrouter_free_models.json
+backend/config/ngrok_enabled.txt
+backend/config/whisper_model.txt
 backend/.setup_done
 backend/err.json
 backend/error_log_utf8.txt
@@ -32,10 +38,10 @@ backend/test_results.txt
 backend/yt_error.txt
 
 # ── Database ─────────────────────────────────────────────────────────────────
-backend/superbrain.db
-backend/superbrain.db-shm
-backend/superbrain.db-wal
-backend/superbrain.db.bak-*
+backend/serendipid.db
+backend/serendipid.db-shm
+backend/serendipid.db-wal
+backend/serendipid.db.bak-*
 backend/backups/
 
 # ── Media (downloaded videos/audio/images, not for version control) ──────────
@@ -53,21 +59,6 @@ backend/cache/
 backend/static/
 backend/*.apk
 
-# ── Mobile app ───────────────────────────────────────────────────────────────
-superbrain-app/node_modules/
-superbrain-app/.expo/
-superbrain-app/android/build/
-superbrain-app/android/app/build/
-superbrain-app/android/.gradle/
-superbrain-app/.env
-
-supermobile-app/node_modules/
-supermobile-app/.expo/
-supermobile-app/android/build/
-supermobile-app/android/app/build/
-supermobile-app/android/.gradle/
-supermobile-app/.env
-
 # ── IDE / OS ─────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
@@ -81,13 +72,9 @@ desktop.ini
 anti-gravity
 anti-gravity*
 
-# ── CLI Wrapper ──────────────────────────────────────────────────────────────
-superbrain-cli/node_modules/
-superbrain-cli/payload/
-
 # ── Web app ──────────────────────────────────────────────────────────────────
-superbrain-web/node_modules/
-superbrain-web/.next/
-superbrain-web/.env*.local
+serendipid-web/node_modules/
+serendipid-web/.next/
+serendipid-web/.env*.local
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouTube Video Analyzer for SuperBrain
+YouTube Video Analyzer for Serendipid
 =======================================
 Uses Gemini's native YouTube URL understanding — no download, no audio
 transcription, no frame extraction. One API call → full structured analysis.

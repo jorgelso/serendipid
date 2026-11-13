@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Web Page Analyzer for SuperBrain
+Web Page Analyzer for Serendipid
 ==================================
 Multi-strategy fetcher with platform-aware content extraction.
 

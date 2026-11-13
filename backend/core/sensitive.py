@@ -1,5 +1,5 @@
 """
-Instagram-folder policies that change what SuperBrain imports and shows.
+Instagram-folder policies that change what Serendipid imports and shows.
 
 Two user-configured lists (excluded_import_folders / sensitive_folders in
 config/user_config.json, see core/app_config.py), both matched on the folder/collection *name*
@@ -14,7 +14,7 @@ keeps trailing spaces):
 
 - sensitive_folders — folders that ARE imported and stored normally,
   but whose posts are hidden from every client-facing read path unless the
-  backend was started with --show-sensitive (or SUPERBRAIN_SHOW_SENSITIVE=1).
+  backend was started with --show-sensitive (or SERENDIPID_SHOW_SENSITIVE=1).
   Independently of that flag, their posts are never used as a
   recommendation/suggestion signal or candidate: views aren't logged, they're
   left out of view/study-guide history and chat retrieval, and every post
@@ -26,7 +26,7 @@ import os
 
 from core import app_config
 
-SHOW_SENSITIVE_ENV = "SUPERBRAIN_SHOW_SENSITIVE"
+SHOW_SENSITIVE_ENV = "SERENDIPID_SHOW_SENSITIVE"
 
 
 def _norm(name) -> str:

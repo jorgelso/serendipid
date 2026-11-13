@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.media_store import MEDIA_DIR
 
 TAG_KEY = "comment"
-TAG_PREFIX = "superbrain-reencoded"
+TAG_PREFIX = "serendipid-reencoded"
 
 # Don't bother replacing the original unless we actually save something —
 # a re-encode that lands within a few percent isn't worth the quality cost.

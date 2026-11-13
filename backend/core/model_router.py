@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI Model Router for SuperBrain
+AI Model Router for Serendipid
 ================================
 Multi-provider routing with automatic fallback, response-time ranking,
 and dynamic re-ranking as models change speed or go down.
@@ -29,7 +29,7 @@ Performance state persisted to backend/model_rankings.json (rankings survive res
 Dynamic model list cached in backend/openrouter_free_models.json (refreshed every 6 h).
 
 Preferred provider: start the backend with --prefer <provider> (start.py or
-api.py; or set SUPERBRAIN_PREFERRED_PROVIDER) to try that provider's models
+api.py; or set SERENDIPID_PREFERRED_PROVIDER) to try that provider's models
 before everything else for that run — the rest of the fallback order is unchanged.
 
 CLI:
@@ -112,7 +112,7 @@ ANTHROPIC_API_VERSION = "2023-06-01"
 # else keeps its usual order as fallback. The pinned paths
 # (generate_openai_only_text, batch mode) ignore it; generate_importance_text
 # honors --prefer anthropic by pinning to ANTHROPIC_TEXT_MODEL instead.
-PREFERRED_PROVIDER_ENV = "SUPERBRAIN_PREFERRED_PROVIDER"
+PREFERRED_PROVIDER_ENV = "SERENDIPID_PREFERRED_PROVIDER"
 PROVIDERS = ("openai", "anthropic", "groq", "gemini", "openrouter", "ollama")
 PREFERRED_PROVIDER_BOOST = 1000
 
@@ -1165,8 +1165,8 @@ class ModelRouter:
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {self._key('OPENROUTER_API_KEY')}",
-                "HTTP-Referer": "https://github.com/superbrain",
-                "X-Title": "SuperBrain",
+                "HTTP-Referer": "https://github.com/serendipid",
+                "X-Title": "Serendipid",
                 "Content-Type": "application/json",
             },
             json={
@@ -1196,8 +1196,8 @@ class ModelRouter:
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {self._key('OPENROUTER_API_KEY')}",
-                "HTTP-Referer": "https://github.com/superbrain",
-                "X-Title": "SuperBrain",
+                "HTTP-Referer": "https://github.com/serendipid",
+                "X-Title": "Serendipid",
                 "Content-Type": "application/json",
             },
             json={
